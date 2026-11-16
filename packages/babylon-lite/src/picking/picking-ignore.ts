@@ -27,7 +27,13 @@ export function prepareIgnoredCandidates(
         }
         candidates.push({ mesh, ignore: entry });
         deformed ||= !!(mesh.morphTargets || mesh.skeleton);
-        advanced ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p || entry?.thinInstanceIndex !== undefined || !!entry?.thinInstanceRange;
+        advanced ||=
+            !!mesh.vat ||
+            !!mesh.thinInstances ||
+            !!mesh._gpu._vbLayout?.position ||
+            !!mesh.material?._attributeFormats ||
+            entry?.thinInstanceIndex !== undefined ||
+            !!entry?.thinInstanceRange;
     }
     return { candidates, deformed, advanced };
 }

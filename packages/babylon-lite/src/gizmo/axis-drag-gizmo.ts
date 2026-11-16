@@ -12,7 +12,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { Vec3 } from "../math/types.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -103,8 +103,8 @@ function buildArrow(
     addToScene(utilityScene, line);
 
     if (isCollider) {
-        cone.visible = false;
-        line.visible = false;
+        (cone as _WritableVisibility).visible = false;
+        (line as _WritableVisibility).visible = false;
     }
     return [cone, line];
 }
@@ -123,7 +123,7 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
     // scene's `meshes` array for dispatching child transforms.
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = materials.colored;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     addToScene(utilityScene, root);
 
     // Orient root so its +Z points along the configured drag axis.

@@ -37,6 +37,8 @@ export interface PointerMaterial {
     _emissiveColor?: [number, number, number];
     /** Runtime base-color factor (linear RGBA). */
     baseColorFactor?: [number, number, number, number];
+    /** BLEND/MASK factor opacity; absent on an OPAQUE glTF material. */
+    alpha?: number;
     roughnessFactor?: number;
     /** @internal Runtime dielectric F0 scale (KHR_materials_ior / _specular). */
     _metallicF0Factor?: number;
@@ -66,6 +68,20 @@ export interface PointerMaterial {
     _animEmissiveFactor?: [number, number, number];
     /** @internal Animated KHR_materials_emissive_strength value. */
     _animEmissiveStrength?: number;
+}
+
+export type BaseColorPointerMaterial = Pick<PointerMaterial, "_uboVersion" | "baseColorFactor" | "alpha">;
+
+/** Apply one base-color sample without sharing or modifying the raw glTF factor. */
+export function _writeBaseColorFactor(mat: BaseColorPointerMaterial, out: Float32Array, off: number): void {
+    mat.baseColorFactor![0] = out[off]!;
+    mat.baseColorFactor![1] = out[off + 1]!;
+    mat.baseColorFactor![2] = out[off + 2]!;
+    mat.baseColorFactor![3] = 1;
+    if (mat.alpha !== undefined) {
+        mat.alpha = out[off + 3]!;
+    }
+    mat._uboVersion++;
 }
 
 /** Recompute the emissive color = factor × strength after either input animates, then
@@ -317,13 +333,7 @@ const _registry: [RegExp, PointerFactory][] = [
             }
             return {
                 arity: 4,
-                writer: (out, off) => {
-                    mat.baseColorFactor![0] = out[off]!;
-                    mat.baseColorFactor![1] = out[off + 1]!;
-                    mat.baseColorFactor![2] = out[off + 2]!;
-                    mat.baseColorFactor![3] = out[off + 3]!;
-                    mat._uboVersion++;
-                },
+                writer: (out, off) => _writeBaseColorFactor(mat, out, off),
             };
         },
     ],

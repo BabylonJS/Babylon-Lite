@@ -14,9 +14,11 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flag-bits.js";
+import { PBR_HAS_SHEEN } from "../pbr-flag-bits.js";
 import { wgsl } from "../../../shader/wgsl.js";
 
+const PBR_HAS_SHEEN_TEXTURE = 1 << 23;
+const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
 const STAGE_FRAGMENT = 0x2;
 const PBR2_HAS_SHEEN_UV_TX = 8192; // 1 << 13
 

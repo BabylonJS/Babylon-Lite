@@ -5,8 +5,14 @@ export const PBR_HAS_ALPHA_TEST = 1 << 3;
 export const PBR_HAS_TONEMAP = 1 << 4;
 /** Scene has fog enabled (scene.fog != null). A scene-feature bit (threaded via
  *  sceneFeatures), gating the PBR fog blend + calcFogFactor helper into the shader.
- *  Compile-time gated so non-fog PBR scenes stay byte-identical. */
+ *  Compile-time gated so non-fog PBR scenes stay byte-identical.
+ *  Material features bit 5 is separately reserved by parallax-occlusion-fragment.ts. */
 export const PBR_HAS_FOG = 1 << 5;
+// PBR_HAS_ENV / PBR_HAS_TONEMAP / PBR_HAS_FOG live only in `sceneFeatures`.
+// Their material `features` bits are extension-local (1<<2 remains free):
+//   1<<4  PBR_HAS_BENT_NORMAL  (bent-normal-fragment.ts)
+//   1<<5  PBR_HAS_PARALLAX_OCCLUSION  (parallax-occlusion-fragment.ts)
+// Scene bits 1<<6 and 1<<7 are rect-area-light-local (rect-area-light-fragment.ts).
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
 export const PBR_HAS_DOUBLE_SIDED = 1 << 8;
@@ -22,16 +28,16 @@ export const PBR_HAS_OCCLUSION = 1 << 15;
 // PBR_HAS_LIGHTMAP. Declared inside that lazy module so scenes without lightmaps
 // retain none of its implementation.
 export const PBR_HAS_SPECULAR_AA = 1 << 17;
-export const PBR_HAS_CLEARCOAT = 1 << 20;
+// 1<<20 is PBR_HAS_CLEARCOAT (clearcoat-fragment.ts).
 export const PBR_HAS_EMISSIVE_COLOR = 1 << 21;
 export const PBR_HAS_SHEEN = 1 << 22;
-export const PBR_HAS_SHEEN_TEXTURE = 1 << 23;
+// 1<<23 is PBR_HAS_SHEEN_TEXTURE (sheen-fragment.ts).
 export const PBR_HAS_GAMMA_ALBEDO = 1 << 25;
 export const PBR_HAS_ANISOTROPY = 1 << 26;
 export const PBR_HAS_SUBSURFACE = 1 << 27;
 export const PBR_HAS_THICKNESS_MAP = 1 << 28;
 export const PBR_HAS_SKYBOX = 1 << 29;
-export const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
+// 1<<30 is PBR_HAS_SHEEN_ALBEDO_SCALING (sheen-fragment.ts).
 // 1<<31 is PBR_HAS_LOCAL_ENVIRONMENT (local-cubemap-fragment.ts).
 
 // ─── features2 (extended feature bits) ──────────────────────────────

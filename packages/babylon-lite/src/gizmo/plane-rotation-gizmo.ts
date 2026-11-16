@@ -13,11 +13,12 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { Vec3 } from "../math/types.js";
 import type { ShaderMaterial } from "../material/shader/shader-material.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
+import { setSubtreeVisible } from "../scene/visibility.js";
 import { createCylinder, createPlane, createTorus } from "../mesh/mesh-factories.js";
 import { setShaderUniform } from "../material/shader/shader-material.js";
 import { invertMat4 } from "../math/invert-mat4.js";
@@ -28,6 +29,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 import { createRotationSectorMaterial } from "./rotation-sector-material.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Options for building a rotation ring constrained to a single plane. */
 export interface PlaneRotationGizmoOptions {
@@ -83,7 +85,7 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
 
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = materials.colored;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     addToScene(utilityScene, root);
 
     const q = lookAtQuat(options.planeNormal);
@@ -99,7 +101,7 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
     const collider = createTorus(engine, { diameter: 0.6, thickness: 0.03 * thickness, tessellation });
     collider.material = materials.colored;
     collider.rotation.set(Math.PI / 2, 0, 0);
-    collider.visible = false;
+    (collider as _WritableVisibility).visible = false;
     collider.parent = root;
     addToScene(utilityScene, collider);
 
@@ -113,7 +115,7 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
     const rotationDisplayPlane = createPlane(engine, { size: 0.6 });
     rotationDisplayPlane.material = rotationDisplayMaterial;
     rotationDisplayPlane.rotation.set(0, 0, Math.PI / 2);
-    rotationDisplayPlane.visible = false;
+    (rotationDisplayPlane as _WritableVisibility).visible = false;
     // The camembert display plane is purely visual — it never participates in
     // gizmo picking.  Marking it non-pickable keeps it out of the GPU picker
     // pass so it doesn't shadow nearby gizmo colliders.
@@ -179,12 +181,12 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
         anglesUniform[2] = 1; // updateGizmoRotationToMatchAttachedMesh = true (default behaviour)
         setShaderUniform(rotationDisplayMaterial, "angles", anglesUniform);
 
-        rotationDisplayPlane.visible = true;
+        setSubtreeVisible(rotationDisplayPlane, true);
     });
     drag.onDragEnd.add(() => {
         lastDragPoint = null;
         setMeshesMaterial([ring], materials.colored);
-        rotationDisplayPlane.visible = false;
+        setSubtreeVisible(rotationDisplayPlane, false);
     });
     drag.onHoverStart.add(() => setMeshesMaterial([ring], materials.hover));
     drag.onHoverEnd.add(() => {
@@ -223,10 +225,10 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
         onRotationChanged.notify(out);
         lastDragPoint = { x: event.dragPlanePoint.x, y: event.dragPlanePoint.y, z: event.dragPlanePoint.z };
 
-        // Accumulate angle for the camembert visual.  BJS uses left-handed
-        // coords by default (`useRightHandedSystem === false`), in which case
-        // `_angles.y += angle` (positive sign).
-        cumulativeAngle += angle;
+        // Accumulate angle for the camembert visual.  BJS adds the angle in a
+        // left-handed scene and subtracts it in a right-handed one
+        // (`_angles.y += useRightHandedSystem ? -angle : angle`).
+        cumulativeAngle += _rightHanded ? -angle : angle;
         anglesUniform[1] = cumulativeAngle;
         setShaderUniform(rotationDisplayMaterial, "angles", anglesUniform);
     });

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Babylon.js — Ocean Reference</title>
+        <link rel="icon" href="data:," />
+        <style>
+            html,
+            body,
+            canvas {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+            canvas {
+                display: block;
+                touch-action: none;
+                transform: scaleX(-1);
+            }
+            .links {
+                position: fixed;
+                left: 16px;
+                top: 16px;
+                z-index: 20;
+                padding: 8px 12px;
+                border-radius: 8px;
+                color: #fff;
+                background: rgba(0, 0, 0, 0.55);
+                font:
+                    13px system-ui,
+                    sans-serif;
+            }
+            .links a {
+                color: #9edcff;
+            }
+            .seek-status {
+                position: fixed;
+                left: 50%;
+                top: 50%;
+                z-index: 30;
+                transform: translate(-50%, -50%);
+                padding: 10px 14px;
+                border-radius: 8px;
+                color: #fff;
+                background: rgba(0, 0, 0, 0.7);
+                font:
+                    14px system-ui,
+                    sans-serif;
+            }
+        </style>
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/typescript@5.9.2/lib/typescript.js"></script>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <div class="links">Babylon.js reference · <a id="liteLink" href="./demo-ocean.html">open Lite</a></div>
+        <div id="seekStatus" class="seek-status" hidden></div>
+        <script>
+            (async function () {
+                var canvas = document.getElementById("renderCanvas");
+                document.getElementById("liteLink").href = "./demo-ocean.html" + location.search;
+                if (new URLSearchParams(location.search).has("hidegui")) {
+                    document.querySelector(".links")?.remove();
+                }
+                try {
+                    var response = await fetch("https://snippet.babylonjs.com/YX6IB8/758");
+                    if (!response.ok) {
+                        throw new Error("Unable to load Ocean Playground source: HTTP " + response.status);
+                    }
+                    var payload = JSON.parse((await response.json()).jsonPayload);
+                    var preamble = [
+                        "const __oceanQuery = new URLSearchParams(location.search);",
+                        "const __oceanSeekValue = __oceanQuery.get('seekTime') ?? __oceanQuery.get('seektime');",
+                        "const __oceanSeek = Number(__oceanSeekValue ?? 0);",
+                        'if (!Number.isFinite(__oceanSeek) || __oceanSeek < 0) { throw new Error(`Ocean seekTime must be finite and non-negative, received "${__oceanSeekValue}".`); }',
+                        "const __oceanAnimateValue = __oceanQuery.get('animate');",
+                        "const __oceanInitiallyPaused = __oceanAnimateValue === null ? __oceanSeekValue !== null : (__oceanAnimateValue === 'false' || __oceanAnimateValue === '0');",
+                        "let __oceanPaused = __oceanInitiallyPaused;",
+                        "let __oceanWarming = false;",
+                        "let __oceanFrameDelta = null;",
+                        "let __oceanClockTime = 0;",
+                        "let __oceanWallStart = performance.now() / 1000;",
+                        "function __oceanNow(){ return __oceanClockTime + (__oceanPaused || __oceanWarming ? 0 : performance.now() / 1000 - __oceanWallStart); }",
+                        "function __oceanSetPaused(value){ if(value===__oceanPaused)return; if(value){__oceanClockTime=__oceanNow();}else{__oceanWallStart=performance.now()/1000;} __oceanPaused=value; }",
+                    ].join("\n");
+                    var code = payload.code;
+                    code = code.replace("const oceanDemo = new Ocean();", "const oceanDemo = new Ocean(); globalThis.__oceanDemo = oceanDemo;");
+                    code = code.replaceAll("this._startTime = new Date().getTime() / 1000;", "this._startTime = 0;");
+                    code = code.replace(/\(new Date\(\)\.getTime\(\) \/ 1000\) - this\._startTime/g, "__oceanNow() - this._startTime");
+                    code += [
+                        ";",
+                        "(async function(){",
+                        "const canvas = document.getElementById('renderCanvas');",
+                        "const engine = await createEngine();",
+                        "engine.displayLoadingUI = function(){};",
+                        "engine.hideLoadingUI();",
+                        "const originalGetDeltaTime = engine.getDeltaTime.bind(engine);",
+                        "engine.getDeltaTime = function(){ return __oceanFrameDelta === null ? (__oceanPaused ? 0 : originalGetDeltaTime()) : __oceanFrameDelta * 1000; };",
+                        "const scene = await Playground.CreateScene(engine, canvas);",
+                        "const referenceCamera = scene.activeCameras?.[0] ?? scene.activeCamera;",
+                        "if (referenceCamera?.rotation) {",
+                        "  referenceCamera.position.set(-33.91187023336096, 4.727123075533213, -8.578004717405992);",
+                        "  referenceCamera.rotation.set(0.10888242375229679, 1.592485767754143 + Math.PI, 0);",
+                        "}",
+                        "const oceanDemo = globalThis.__oceanDemo;",
+                        "if (oceanDemo) {",
+                        "  oceanDemo._setCameraKeys = function(){",
+                        "    const keyboard = this._camera.inputs.attached.keyboard;",
+                        "    keyboard.keysDown = [40, 83];",
+                        "    keyboard.keysLeft = [39, 68];",
+                        "    keyboard.keysRight = this._useZQSD ? [37, 81] : [37, 65];",
+                        "    keyboard.keysUp = this._useZQSD ? [38, 90] : [38, 87];",
+                        "    keyboard.keysDownward = [34, 67];",
+                        "    keyboard.keysUpward = [33, 32];",
+                        "  };",
+                        "  oceanDemo._setCameraKeys();",
+                        "}",
+                        "const referenceMouse = referenceCamera?.inputs?.attached?.mouse;",
+                        "if (referenceMouse?.onPointerMovedObservable) {",
+                        "  referenceMouse.onPointerMovedObservable.add(({ offsetX }) => {",
+                        "    referenceCamera.cameraRotation.y -= 2 * offsetX / referenceMouse.angularSensibility;",
+                        "  });",
+                        "}",
+                        "if (__oceanSeekValue !== null) {",
+                        "  const waves = globalThis.__oceanDemo?._wavesGenerator;",
+                        "  if (!waves?._cascades?.length) { throw new Error('Ocean seek warmup could not access the wave cascades.'); }",
+                        "  const exactFrames = Math.ceil(Math.max(0, __oceanSeek) * 60);",
+                        "  const minimumCappedFrames = Math.ceil(Math.max(0, __oceanSeek) / 0.5);",
+                        "  const warmupFrames = Math.max(2, Math.min(exactFrames, Math.max(720, minimumCappedFrames)));",
+                        "  const seekStatus = document.getElementById('seekStatus');",
+                        "  seekStatus.hidden = false;",
+                        "  __oceanFrameDelta = __oceanSeek / warmupFrames;",
+                        "  __oceanWarming = true;",
+                        "  __oceanPaused = false;",
+                        "  for (let frame = 1; frame <= warmupFrames; frame++) {",
+                        "    __oceanClockTime = __oceanFrameDelta * frame;",
+                        "    for (const cascade of waves._cascades) { cascade.calculateWavesAtTime(__oceanClockTime); }",
+                        "    if ((frame & 15) === 0) {",
+                        "      seekStatus.textContent = `Preparing ${Math.round(frame / warmupFrames * 100)}%`;",
+                        "      await engine._device?.queue?.onSubmittedWorkDone?.();",
+                        "      await new Promise(requestAnimationFrame);",
+                        "    }",
+                        "  }",
+                        "  await engine._device?.queue?.onSubmittedWorkDone?.();",
+                        "  const displacementBuffer = await waves._cascades[0].displacement.readPixels(undefined, undefined, undefined, undefined, true);",
+                        "  waves._displacementMap = new Uint16Array(displacementBuffer.buffer, displacementBuffer.byteOffset, displacementBuffer.byteLength / 2);",
+                        "  const buoyancy = globalThis.__oceanDemo?._buoyancy;",
+                        "  if (buoyancy) {",
+                        "    buoyancy.setWaterHeightMap(waves._displacementMap, waves.waterHeightMapScale);",
+                        "    for (let step = 0; step < buoyancy.numSteps * 2 + 2; step++) { buoyancy.update(); }",
+                        "  }",
+                        "  __oceanClockTime = __oceanSeek;",
+                        "  __oceanFrameDelta = null;",
+                        "  __oceanWarming = false;",
+                        "  __oceanPaused = __oceanInitiallyPaused;",
+                        "  __oceanWallStart = performance.now() / 1000;",
+                        "  canvas.dataset.seekWarmupFrames = String(warmupFrames);",
+                        "  canvas.dataset.seekWarmupMode = 'compute-only';",
+                        "  seekStatus.hidden = true;",
+                        "  for (const group of scene.animationGroups) { group.goToFrame(__oceanSeek * 60); }",
+                        "}",
+                        "function updatePauseState(){",
+                        "for (const group of scene.animationGroups) {",
+                        "  if (__oceanPaused) { group.pause(); } else { group.play(); }",
+                        "}",
+                        "if (globalThis.__oceanDemo?._buoyancy) { globalThis.__oceanDemo._buoyancy.enabled = !__oceanPaused; }",
+                        "canvas.dataset.animationFrozen = String(__oceanPaused);",
+                        "}",
+                        "updatePauseState();",
+                        "addEventListener('keydown', event => {",
+                        "  if (event.code !== 'KeyP' || event.repeat || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement) return;",
+                        "  __oceanSetPaused(!__oceanPaused);",
+                        "  updatePauseState();",
+                        "});",
+                        "engine.runRenderLoop(() => scene.render());",
+                        "addEventListener('resize', () => engine.resize());",
+                        "await new Promise(resolve => { let frames = 0; function wait(){ if (++frames >= 10) resolve(); else requestAnimationFrame(wait); } requestAnimationFrame(wait); });",
+                        "await engine._device?.queue?.onSubmittedWorkDone?.();",
+                        "document.getElementById('babylonjsLoadingDiv')?.remove();",
+                        "canvas.dataset.ready = 'true';",
+                        "})().catch(error => { canvas.dataset.error = error instanceof Error ? error.message : String(error); console.error(error); });",
+                    ].join("\n");
+                    var compiled = ts.transpileModule(preamble + "\n" + code, {
+                        compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None },
+                    }).outputText;
+                    (0, eval)(compiled);
+                } catch (error) {
+                    canvas.dataset.error = error instanceof Error ? error.message : String(error);
+                    console.error(error);
+                }
+            })();
+        </script>
+    </body>
+</html>

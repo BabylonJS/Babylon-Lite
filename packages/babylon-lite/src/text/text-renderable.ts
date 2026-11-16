@@ -10,11 +10,12 @@ import { composeTrsLocalMatrix, createWorldMatrixState } from "../scene/world-ma
 import { createEulerProxy } from "../scene/scene-node.js";
 import type { EulerProxy } from "../scene/scene-node.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
-import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _addSceneRenderable, _getSceneRenderables, _observeSceneRenderables, _removeSceneRenderable } from "../scene/scene-renderable-collection.js";
+import type { SceneRenderableChangeListener } from "../scene/scene-renderable-collection.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
-import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
@@ -65,6 +66,8 @@ interface TextRenderableGpu {
     _variantPipeline: GPURenderPipeline;
     _uploadedDataVersion: number;
     _uploadedCameraVersion: number;
+    /** Camera the uploaded mvp was composed from; a replacement camera can report the same version. */
+    _uploadedCamera?: Camera;
     _uploadedAspect: number;
     _uploadedViewportW: number;
     _uploadedViewportH: number;
@@ -76,7 +79,7 @@ const TEXT_UBO_BYTES = 64 /* mvp */ + 16 /* viewport */ + 16; /* color */
 const _mvpScratch = new Float32Array(16);
 
 function targetSig(target: RenderTargetSignature): string {
-    return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-");
+    return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-") + ":" + (target._depthCompare ?? "greater-equal");
 }
 
 /** Create a scene renderable that draws the supplied `TextData` through the normal renderable pipeline.
@@ -126,10 +129,11 @@ function ensureGpu(
     colorFormat: GPUTextureFormat,
     sampleCount: 1 | 4,
     depthFormat: GPUTextureFormat | null,
-    depthWrite: boolean
+    depthWrite: boolean,
+    depthCompare: GPUCompareFunction
 ): TextRenderableGpu {
     const device = engine._device;
-    const { _pipeline: pipeline, _variantPipeline: variantPipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
+    const { _pipeline: pipeline, _variantPipeline: variantPipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r, depthCompare);
     const key = targetSig(target);
     let gpu = r._gpu;
     if (gpu && gpu._device !== device) {
@@ -166,11 +170,12 @@ function ensureGpu(
         } else {
             gpu._pipeline = pipeline;
             gpu._targetKey = key;
-            // Pipeline change — per-group bind groups must be rebuilt against the new bindGroupLayout.
-            for (const g of r._data._groups) {
-                g._bindGroup = null;
-                g._bindGroupVersion = -1;
-            }
+        }
+        // Group bind groups reference this record's buffers and the pipeline's layout, so a new record (including one
+        // recreated after the previous record was released) or a pipeline change must rebuild them.
+        for (const g of r._data._groups) {
+            g._bindGroup = null;
+            g._bindGroupVersion = -1;
         }
     }
     // Assigned unconditionally: a styling feature installed after this record was created
@@ -207,8 +212,9 @@ function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: Re
     // same target signature, same depth-write, same alpha-to-coverage owner.
     const sampleCount = target._sampleCount === 1 ? 1 : 4;
     const depthFormat = target._depthStencilFormat ?? null;
+    const depthCompare = target._depthCompare ?? "greater-equal";
     const depthWrite = !r.ignoreDepth;
-    const gpu = ensureGpu(r, engine, target, colorFormat, sampleCount, depthFormat, depthWrite);
+    const gpu = ensureGpu(r, engine, target, colorFormat, sampleCount, depthFormat, depthWrite, depthCompare);
     const cache = getTextPipelineCache(engine);
     const quadVertex = cache._quadVertexBuffer;
     const bindGroupLayout = cache._bindGroupLayout;
@@ -223,7 +229,7 @@ function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: Re
             // binding. The aliasing test costs a base consumer one identity comparison per
             // frame and stops matching after the single refresh, so no key is ever rebuilt.
             if (gpu._variantPipeline === gpu._pipeline && _textVariantResolver) {
-                gpu._variantPipeline = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r)._variantPipeline;
+                gpu._variantPipeline = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r, depthCompare)._variantPipeline;
             }
             updateTextRenderable(r, engine, gpu, bindGroupLayout, context);
         },
@@ -288,13 +294,14 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     if (camera) {
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
         const camVer = _cameraChangeKey(camera);
-        if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedAspect !== aspect) {
+        if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedCamera !== camera || gpu._uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();
             multiplyMat4IntoBuffer(_mvpScratch, 0, vp, 0, wm as unknown as Mat4Storage, 0);
             device.queue.writeBuffer(gpu._textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
             r._wmDirty = false;
             gpu._uploadedCameraVersion = camVer;
+            gpu._uploadedCamera = camera;
             gpu._uploadedAspect = aspect;
         }
     }
@@ -348,20 +355,44 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
 
 /** Release GPU buffers owned by a text renderable. The underlying `TextData` and `GlyphStorage` remain caller-owned. */
 export function disposeTextRenderable(renderable: TextRenderable): void {
-    if (renderable._gpu) {
-        renderable._gpu._textU.destroy();
-        renderable._gpu._instanceBuf.destroy();
-        renderable._gpu._styleBuf.destroy();
-        renderable._gpu = null;
-    }
+    detachTextGpu(renderable)();
 }
 
-/** Attach a `TextRenderable` to a scene. Uses the scene's deferred-renderables hook. */
-export function addTextRenderable(scene: SceneContext, renderable: TextRenderable): void {
-    addDeferredSceneRenderables(scene, () => {
-        return {
-            renderables: [renderable],
-            dispose: () => disposeTextRenderable(renderable),
-        };
-    });
+/** Detach the renderable's GPU record now, so its next draw creates a fresh one, and return the record's release. */
+function detachTextGpu(renderable: TextRenderable): () => void {
+    const gpu = renderable._gpu;
+    renderable._gpu = null;
+    return () => {
+        if (gpu) {
+            gpu._textU.destroy();
+            gpu._instanceBuf.destroy();
+            gpu._styleBuf.destroy();
+        }
+    };
+}
+
+/**
+ * Adds a `TextRenderable` to the scene so it is drawn once the scene builds. Adding a member again does nothing.
+ * The scene releases the renderable's GPU buffers when the renderable is removed or the scene is disposed.
+ */
+export function addTextRenderableToScene(scene: SceneContext, renderable: TextRenderable): void {
+    _addSceneRenderable(scene, "text", renderable, () => ({ _renderable: renderable, _detach: () => detachTextGpu(renderable) }));
+}
+
+/**
+ * Removes a `TextRenderable` from the scene. It stops drawing immediately; its GPU buffers are released once
+ * in-flight frames finish. Returns `false` when the renderable was not in the scene.
+ */
+export function removeTextRenderableFromScene(scene: SceneContext, renderable: TextRenderable): boolean {
+    return _removeSceneRenderable(scene, "text", renderable);
+}
+
+/** Returns a snapshot of the scene's text renderables, in add order. */
+export function getSceneTextRenderables(scene: SceneContext): readonly TextRenderable[] {
+    return _getSceneRenderables(scene, "text");
+}
+
+/** Subscribes to the scene's text-renderable membership changes. The returned callback unsubscribes (idempotent). */
+export function onSceneTextRenderablesChanged(scene: SceneContext, listener: SceneRenderableChangeListener<TextRenderable>): () => void {
+    return _observeSceneRenderables(scene, "text", listener);
 }

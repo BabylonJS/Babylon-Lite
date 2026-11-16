@@ -19,7 +19,7 @@ const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 // The former per-feature sub-entries (`/sprites`, `/mesh`, …) were collapsed into
 // the barrel; their modules still emit as internal `dist/*.js` + `.d.ts` (the
 // barrel imports them) but are NOT public `exports`.
-const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture"] as const;
+const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture", "texture-source"] as const;
 const REMOVED_SUBPATHS = ["./html-texture", "./sprites", "./render-target", "./mesh", "./depth-stencil", "./scissor", "./dynamic-texture"] as const;
 
 function typecheckDts(dts: string) {
@@ -51,8 +51,14 @@ describe("babylon-lite-gl build output", () => {
 
         // The emitted manifest is the scoped npm name exposing EXACTLY one public
         // export — the barrel. The former sub-entries must NOT be published anymore.
-        const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown> };
+        const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown>; dependencies?: Record<string, string> };
         expect(pkg.name).toBe("@babylonjs/lite-gl");
+
+        // The emitted text modules import `text-shaper` by bare specifier, so the published manifest must
+        // carry the source package's runtime dependencies.
+        const sourceDependencies = (JSON.parse(readFileSync(resolve(PACKAGE_DIR, "package.json"), "utf-8")) as { dependencies?: Record<string, string> }).dependencies;
+        expect(sourceDependencies?.["text-shaper"]).toBeDefined();
+        expect(pkg.dependencies).toEqual(sourceDependencies);
         expect(Object.keys(pkg.exports ?? {})).toEqual(["."]);
         for (const subpath of REMOVED_SUBPATHS) {
             expect(pkg.exports?.[subpath], `exports["${subpath}"] must no longer be published`).toBeUndefined();
@@ -89,6 +95,14 @@ describe("babylon-lite-gl build output", () => {
         }
         expect(dtsResult.status).toBe(0);
         expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLStencilOpState\b[^}]*\} from "\.\/depth-stencil\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTexture3D\b[^}]*\} from "\.\/texture-3d\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLEffectWaitOptions\b[^}]*\} from "\.\/effect-ready\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTextureSourceOptions\b[^}]*\} from "\.\/texture-source\.js";/);
+        expect(readFileSync(resolve(DIST, "texture-source.d.ts"), "utf-8")).toContain(
+            "createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture"
+        );
+        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(effect: GLEffect): string | null");
+        expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain("waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>");
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -101,8 +115,14 @@ describe("babylon-lite-gl build output", () => {
             "wipeGLStateCache",
             "runRenderLoop",
             "stopRenderLoop",
+            "beginFrame",
+            "endFrame",
+            "captureGPUFrameTime",
+            "getGPUFrameTimeCounter",
             // effects
             "createEffect",
+            "getEffectCompilationError",
+            "waitForEffect",
             "createEffectWrapper",
             "applyEffectWrapper",
             "drawEffect",
@@ -111,13 +131,27 @@ describe("babylon-lite-gl build output", () => {
             "setEffectMatrix3x3",
             // textures (LDR core + HDR opt-in + extensions)
             "createRawTexture",
+            "createTextureFromSource",
+            "bindTexture",
+            "unbindTexture",
+            "createTexture3DFromPixels",
+            "bindTexture3D",
+            "unbindTexture3D",
+            "setEffectTexture3D",
+            "generateTexture3DMipMaps",
+            "updateTexture3DSamplingMode",
+            "updateTexture3DWrapMode",
+            "disposeTexture3D",
             "createFloatTexture",
             "generateTextureMipMaps",
             "loadTexture2D",
             "updateRawTexture",
             "updateTextureSamplingMode",
+            "updateTextureSamplingPreset",
             "updateTextureWrapMode",
             "createTextureFromHandle",
+            "getSamplingModeFilters",
+            "isTextureReady",
             // dynamic textures
             "createDynamicTexture",
             "updateDynamicTexture",
@@ -126,9 +160,11 @@ describe("babylon-lite-gl build output", () => {
             "createRenderTarget",
             "createFloatRenderTarget",
             "bindRenderTarget",
+            "restoreDefaultFramebuffer",
             "generateRenderTargetMipMaps",
             "resizeRenderTarget",
             "readRenderTargetPixels",
+            "readRenderTargetPixelsToBuffer",
             "disposeRenderTarget",
             // meshes / buffers / instancing
             "createVertexBuffer",
@@ -171,8 +207,9 @@ describe("babylon-lite-gl build output", () => {
         expect(typeof mod.GLBlendMode, "export GLBlendMode").toBe("object");
         expect(typeof mod.GLBlendEquation, "export GLBlendEquation").toBe("object");
         expect(typeof mod.GLSamplingMode, "export GLSamplingMode").toBe("object");
+        expect(mod.setBoundTextureParams, "internal texture parameter helper must not be public").toBeUndefined();
 
-        // The legacy `unbindRenderTarget` was folded into `bindRenderTarget(engine, null)`
+        // The legacy `unbindRenderTarget` was folded into `restoreDefaultFramebuffer(engine)`
         // and MUST NOT ship — its presence would mean the converge regressed.
         expect(mod.unbindRenderTarget, "unbindRenderTarget must not be exported").toBeUndefined();
 

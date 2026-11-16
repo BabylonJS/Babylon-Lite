@@ -30,8 +30,7 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
     const caches = (samplerCaches ??= new WeakMap());
     let cache = caches.get(device);
     if (!cache) {
-        cache = new Map();
-        caches.set(device, cache);
+        caches.set(device, (cache = new Map()));
     }
     let key = extraKey;
     for (const property in textureSamplerDefaults) {
@@ -40,8 +39,7 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
     }
     let sampler = cache.get(key);
     if (!sampler) {
-        sampler = device.createSampler(descriptor);
-        cache.set(key, sampler);
+        cache.set(key, (sampler = device.createSampler(descriptor)));
     }
     return sampler;
 }
@@ -49,4 +47,21 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
 /** Clear sampler cache for one device. */
 export function clearSamplerCache(engine: EngineContext): void {
     samplerCaches?.delete(engine._device);
+}
+
+/** @internal Recover ordinary sampler settings from this pool's canonical descriptor key without retaining another cache. */
+export function getTextureSamplerDescriptor(engine: EngineContext, sampler: GPUSampler): TextureSamplerDescriptor | undefined {
+    const cache = samplerCaches?.get(engine._device);
+    if (cache) {
+        const fields = Object.keys(textureSamplerDefaults) as (keyof typeof textureSamplerDefaults)[];
+        for (const [key, value] of cache) {
+            if (value === sampler) {
+                const values = key.split(":").slice(-fields.length);
+                return Object.fromEntries(
+                    fields.map((field, i) => [field, typeof textureSamplerDefaults[field] === "number" ? Number(values[i]) : values[i]])
+                ) as TextureSamplerDescriptor;
+            }
+        }
+    }
+    return undefined;
 }

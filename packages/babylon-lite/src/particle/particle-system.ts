@@ -34,6 +34,8 @@ export interface ParticleSpriteHandle {
 
 /** Pure-state data-oriented particle system. Behaviour is provided by the standalone functions below. */
 export interface ParticleSystem {
+    /** Name of the NPE SystemBlock this system was built from, if any. */
+    name?: string;
     readonly buffer: ParticleBuffer;
     /** Particles emitted per simulated time unit. */
     emitRate: number;
@@ -125,6 +127,11 @@ export function startParticleSystem(system: ParticleSystem): void {
 /** Stop emission. Existing particles continue until they expire. */
 export function stopParticleSystem(system: ParticleSystem): void {
     system._stopped = true;
+}
+
+/** Whether emission is started. Stopped systems may still contain draining particles. */
+export function isParticleSystemStarted(system: ParticleSystem): boolean {
+    return system._started && !system._stopped;
 }
 
 /**

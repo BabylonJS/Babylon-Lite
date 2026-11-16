@@ -45,11 +45,22 @@ export const VERTEX_ALPHA = 1 << 24;
 export const HAS_SKELETON = 1 << 26;
 /** Skinned mesh has a second JOINTS/WEIGHTS set. */
 export const HAS_SKELETON_8 = 1 << 27;
+// Bit 28 is rect-area-light-local (fragments/rect-area-light-fragment.ts).
+// Bit 29 is rect-area-light-emission-local (fragments/rect-area-light-emission-fragment.ts).
+// Bit 30 is reserved by mesh/opacity (feature-local constant).
+// Bit 31 is reserved by STD_HAS_PARALLAX_OCCLUSION in the opt-in
+// fragments/std-parallax-occlusion-fragment.ts module.
 
 // ─── Standard Scene Features ───────────────────────────────────────
 
 /** Scene contributes Standard fog WGSL. Kept separate from material/mesh bits. */
 export const STD_SCENE_FOG = 1 << 0;
+/** @internal Nullable scalar shader-source transport, installed by scene-lighting enablers only. */
+export let _stdSceneLightingSource: ((source: string | undefined) => string | undefined) | null = null;
+/** @internal No scene or branch-gating shader context crosses this seam. */
+export function _installStandardLightingSource(): void {
+    _stdSceneLightingSource = (source) => source;
+}
 
 // ─── Standard Material Extension Registry ───────────────────────────
 
@@ -82,6 +93,8 @@ export interface StdExt {
     _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */
     _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
+    /** @internal Write extension-owned material UBO state. */
+    _writeUbo?(data: Float32Array, mat: StandardMaterialProps): void;
 }
 
 export interface ShadowLightSlotLite {

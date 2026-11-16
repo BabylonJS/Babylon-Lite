@@ -26,7 +26,8 @@ This gives Babylon Lite enough structure for offscreen RTT passes, per-pass came
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export type { Task } from "./frame-graph/task.js";
 export { getFrameGraph } from "./scene/scene.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
+export { getFrameGraphTasks } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 
 export type { Pass } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
@@ -34,7 +35,7 @@ export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, addMeshesToTask, removeMeshFromTask, removeMeshesFromTask } from "./frame-graph/render-task.js";
 export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
@@ -70,6 +71,61 @@ export interface FrameGraph {
 
 `_currentProcessedTask` is `null` outside of phase 1; calling `addRenderPass(...)` outside `record()` throws.
 
+`RenderDrawTask` retains direct execution but records one internal texture-task pass for phase-2 initialization.
+After all tasks have recorded, its initializer synchronizes the current eager target through a member-bound
+`_syncEager` call and refreshes its cached attachments. It never rebuilds ordinary targets. A borrowing wrapper
+can therefore observe a surface RTT replacement even when the source allocation task records later. Both phases
+remain synchronous. `buildFrameGraphTask()` initializes only its selected task, not other producers. Execute
+order and content dependencies remain the caller's responsibility. Re-recording replaces the initializer pass;
+task disposal clears it without releasing the borrowed target.
+
+### Task discovery
+
+```typescript
+export function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];
+```
+
+The root-package function returns `frameGraph._tasks` directly, without allocating,
+filtering, or validating the typed argument. The array is a **live view**, not a
+snapshot: repeated calls return the same instance throughout the graph's lifetime.
+Later `addTask()`, `addTaskAtStart()`, `addTaskBefore()`, `addTaskAfter()`, and
+`removeTask()` calls mutate that same array in place. `frameGraph.dispose()` disposes
+the tasks still registered and empties the same array.
+
+```typescript
+const sceneTasks = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks = getFrameGraphTasks(frameGraphContext.frameGraph);
+const snapshot = sceneTasks.slice(); // copy membership/order when a stable snapshot is needed
+```
+
+For scene graphs, use `getFrameGraph(scene)`. For scene-less graphs, use
+`FrameGraphContext.frameGraph`; registered contexts can be found through
+`getRenderingContexts(surface)` and identified with
+`getRenderingContextKind(context) === "frame-graph-context"`.
+
+Every registered top-level task is listed in build/execution order, including
+the default scene render task, system tasks such as the leading shadow task, and
+tasks whose `executionEnabled` is `false`. A composite such as bloom appears once
+per registration; its privately owned extraction, blur, and merge sub-tasks are
+not separate entries. Duplicate registrations remain duplicate entries. Names
+are neither unique nor stable identifiers. Indexes shift after insertion or
+removal, so a polling consumer must re-read the list and associate the current
+index with each task object's identity.
+
+The caller must not mutate the returned array; `readonly` is a TypeScript-only
+restriction, not a runtime freeze. Discovery transfers no ownership: the graph
+continues to own registered tasks and their disposal. A copied snapshot also
+borrows the task objects, whose resources may later be disposed. Explicit removal
+transfers cleanup responsibility as described in **Task removal and ownership**.
+
+The effective execution gate is `task.executionEnabled !== false`: both `true`
+and `undefined` mean enabled, and consumers should write booleans when toggling.
+Setting it to `false` keeps recording/resources intact but skips the task entirely,
+not a disabled passthrough pass; downstream consumers may therefore sample stale
+targets. This is independent of task-specific `enabled` settings. One-shot compute
+tasks also write their own `executionEnabled`, so a consumer's toggle may be
+overwritten by that scheduler. Discovery does not change any of these semantics.
+
 ### `Task`
 
 ```typescript
@@ -100,8 +156,6 @@ Task lifecycle:
 The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. `RenderTask` is a direct task: `_passes` remains empty, `record()` prepares its descriptor/bindings, and `execute()` opens and closes the GPU render pass itself. User-defined pass-backed tasks and helpers created through `addRenderPass()` still use `_passes` plus the phase-2 `_initialize()` walk.
 
 `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Direct execution is the deliberate built-in fast path, not only a migration escape hatch. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
-
-`Task.executionEnabled` is a runtime-only gate that defaults to enabled. When set to `false`, `FrameGraph.execute()` skips both the task-level `execute()` hook and every recorded pass while preserving the task's recorded state and allocated resources. Task-specific fields such as `enabled` retain their own semantics and are not interpreted as this scheduling gate.
 
 ## `Pass` and `RenderPass`
 
@@ -177,6 +231,7 @@ addTask(sceneOrGraph, task); // append at end
 addTaskAtStart(sceneOrGraph, task); // insert at start of user work, after built-in system tasks such as ShadowTask
 addTaskBefore(sceneOrGraph, task, beforeTask);
 addTaskAfter(sceneOrGraph, task, afterTask); // insert immediately after afterTask
+removeTask(sceneOrGraph, task); // detach every registration of this task; returns whether any were removed
 ```
 
 Rules:
@@ -187,6 +242,34 @@ Rules:
 - `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
 - If a task uses `addMeshToTask()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
+
+### Task removal and ownership
+
+```typescript
+export function removeTask(target: FrameGraph | SceneContext, task: Task): boolean;
+```
+
+`removeTask()` matches task object identity, removes every occurrence from the
+existing ordered task array, and preserves the order of all other tasks. It
+returns `true` when membership changed and `false` when the task was absent.
+Another task with the same name is unaffected. Both a scene and its graph select
+the same list. Perform this operation between graph builds/executions, such as
+in the scene's before-render update; mutation from task/pass callbacks is outside
+the scheduling contract.
+
+Removal transfers lifetime responsibility to the caller. It preserves recorded
+passes and task state and does not call `dispose()`, rebuild surviving tasks,
+rewire resource consumers, or cancel in-flight asynchronous preload work. The
+removed task is skipped by future graph builds, execution and graph disposal.
+A still-valid recorded task may be added back without rebuilding; an unrecorded
+or changed task uses `buildFrameGraphTask()` after re-addition. The owner releases
+a removed task only after its consumers and encoded/submitted GPU work no longer
+use its resources. Producer/consumer ordering remains the caller's responsibility.
+
+Validation covers direct and pass-backed tasks, graph/scene targets, absent and
+same-named tasks, duplicate registrations, retained pass state, disposal ownership
+and re-addition. Public declarations and tree shaking verify root access and
+absence of removal/renderer code from unrelated imports.
 
 ### Internal Shadow Adapter Task
 
@@ -217,24 +300,37 @@ export interface RenderTargetDescriptor {
     lbl?: string;
     format?: GPUTextureFormat;
     dFormat?: GPUTextureFormat;
-    _depthClearValue?: number;
-    _depthCompare?: GPUCompareFunction;
+    depthClearValue?: number;
+    depthCompare?: GPUCompareFunction;
     samples: number;
-    size: SurfaceContext | { width: number; height: number };
+    size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
+}
+
+export interface RenderTargetSurfaceSize {
+    readonly surface: SurfaceContext;
+    readonly scale: number;
 }
 ```
 
 Render targets are pure-state descriptors plus owned GPU texture handles. `buildRenderTarget(rt, engine)` allocates textures during `RenderTask.record()`.
 
-| Field              | Meaning                                                                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lbl`              | Optional GPU debug label.                                                                                                                                         |
-| `format`           | Optional color format. Omit for a depth-only target.                                                                                                              |
-| `dFormat`          | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                |
-| `_depthClearValue` | Internal clear depth; reverse-Z targets default to `0`, while standard-Z shadow targets use `1`.                                                                  |
-| `_depthCompare`    | Internal pipeline depth compare; defaults to reverse-Z `"greater-equal"` when omitted by pipeline builders.                                                       |
-| `samples`          | Attachment sample count (`1` or `4`).                                                                                                                             |
-| `size`             | A `SurfaceContext` for live surface dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+| Field             | Meaning                                                                                                                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lbl`             | Optional GPU debug label.                                                                                                                                                                                       |
+| `format`          | Optional color format. Omit for a depth-only target.                                                                                                                                                            |
+| `dFormat`         | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                                                              |
+| `depthClearValue` | Optional clear depth; reverse-Z targets default to `0`, while standard-Z targets normally use `1`.                                                                                                              |
+| `depthCompare`    | Optional pass-wide pipeline depth compare; defaults to reverse-Z `"greater-equal"` and overrides material defaults when supplied.                                                                               |
+| `samples`         | Attachment sample count (`1` or `4`).                                                                                                                                                                           |
+| `size`            | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+
+A scaled surface size applies a positive finite `scale` to each live canvas dimension, floors the
+result, and clamps each axis to at least one pixel. The scale is fixed by the descriptor while canvas
+dimensions remain live:
+
+```typescript
+const halfResolution = { surface: scene.surface, scale: 0.5 };
+```
 
 The surface owns `scRT`, an eager single-sample color-only wrapper around the current swapchain
 texture. A single-sample default `RenderTask` writes directly to `scRT` and owns a separate depth
@@ -276,17 +372,18 @@ export function withSampledDepthTexture(engine: EngineContext, target: RenderTar
 export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult;
 export function createSurfaceRenderTargetTexture(
     engine: EngineContext,
-    descriptor: RenderTargetDescriptor & { size: SurfaceContext },
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
     sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult;
 export function disposeRenderTargetTexture(result: RenderTargetTextureResult): void;
 export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void;
 ```
 
-Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
+Use this when a pass output must be wired into a material or compute binding before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
 
 ```typescript
 const output = createSurfaceRenderTargetTexture(engine, { format: engine.format, dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+const halfDepth = createSurfaceRenderTargetTexture(engine, { dFormat: "depth32float", samples: 1, size: { surface: engine, scale: 0.5 } }, withSampledDepthTexture);
 ```
 
 **Breaking migration:** depth-only `createRenderTargetTexture(engine, descriptor)` calls that previously received sampled depth as the primary `texture` must now pass `withSampledDepthTexture` as the third argument. The same requirement applies to `createSurfaceRenderTargetTexture`. Missing helpers are rejected before attachment allocation. Color targets, including color targets with a depth-test attachment, do not retain the depth helper or sampled-depth facade unless explicitly requested. Requesting sampled depth without a depth attachment throws and releases partially constructed attachments.
@@ -325,9 +422,12 @@ require the separate `createSurfaceRenderTargetTexture` import; passing one to t
 an explicit error, not a silently frozen target.
 
 The surface factory lives in `texture/rtt-surface.ts`. Its target reallocates during a frame-graph
-rebuild when dimensions or owning `GPUDevice` change, updates shared facades, and retires the old
-allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers cache bind groups;
-the callback runs after facade replacement so callers can rebuild before the resized frame draws.
+rebuild when resolved dimensions or the owning `GPUDevice` change, updates shared facades, and
+retires the old allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers
+cache bind groups; the callback runs after facade replacement so callers can rebuild before the
+resized frame draws. Shader-material consumers can call `setShaderTexture` again from that callback:
+the setter detects changed views and samplers behind a stable facade without rebuilding on ordinary
+repeated sets.
 
 Resize delivery is synchronous and retryable. Each subscription has an independent pending flag:
 
@@ -412,6 +512,165 @@ export interface RenderTaskConfig {
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
 | `autoMirror`   | Set `false` for an explicit render list that remains empty until populated with `addMeshToTask()`.                                                                                                                                                        |
 
+### Clear and Generate Mipmaps Tasks
+
+```typescript
+export interface ClearTextureTaskConfig {
+    name?: string;
+    targetTexture?: RenderTarget | RenderTarget[];
+    depthTexture?: RenderTarget;
+    color?: GPUColorDict;
+    clearColor?: boolean;
+    convertColorToLinearSpace?: boolean;
+    clearDepth?: boolean;
+    clearStencil?: boolean;
+    stencilValue?: number;
+}
+
+export interface ClearTextureTask extends Task {
+    targetTexture: RenderTarget | RenderTarget[] | undefined;
+    depthTexture: RenderTarget | undefined;
+    color: GPUColorDict;
+    clearColor: boolean;
+    convertColorToLinearSpace: boolean;
+    clearDepth: boolean;
+    clearStencil: boolean;
+    stencilValue: number;
+    readonly outputTexture: RenderTarget | undefined;
+    readonly outputDepthTexture: RenderTarget | undefined;
+}
+
+export function createClearTextureTask(config: ClearTextureTaskConfig, engine: EngineContext, scene?: SceneContext): ClearTextureTask;
+
+export interface GenerateMipMapsTaskConfig<T extends RenderTarget | Texture2D = RenderTarget | Texture2D> {
+    name?: string;
+    targetTexture: T;
+}
+
+export interface GenerateMipMapsTask<T extends RenderTarget | Texture2D = RenderTarget | Texture2D> extends Task {
+    targetTexture: T;
+    readonly outputTexture: T;
+}
+
+export function createGenerateMipMapsTask<T extends RenderTarget | Texture2D>(
+    config: GenerateMipMapsTaskConfig<T>,
+    engine: EngineContext,
+    scene?: SceneContext
+): GenerateMipMapsTask<T>;
+export function createMipMappedRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;
+```
+
+These factories are root-package exports and require no scene for standalone frame graphs.
+Inputs and outputs follow `FrameGraphClearTextureTask` / `FrameGraphGenerateMipMapsTask`;
+Lite uses concrete resources instead of dangling texture handles. Outputs alias the inputs;
+the clear color output aliases the first target when clearing multiple color attachments.
+The tasks borrow all input textures and never dispose their allocations. Mipmap
+output typing preserves the concrete input type for wiring subsequent consumers.
+
+Clear defaults are `color = { r: 0.2, g: 0.2, b: 0.3, a: 1 }`,
+`clearColor = true`, `convertColorToLinearSpace = false`, `clearDepth = false`,
+`clearStencil = false`, and `stencilValue = 0`. At least one nonempty color-target
+list or explicit depth target is required. A color target's implicit depth attachment
+is not used: pass `depthTexture` explicitly. Each bound attachment must have matching
+dimensions and sample count. Depth-only, stencil-only, and combined formats are
+supported; absent aspects are ignored, and unselected aspects use `load` / `store`.
+Depth clears use the depth target's `depthClearValue`, defaulting to reverse-Z `0`.
+Color conversion applies Babylon.js's default gamma-2.2 linearization to RGB only;
+alpha and the input color object are preserved. Color state is read and converted
+only when a color attachment is actually selected for clearing.
+
+`record()` prepares borrowed targets before downstream consumers record: it
+synchronizes eager targets, allocates missing ordinary attachments, and rebuilds
+ordinary attachments when their resolved dimensions change. Allocation remains
+caller-owned; disposing the clear task never destroys its borrowed targets.
+The record phase then creates one pass with dependencies on all referenced targets.
+Its phase-2 initializer synchronizes each color and depth target's `_syncEager`
+hook before validating and caching the final attachment views after all producer
+records, including an owning render task that may replace an allocation.
+This refreshes borrowing texture wrappers even when their source was resized
+later in the same record or by a later task. Ordinary targets are not rebuilt
+again during initialization; their allocation remains in the record phase.
+Standalone clear-to-copy chains therefore work on their first build and resize
+without a separate allocation task or manual target build.
+Execution patches live attachment views and scalar clear settings, begins and ends
+one drawless render pass, and returns zero draws. If no selected aspect exists,
+execution emits no GPU work. Runtime settings may change without rebuilding;
+changing target identities or attachment layouts requires a graph rebuild.
+MSAA clears do not resolve automatically.
+
+The mipmap pass also defers preparation to phase 2. It requires a single-sample,
+filterable, renderable color texture with `TEXTURE_BINDING | RENDER_ATTACHMENT`
+usage and allocated mip levels. Swapchain targets, depth/integer/compressed
+textures, and 1D/3D textures are rejected with explicit errors. A one-level 1x1
+texture is a valid no-op; larger one-level textures are rejected. Texture arrays
+and cube allocations regenerate each layer independently with 2D views.
+Preparation reuses `prepareMipmaps()` for mip-specific views, pipelines, bind
+groups, and descriptors. Execution calls `recordPreparedMipmaps()` on the current
+frame encoder, returns one draw per generated level per layer, and creates no
+views, bind groups, descriptors, shaders, or auxiliary command submissions.
+Rebuilding releases the previous prepared CPU state and rebinds the live allocation.
+The `texture-formats-tier1` feature enables render-based mip generation for 8-bit
+snorm formats only. Its six 16-bit normalized formats are not filterable and are
+rejected even when the feature is enabled.
+Execution checks the recorded allocation identity once before encoding the chain.
+Replacing or disposing a render-target allocation, or replacing a Texture2D's
+backing texture, requires rebuilding; otherwise the task throws before encoding
+stale GPU bindings. Direct destruction of a GPU texture outside its owning API
+remains subject to WebGPU's own validation.
+
+`createMipMappedRenderTarget()` is an opt-in factory, not a flag added to ordinary
+targets. It requires a color format and `samples: 1`; optional depth remains single
+level. It uses the existing eager synchronization and attachment-disposal hooks,
+so ordinary targets retain none of its format validation or lifecycle policy.
+Resolved dimensions must be positive integers no larger than the current device's
+`maxTextureDimension2D`. Rejecting oversized dimensions before GPU allocation
+preserves rollback: WebGPU validation failures need not throw synchronously.
+The attachment allocation descriptor is shared with ordinary targets and fixed/surface
+RTTs through `_createRenderTargetTextureDescriptor(descriptor, resolvedSize, format, usage)`.
+Both color and depth allocations reuse resolved dimensions rather than creating
+separate size dictionaries.
+The ordinary allocator uses that descriptor unchanged. Only the opt-in factory adds
+`mipLevelCount`, so ordinary scenes retain no optional mip-count parameter or
+descriptor property. Depth allocation uses `buildRenderTarget(rt, engine)` on a
+temporary depth-only descriptor and remains single-level. The common allocator
+creates default views and imports no mipmap-generation code. Ordinary single-level
+targets use one view for both rendering and sampling.
+
+On first build or a size/device/format change, the mipmapped factory creates a
+temporary ordinary depth target, then adds a color texture using the shared
+color descriptor with `floor(log2(max(width, height))) + 1` levels.
+Its default, full-chain color view becomes `_colorSamplingView`; an additional mip-0-only view becomes
+`_colorView` for render attachments. Copy blits and generic post-process samplers
+use `_colorSamplingView ?? _colorView`, so explicit and derivative-based LODs
+can reach generated mips while attachment views remain valid. Extra post-process
+textures follow the same rule. Only a complete build publishes
+its attachments, views, and dimensions to the live target. Failure disposes the temporary
+target and preserves the previous allocation. Unchanged builds reuse the allocation.
+Disposal destroys the owned attachments once and prevents rebuilding. The factory
+returns a render target (not an RTT sampled facade); post-process and copy tasks can
+consume it directly. A rendering task normally owns its lifetime.
+
+```typescript
+const target = createMipMappedRenderTarget({
+    format: "rgba8unorm",
+    samples: 1,
+    size: scene.surface,
+});
+const clear = createClearTextureTask({ targetTexture: target }, engine, scene);
+const render = createRenderTask({ name: "producer", rt: target, clr: false }, engine, scene);
+const mips = createGenerateMipMapsTask({ targetTexture: target }, engine, scene);
+addTaskAtStart(scene, clear);
+addTaskAfter(scene, render, clear);
+addTaskAfter(scene, mips, render);
+```
+
+Focused tests cover defaults/output aliases, MRT/depth/stencil selection and
+preservation, live clear settings and swapchain views, attachment compatibility,
+phase-2 allocation ordering, execution gating, ownership/disposal, mip-level and
+array-layer coverage, current-encoder ordering, zero per-frame GPU-object
+creation, unsupported resources, stale-allocation rejection, full-chain consumer
+sampling, rebuilding, and opt-in allocation/tree-shaking.
+
 ### Image Processing Task
 
 ```typescript
@@ -495,6 +754,29 @@ A render task can be explicitly populated with:
 addMeshToTask(task, mesh);
 addMeshToTask(task, mesh, { material: overrideMaterialOrView });
 ```
+
+For large editor selections, use the root-exported batch APIs:
+
+```typescript
+addMeshesToTask(task: RenderTask, meshes: readonly Mesh[], opts?: { material?: Material }): void;
+removeMeshesFromTask(task: RenderTask, meshes: readonly object[]): void;
+```
+
+Batch addition preserves input order and skips meshes without a material unless an override is
+provided. Before recording it only queues requests; on a live task it builds one candidate generation
+and binds once, not once per mesh. If building or binding fails, the live generation and the original
+pending queue remain unchanged: none of that batch is retained for retry. This differs from a failed
+single addition, which retains its request for retry. Refresh-enabled tasks also roll back newly
+tracked meshes and refresh dirtiness; their batch hook deduplicates tracked meshes just like single
+adds, while override requests retain duplicates. Task-specific population strategies supply a matching
+batch hook so refresh and material-view semantics are preserved.
+
+Batch removal uses a membership set and stable in-place compaction of the pending, renderable, and
+three binding lists. It retires removed owned resources and binding batches, then selects/releases
+the update-batch state once and invalidates bundles only if an active entry was removed. Source-list
+removal hooks still run in input order; refresh tracking has its own set-based batch removal hook.
+Repeated or absent meshes are harmless. Empty arrays do nothing (without enabling population), and
+both batch APIs reject disposed tasks.
 
 **Breaking API migration:** replace `task.addMesh(mesh, options)` with
 `addMeshToTask(task, mesh, options)`, imported from `@babylonjs/lite`. The constructor and
@@ -621,8 +903,8 @@ explicit recording share target, descriptor, and dimension preparation; the expl
 updates the task-owned context only after binding and scene-BG refresh succeed.
 
 An explicit task normally keeps the renderables resolved by `addMeshToTask()`. Applications that replace
-mesh geometry or change mesh materials at runtime can opt a task into following the corresponding
-scene-renderable rebuilds:
+mesh geometry, change mesh materials, or change mesh opacity across 1 (`1 ↔ <1`) at runtime can opt
+a task into following the corresponding scene-renderable rebuilds:
 
 ```typescript
 const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);
@@ -826,12 +1108,15 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Babylon.js concept              | Babylon Lite                                               |
 | ------------------------------- | ---------------------------------------------------------- |
 | Frame graph                     | Ordered `FrameGraph._tasks`                                |
+| `frameGraph.tasks`              | `getFrameGraphTasks(frameGraph)` (readonly live view)      |
 | Frame graph task                | `Task` (with `_passes: Pass[]`)                            |
 | `IFrameGraphPass`               | `Pass`                                                     |
 | `FrameGraphRenderPass`          | `RenderPass` (no shared render context)                    |
 | `frameGraph.addRenderPass`      | `addRenderPass(target, name)`                              |
 | `addDependencies`               | `addPassDependencies(pass, deps)` (lifted onto base)       |
 | Render pass task                | `RenderTask`                                               |
+| `FrameGraphClearTextureTask`    | `createClearTextureTask()`                                 |
+| `FrameGraphGenerateMipMapsTask` | `createGenerateMipMapsTask()`                              |
 | Texture/resource handle         | Concrete `RenderTarget` for now                            |
 | Task record/build phase         | `Task.record()` via `FrameGraph.build()` (phase 1)         |
 | Pass post-record initialization | `Pass._initialize()` via `FrameGraph.build()` (phase 2)    |
@@ -840,6 +1125,15 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Render target texture           | `createRenderTargetTexture()`                              |
 | Pass-specific camera/scene UBO  | `RenderTaskConfig.cam` + task-owned `_sceneUBO`            |
 
+## Task Discovery Test Specification
+
+- Root import and emitted declarations expose exactly `getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[]`; no internal task storage or GPU types leak through this API.
+- Graph and scene `addTask()` calls preserve insertion/build/execution order, including the scene's default render task and leading shadow adapter.
+- The live array keeps its identity through append, start/before/after insertion, removal (including duplicates), and graph disposal.
+- Disabled tasks remain visible. A real bloom composite appears once without exposing its privately owned sub-tasks.
+- Standalone `FrameGraphContext.frameGraph` is enumerable. Disposal empties the retained array and disposes only tasks still owned by the graph.
+- Focused frame-graph unit and public-API build tests enforce the contract; a filtered scene1 runtime bundle comparison verifies zero bytes when discovery is unused. CI owns visual/parity and wider scene coverage.
+
 ## File Manifest
 
 | File                                         | Purpose                                                                                       |
@@ -847,13 +1141,18 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `src/frame-graph/task.ts`                    | Polymorphic task interface (now with `_passes: Pass[]`)                                       |
 | `src/frame-graph/pass.ts`                    | `Pass` base interface, `addPassDependencies`                                                  |
 | `src/frame-graph/render-pass.ts`             | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                          |
-| `src/frame-graph/frame-graph.ts`             | Ordered task list and two-phase build/execute/dispose lifecycle                               |
+| `src/frame-graph/frame-graph.ts`             | Ordered task list, readonly live discovery, and two-phase build/execute/dispose lifecycle     |
 | `src/frame-graph/frame-graph-actions.ts`     | Public task-insertion + `addRenderPass` actions                                               |
 | `src/frame-graph/render-task-base.ts`        | Direct RenderTask target preparation, scene UBO/bindings, draw buckets, descriptor, execution |
 | `src/frame-graph/render-task.ts`             | Public task factory plus lazily installed explicit mesh population seam                       |
 | `src/frame-graph/render-task-transaction.ts` | Typed off-task population/binding staging, rollback, and known-field publication              |
 | `src/frame-graph/overdraw-probe-run.ts`      | Timestamp-query replay implementation loaded only by the public GPU timing diagnostics probe  |
 | `src/frame-graph/image-processing-task.ts`   | Reusable fullscreen image-processing task for swapchain output                                |
+| `src/frame-graph/clear-texture-task.ts`      | Drawless color/MRT, depth, and stencil clears with live settings                              |
+| `src/frame-graph/generate-mipmaps-task.ts`   | Prepared in-place mip generation in the frame encoder                                         |
+| `src/frame-graph/texture-task-pass.ts`       | Deferred texture-pass initialization and shared pass lifecycle                                |
+| `src/engine/render-target-mipmaps.ts`        | Opt-in full-mip-chain render-target allocation through existing target hooks                  |
+| `src/texture/mipmap-format.ts`               | Device-feature-aware filterable/renderable color-format predicate                             |
 | `src/frame-graph/shadow-task.ts`             | Internal adapter task that schedules existing shadow generators through `Task.execute()`      |
 | `src/engine/render-target.ts`                | Render target/signature state plus attachment allocation and disposal                         |
 | `src/engine/render-target-signature.ts`      | Pipeline-cache key serialization for a `RenderTargetSignature`                                |

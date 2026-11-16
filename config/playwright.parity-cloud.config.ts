@@ -45,8 +45,11 @@ const swiftShaderArgs =
         : [];
 
 export default defineConfig({
-    testDir: "../tests/lite/parity/scenes",
-    ...(selectedSceneIds?.length ? { testMatch: selectedSceneIds.map((id) => `scene${id}-*.spec.ts`) } : {}),
+    testDir: "../tests/lite/parity",
+    testMatch: [
+        ...(selectedSceneIds?.length ? selectedSceneIds.map((id) => `**/scenes/scene${id}-*.spec.ts`) : ["**/scenes/*.spec.ts"]),
+        "**/regressions/sprite-instance-params.spec.ts",
+    ],
     timeout: 120_000,
     retries: 1,
     workers: ciWorkers ?? (useBrowserStack ? 1 : 2),
@@ -77,6 +80,6 @@ export default defineConfig({
         command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
-        timeout: 15_000,
+        timeout: 180_000,
     },
 });

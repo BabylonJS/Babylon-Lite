@@ -25,7 +25,7 @@
  *  — scenes that do not use the geometry renderer task pay zero bytes for it.
  */
 
-import { F32 } from "../../engine/typed-arrays.js";
+import { F32, U32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -37,7 +37,7 @@ import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension, _geometryColorTarget } from "../../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 import type { Material } from "../material.js";
@@ -59,11 +59,14 @@ import { isStandardUvInverted, writeStandardUvTransformData, writeStdMaterialDat
 import { composeStandardGeometryShader } from "./standard-geometry-output-shader.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
-import { _getStandardGeometrySkeletonVelocityFactory, _getStandardGeometryThinInstanceHelpers } from "./geometry-view.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_HAS_VERTEX_COLOR, MSH_VAT } from "../mesh-features.js";
+import { _getStandardGeometryThinInstanceHelpers } from "./geometry-view.js";
+import { getGeometryDeformationVelocity } from "../geometry-deformation-hooks.js";
+import type { GeometryDeformationVelocity } from "../geometry-deformation-velocity.js";
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 import type { StandardGeometryContext } from "./standard-renderable.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -102,14 +105,12 @@ interface StandardGeometryViewResources {
     _sceneFeatures: number;
     _meshBGL: GPUBindGroupLayout;
     _pipelineLayout: GPUPipelineLayout;
-    _vertModule: GPUShaderModule;
-    _fragModule: GPUShaderModule;
     _pipelines: Map<string, GPURenderPipeline>;
     /** Ext fragments that contributed bindings — used by per-mesh bind groups. */
     _extFragments: readonly { _ext: ReturnType<typeof _getStdExtsSorted>[number] }[];
     _vertexBufferBinders: readonly NonNullable<StdExt["_bindVertexBuffers"]>[];
     _needsVelocity: boolean;
-    _hasSkeletonVelocity: boolean;
+    _hasDeformationVelocity: boolean;
     _alphaBlend: boolean;
     /** Shared material UBO and dirty-version state (one per source material in this view). */
     _matUBO: GPUBuffer;
@@ -134,8 +135,8 @@ export function _installStdGeometryWinding(resolve: (meshFeatures: number) => GP
     _geometryWinding = resolve;
 }
 
-function _variantKey(features: number, meshFeatures: number, sceneFeatures: number): string {
-    return `${features}:${meshFeatures}:${sceneFeatures}`;
+function _variantKey(features: number, meshFeatures: number, sceneFeatures: number, meshVertexKey: string): string {
+    return `${features}:${meshFeatures}:${sceneFeatures}${meshVertexKey}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a Standard geometry view.
@@ -147,7 +148,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const standardContext = (scene as SceneContext & { _standardGeometryContext?: StandardGeometryContext })._standardGeometryContext;
     // Geometry pass has no receiver path — pass receiveShadows=false.
     const meshFeatures = _computeMeshFeatures(mesh, false);
-    let features = view._renderFeatures.features;
+    let features = view._renderFeatures.features | (standardContext?.sceneShader?._materialFeatures ?? 0);
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
         features |= ext._meshFeatures?.(meshFeatures, source) ?? 0;
@@ -166,12 +167,14 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (hasVertexColor && mesh.hasVertexAlpha === true) {
         features |= VERTEX_ALPHA | MATERIAL_ALPHA_BLEND;
     }
-    const variantKey = _variantKey(features, meshFeatures, sceneFeatures) + (_stdMaterialVariantKey?.(source) ?? "");
-    const res = _ensureViewResources(view, engine, meshFeatures, features, sceneFeatures, variantKey, standardContext);
+    const variantKey = _variantKey(features, meshFeatures, sceneFeatures, mesh._gpu._vbKey ?? "") + (_stdMaterialVariantKey?.(source) ?? "");
+    const res = _ensureViewResources(view, engine, meshFeatures, features, sceneFeatures, variantKey, standardContext, mesh._gpu._vbLayout);
     _retainViewResources(view, variantKey, res, resources);
 
     // Per-mesh UBOs + bind group.
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const meshUboData = new F32(res._composed._meshUboSpec._totalBytes / 4);
+    const meshUboU32 = extension ? new U32(meshUboData.buffer) : null;
     // Floating-origin offset + invalidation must key off the EFFECTIVE task camera:
     // a geometry task can render with a `config.camera` override whose origin (and
     // view-projection) differs from `scene.camera`. Packing the world/previous-world
@@ -203,19 +206,28 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (velocityEnabledOffset !== undefined) {
         meshUboData[velocityEnabledOffset / 4] = 0;
     }
-    const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
+    let extensionValue = 0;
+    if (extension) {
+        extensionValue = extension.value(mesh);
+        meshUboU32![16] = meshUboU32![16]! | (extensionValue << 8);
+    }
+    const deformationFeature = res._hasDeformationVelocity ? getGeometryDeformationVelocity() : null;
     const meshUBO = createUniformBuffer(engine, meshUboData);
     const bindingDisposers: (() => void)[] = [];
-    let skeletonVelocity: ReturnType<NonNullable<typeof skeletonVelocityFactory>> | null = null;
+    let deformationVelocity: GeometryDeformationVelocity | null = null;
     let boundTextures: ReturnType<typeof collectStdBoundTextures> = [];
+    // Codes of the shared modules this renderable holds. Only a successful acquisition is recorded, so a
+    // candidate rolled back after a failed compile releases exactly what it acquired.
+    const heldModules: string[] = [];
     let _perMeshDisposed = false;
     const _disposePerMesh = (): void => {
         if (_perMeshDisposed) {
             return;
         }
         _perMeshDisposed = true;
+        _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
-        skeletonVelocity?._dispose();
+        deformationVelocity?._dispose();
         for (const dispose of bindingDisposers) {
             dispose();
         }
@@ -224,9 +236,11 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
     };
     resources._lifetimeDisposers.push(_disposePerMesh);
+    const vertModule = _acquireShaderModule(device, res._composed._vertexWGSL, heldModules);
+    const fragModule = _acquireShaderModule(device, res._composed._fragmentWGSL, heldModules);
 
-    if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
-        throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
+    if (res._hasDeformationVelocity && !deformationFeature) {
+        throw new Error("standard-geometry: deformation velocity feature was not preloaded");
     }
     // Acquire all textures the standard shader references so the GPU-pool
     // doesn't release them while the geometry pass holds bind groups on
@@ -235,11 +249,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     for (const t of boundTextures) {
         acquireTexture(t);
     }
-    skeletonVelocity =
-        skeletonVelocityFactory && mesh.skeleton
-            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, texture, bindingDisposers))
-            : null;
-    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, null, bindingDisposers);
+    deformationVelocity = deformationFeature?.createGeometryDeformationVelocity(engine, mesh, (features & HAS_SKELETON) !== 0) ?? null;
+    const meshBindGroup = _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, deformationVelocity, bindingDisposers);
     let velocityReady = false;
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
@@ -261,8 +272,16 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     let thinDrawArgs: GPUBuffer | null = null;
 
     const _baseUpdate = (): void => {
-        const velocityEnabled = res._needsVelocity && velocityReady && !view._velocityExclusions?.has(mesh);
-        if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount || previousWorldOffset !== undefined || velocityEnabledOffset !== undefined) {
+        const tracked = mesh.visible !== false && !view._velocityExclusions?.has(mesh);
+        const velocityEnabled = res._needsVelocity && velocityReady && tracked;
+        const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
+        if (
+            mesh.worldMatrixVersion !== _lastWorldVersion ||
+            scene.lights.length !== _lastLightsCount ||
+            previousWorldOffset !== undefined ||
+            velocityEnabledOffset !== undefined ||
+            nextExtensionValue !== extensionValue
+        ) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
             sortCenter[2] = mesh.worldMatrix[14]!;
@@ -274,18 +293,20 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             if (velocityEnabledOffset !== undefined) {
                 meshUboData[velocityEnabledOffset / 4] = velocityEnabled ? 1 : 0;
             }
+            if (extension) {
+                meshUboU32![16] = meshUboU32![16]! | (nextExtensionValue << 8);
+                extensionValue = nextExtensionValue;
+            }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;
             _lastLightsCount = scene.lights.length;
         }
-        if (skeletonVelocity) {
-            meshBindGroup = skeletonVelocity._update();
-        }
+        deformationVelocity?._update(!velocityEnabled);
         if (previousWorld) {
             // Snapshot the current world relative to the *current* origin so next
             // frame's previous-world matches next frame's previous view-projection.
             _packMeshWorld(previousWorld, mesh.worldMatrix, 0, 0);
-            velocityReady = true;
+            velocityReady = tracked;
         }
         if (source._uboVersion !== res._lastUboVersion) {
             res._lastUboVersion = source._uboVersion;
@@ -296,7 +317,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
-            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
+            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu);
         }
     };
     // Floating-origin: the mesh UBO bakes the active-camera offset into the
@@ -329,7 +350,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             slot = bindVertexBuffers(mesh, pass, slot);
         }
         if (hasVertexColor) {
-            pass.setVertexBuffer(slot++, g.colorBuffer!, g._vbLayout?._c?._offset);
+            pass.setVertexBuffer(slot++, g.colorBuffer!);
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
@@ -339,7 +360,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount, ti?.count);
+            pass.drawIndexed(g.indexCount, ti?.count ?? 1, g._firstIndex ?? 0, g._baseVertex);
         }
         return 1;
     };
@@ -351,7 +372,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             return {
                 renderable: r,
-                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res),
+                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
                 draw,
             };
@@ -363,6 +384,46 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
 // ─── Shared per-view resources ─────────────────────────────────────────────
 
+/** Shader modules of composed Standard geometry WGSL, per device and exact code. The geometry task builds
+ *  new views on every record and renderable-version change, yet the composed code rarely changes and
+ *  materials with equal features compose equal code. A module is immutable and has no `destroy()`, so one
+ *  module per code string can serve every view, generation and material. Each entry counts the renderables
+ *  drawing with it, and a renderable releases its count with its per-mesh resources: a rebuild, built before
+ *  the old generation retires, still hits the entry, and the entry leaves the map with its last holder (a
+ *  retired variant, a disposed task, a rolled-back candidate). Keyed weakly by device: a replaced device
+ *  compiles its own modules. Lazy, so the module keeps no top-level side effect. */
+let _shaderModules: WeakMap<GPUDevice, Map<string, [GPUShaderModule, number]>> | null = null;
+
+/** Acquire the shared module of `code`, compiling it on first use, and record the acquisition in `held`. A
+ *  compile that throws stores and records nothing. */
+function _acquireShaderModule(device: GPUDevice, code: string, held: string[]): GPUShaderModule {
+    _shaderModules ??= new WeakMap();
+    let modules = _shaderModules.get(device);
+    if (!modules) {
+        modules = new Map();
+        _shaderModules.set(device, modules);
+    }
+    let entry = modules.get(code);
+    if (!entry) {
+        entry = [device.createShaderModule({ code }), 0];
+        modules.set(code, entry);
+    }
+    entry[1]++;
+    held.push(code);
+    return entry[0];
+}
+
+/** Release the acquisitions recorded in `held`. Never compiles or creates an entry, so it cannot throw. */
+function _releaseShaderModules(device: GPUDevice, held: readonly string[]): void {
+    const modules = _shaderModules?.get(device);
+    for (const code of held) {
+        const entry = modules?.get(code);
+        if (entry && !--entry[1]) {
+            modules!.delete(code);
+        }
+    }
+}
+
 function _ensureViewResources(
     view: StandardGeometryMaterialView,
     engine: EngineContext,
@@ -370,7 +431,8 @@ function _ensureViewResources(
     features: number,
     sceneFeatures: number,
     variantKey: string,
-    standardContext: StandardGeometryContext | undefined
+    standardContext: StandardGeometryContext | undefined,
+    meshVertexLayout?: Mesh["_gpu"]["_vbLayout"]
 ): StandardGeometryViewResources {
     let cache = view._geometry as Map<string, StandardGeometryViewResources> | undefined;
     if (!cache) {
@@ -444,7 +506,16 @@ function _ensureViewResources(
         }
     }
 
-    const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor, standardContext?.sceneShader ?? null);
+    const composed = composeStandardGeometryShader(
+        features,
+        meshFeatures,
+        frags,
+        view._geometryAttachments,
+        "",
+        view._emitColor,
+        standardContext?.sceneShader ?? null,
+        meshVertexLayout
+    );
     const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     // Pipeline layout: scene BG (group 0) + mesh BG (group 1). Geometry pass
@@ -453,8 +524,6 @@ function _ensureViewResources(
     const pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [sceneBGL, meshBGL],
     });
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
-    const fragModule = device.createShaderModule({ code: composed._fragmentWGSL });
 
     // Re-detect alpha-blend from the *source* material — the view masked
     // MATERIAL_ALPHA_BLEND out so the composer doesn't emit standard's source-over
@@ -491,13 +560,15 @@ function _ensureViewResources(
         _sceneFeatures: sceneFeatures,
         _meshBGL: meshBGL,
         _pipelineLayout: pipelineLayout,
-        _vertModule: vertModule,
-        _fragModule: fragModule,
         _pipelines: new Map(),
         _extFragments: usedExts,
         _vertexBufferBinders: vertexBufferBinders,
         _needsVelocity: needsVelocity,
-        _hasSkeletonVelocity: needsVelocity && (features & HAS_SKELETON) !== 0,
+        // Mirrors composition: morph-only previous weights apply only once the shared feature is loaded.
+        _hasDeformationVelocity:
+            needsVelocity &&
+            !(meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT)) &&
+            ((features & HAS_SKELETON) !== 0 || ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 && getGeometryDeformationVelocity() !== null)),
         _alphaBlend: alphaBlend,
         _matUBO: matUBO,
         _matData: matData,
@@ -540,7 +611,7 @@ function _createGeometryMeshBindGroup(
     res: StandardGeometryViewResources,
     mesh: Mesh,
     meshUBO: GPUBuffer,
-    previousBoneTexture: GPUTexture | null,
+    deformationVelocity: GeometryDeformationVelocity | null,
     disposers: (() => void)[]
 ): GPUBindGroup {
     const engine = scene.surface.engine;
@@ -573,11 +644,8 @@ function _createGeometryMeshBindGroup(
     if (view._gpUBO) {
         entries.push({ binding: nextBinding++, resource: { buffer: view._gpUBO } });
     }
-    if (res._hasSkeletonVelocity) {
-        if (!previousBoneTexture) {
-            throw new Error("standard-geometry: skeletal velocity requires a previous-bone texture");
-        }
-        entries.push({ binding: nextBinding++, resource: previousBoneTexture.createView() });
+    if (deformationVelocity) {
+        nextBinding = deformationVelocity._bind(entries, nextBinding);
     }
     return engine._device.createBindGroup({ layout: res._meshBGL, entries });
 }
@@ -586,7 +654,9 @@ function _getOrCreateGeometryPipeline(
     engine: EngineContext,
     sig: RenderTargetSignature,
     view: StandardGeometryMaterialView,
-    res: StandardGeometryViewResources
+    res: StandardGeometryViewResources,
+    vertModule: GPUShaderModule,
+    fragModule: GPUShaderModule
 ): GPURenderPipeline {
     const key = targetSignatureKey(sig);
     const cached = res._pipelines.get(key);
@@ -605,12 +675,15 @@ function _getOrCreateGeometryPipeline(
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    const colorTargets: GPUColorTargetState[] = formats.map((format) =>
+        extension ? extension.colorTarget(format, blendState, device) : _geometryColorTarget(format, blendState, device)
+    );
     const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
-        vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
-        fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+        vertex: { module: vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+        fragment: { module: fragModule, entryPoint: "main", targets: colorTargets },
         depthStencil: sig._depthStencilFormat
             ? {
                   format: sig._depthStencilFormat,
@@ -627,7 +700,11 @@ function _getOrCreateGeometryPipeline(
         // otherwise be culled away. Resolution goes through the opt-in hook so unmirrored bundles
         // fold the whole thing to the plain "ccw" literal. The variant key already includes
         // meshFeatures, so a winding change gets its own pipeline.
-        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
+        primitive: {
+            topology: "triangle-list",
+            cullMode,
+            frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : _rightHanded ? (res._meshFeatures & (1 << 11) ? "ccw" : "cw") : "ccw",
+        },
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

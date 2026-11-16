@@ -8,6 +8,7 @@ import { F32, F64 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { BillboardCustomShader } from "./billboard-custom-shader.js";
+import type { BillboardRenderableBuilder } from "./billboard-scene.js";
 import type { BillboardBlendDescriptor } from "./billboard-blend.js";
 import { billboardBlendAlpha } from "./billboard-blend.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
@@ -47,13 +48,13 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     visible: boolean;
     readonly order: number;
     readonly count: number;
+    /** How the system's quads orient toward the camera; fixed by the factory that created the system. */
+    readonly orientation: TOrientation;
+    /** Normalized world lock axis for axis-locked systems; `[0, 0, 0]` for facing systems. */
+    readonly axis: readonly [number, number, number];
 
-    /** @internal Orientation shader path for this system. */
-    readonly _orientation: TOrientation;
     /** @internal Depth/blend pipeline path for this system. */
     readonly _depthMode: BillboardDepthMode;
-    /** @internal Normalized lock axis for axis-locked systems; zero for facing. */
-    readonly _axis: readonly [number, number, number];
     /** @internal Capacity of the per-instance buffer in sprites. */
     _capacity: number;
     /** @internal Per-instance stride in floats. */
@@ -85,6 +86,8 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _handleHooks?: BillboardIndexHandleHooks;
     /** @internal Optional custom fragment shader for this system. Absent on plain systems. */
     readonly _customShader?: BillboardCustomShader;
+    /** @internal Scene renderable builder for feature variants (particle blend passes); absent on plain systems. */
+    _sceneBuilder?: BillboardRenderableBuilder;
     /**
      * Per-system custom-shader params (`fx.params`); set via `setBillboardShaderParams`.
      * **Absent** on plain systems (only allocated for custom-shader systems, or lazily by the setter).
@@ -197,9 +200,9 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         visible: opts.visible ?? true,
         order: opts.order ?? (depthMode === "transparent" ? 200 : 100),
         count: 0,
-        _orientation: orientation,
+        orientation,
+        axis,
         _depthMode: depthMode,
-        _axis: axis,
         _capacity: capacity,
         _instanceFloatsPerSprite: BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
         _instanceStrideBytes: BILLBOARD_INSTANCE_STRIDE_BYTES,

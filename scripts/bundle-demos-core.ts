@@ -35,6 +35,7 @@ import {
     measurePage,
     LITE_BUNDLE_TARGET,
     NAME_POLYFILL,
+    litePackageResolverPlugin,
 } from "./bundle-scenes-core";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchDemoAssets } from "./demo-fetchers";
@@ -53,7 +54,9 @@ const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const RACER_SRC = resolve(labDir, "public/racer");
 const ANTIGRAVITY_RACER_SRC = resolve(labDir, "public/antigravity-racer");
+const PLAYROOM_SRC = resolve(labDir, "public/playroom");
 const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
+const MESH_LOD_SRC = resolve(labDir, "public/mesh-lod");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 const _demoRequire = createRequire(import.meta.url);
@@ -76,6 +79,8 @@ interface DemoConfigEntry {
     slug: string;
     name: string;
     description: string;
+    /** Optional hosted thumbnail; otherwise use the demo's relative JPG path. */
+    thumbnailUrl?: string;
     tags?: string[];
     /** When false, the demo is hidden on mobile-oriented demo listings. */
     mobile?: boolean;
@@ -120,7 +125,7 @@ function escapeHtml(value: string): string {
 }
 
 function rewriteDemoHtmlForBundle(html: string): string {
-    return html.replace(/(["'])\/(?:lite\/)?bundle\/demos\//g, "$1./");
+    return html.replace(/(["'])\.?\/(?:lite\/)?bundle\/demos\//g, "$1./");
 }
 
 /**
@@ -142,11 +147,12 @@ function renderCard(demo: DemoConfigEntry, size: DemoManifestEntry | undefined):
         ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
         : "";
     const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
+    const thumbnailUrl = demo.thumbnailUrl ?? `thumbnails/demo-${demo.slug}.jpg`;
     return [
         `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<a class="card-main" href="./demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
-        `<img src="thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="${escapeHtml(thumbnailUrl)}" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,
@@ -204,6 +210,12 @@ function copyRequiredDir(source: string, target: string, label: string): void {
 }
 
 function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
+    if (demos.some((demo) => demo.slug === "navcat")) {
+        copyRequiredDir(resolve(labDir, "public", "navcat"), resolve(demosDir, "navcat"), "Navcat");
+    }
+    if (demos.some((demo) => demo.slug === "ocean")) {
+        cpSync(resolve(labDir, "lite", "demo-ocean-reference.html"), resolve(demosDir, "demo-ocean-reference.html"));
+    }
     if (demos.some((demo) => demo.slug === "doom")) {
         if (!existsSync(DOOM_SRC)) {
             throw new Error(`Missing DOOM assets at ${DOOM_SRC}`);
@@ -265,6 +277,16 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(ANTIGRAVITY_RACER_SRC, resolve(demosDir, "antigravity-racer"), "Antigravity Racer");
     }
 
+    if (demos.some((demo) => demo.slug === "playroom")) {
+        copyRequiredDir(PLAYROOM_SRC, resolve(demosDir, "playroom"), "The Playroom");
+    }
+
+    if (demos.some((demo) => demo.slug === "mesh-lod")) {
+        // The demo fetches its source GLB from BabylonJS/Assets; only the
+        // committed `.mlod` primitives and stats are served locally.
+        copyRequiredDir(MESH_LOD_SRC, resolve(demosDir, "mesh-lod"), "MeshLoD");
+    }
+
     if (demos.some((demo) => demo.slug === "bath-day")) {
         const glb = resolve(labDir, "public", "bath_day.glb");
         if (existsSync(glb)) {
@@ -308,17 +330,22 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
         const rawKB = manifest[demo.slug]?.rawKB;
         writeFileSync(resolve(demosDir, `demo-${demo.slug}.html`), rawKB != null ? injectDemoEngineSize(html, rawKB) : html);
     }
+    writeDemoIndex(demos, manifest);
+}
+
+function writeDemoIndex(demos: DemoConfigEntry[], manifest: Record<string, DemoManifestEntry>): void {
     copyDemoIndexAssets(demos);
     writeFileSync(resolve(demosDir, "index.html"), renderDemoIndex(demos, manifest));
 }
 
 function demoRequiresReady(slug: string): boolean {
-    return slug === "racer";
+    return slug === "racer" || slug === "ocean" || slug === "playroom" || slug === "navcat";
 }
 
-export async function buildDemo(slug: string): Promise<void> {
+export async function buildDemo(slug: string, options: { debug?: boolean } = {}): Promise<void> {
     const demoOutDir = resolve(demosDir, slug);
     rmSync(demoOutDir, { recursive: true, force: true });
+    const debug = options.debug === true;
 
     // Standalone demos have no import map, so Havok can't be externalized to
     // /vendor/havok.js like scenes do — bundle its ESM build inline instead.
@@ -330,7 +357,7 @@ export async function buildDemo(slug: string): Promise<void> {
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration
@@ -344,8 +371,8 @@ export async function buildDemo(slug: string): Promise<void> {
             outDir: demoOutDir,
             emptyOutDir: true,
             target: LITE_BUNDLE_TARGET,
-            minify: "esbuild",
-            sourcemap: "hidden",
+            minify: debug ? false : "esbuild",
+            sourcemap: debug ? true : "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
                 input: { [slug]: resolve(labDir, `lite/src/demos/${slug}.ts`) },
@@ -365,8 +392,11 @@ export async function buildDemo(slug: string): Promise<void> {
         // logic below picks them up alongside the main entry.
         worker: {
             format: "es",
-            plugins: () => [wgslMinifyPlugin(), terserPropertyManglePlugin()],
+            plugins: () => [litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()])],
             rollupOptions: {
+                // Match the parent demo graph: optional vendor runtimes stay external unless
+                // the demo explicitly opts into the inline Havok alias above.
+                external: (id: string) => id !== "@babylonjs/havok" && isLiteBundleExternal(id),
                 output: {
                     entryFileNames: `${slug}-worker-[hash].js`,
                     chunkFileNames: `${slug}-worker-[name]-[hash].js`,
@@ -384,7 +414,7 @@ export async function buildDemo(slug: string): Promise<void> {
     mkdirSync(demosDir, { recursive: true });
     const newNames = new Set<string>();
     for (const f of readdirSync(demoOutDir)) {
-        if (f.endsWith(".map")) continue;
+        if (!debug && f.endsWith(".map")) continue;
         if (!statSync(resolve(demoOutDir, f)).isFile()) continue;
         newNames.add(f);
         writeFileSync(resolve(demosDir, f), readFileSync(resolve(demoOutDir, f)));
@@ -415,7 +445,7 @@ export async function buildDemoSupportBundles(): Promise<void> {
  * skipped by default. Pass `{ measure: true }` to measure this demo and refresh
  * only its entry in demos-manifest.json.
  */
-export async function buildSingleDemo(slug: string, options: { measure?: boolean } = {}): Promise<void> {
+export async function buildSingleDemo(slug: string, options: { measure?: boolean; debug?: boolean } = {}): Promise<void> {
     const demos = loadDemosConfig();
     const demo = demos.find((d) => d.slug === slug);
     if (!demo) {
@@ -428,7 +458,7 @@ export async function buildSingleDemo(slug: string, options: { measure?: boolean
 
     mkdirSync(demosDir, { recursive: true });
     console.log(`Building demo ${slug}...`);
-    await buildDemo(slug);
+    await buildDemo(slug, { debug: options.debug });
     copyDemoRuntimeAssets([demo]);
 
     if (options.measure) {
@@ -460,6 +490,7 @@ export async function buildSingleDemo(slug: string, options: { measure?: boolean
             : {};
         const rawKB = manifest[slug]?.rawKB;
         writeFileSync(resolve(demosDir, `demo-${slug}.html`), rawKB != null ? injectDemoEngineSize(html, rawKB) : html);
+        writeDemoIndex(demos, manifest);
     }
 
     console.log(`Demo "${slug}" ready → lab/public/bundle/demos/${slug}.js`);

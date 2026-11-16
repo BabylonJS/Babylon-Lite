@@ -1,7 +1,7 @@
 # Module: PBR Material
 
 > Package path: `packages/babylon-lite/src/material/pbr/`
-> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder and single-mesh rebuild closure), `pbr-flags.ts` / `pbr-flag-bits.ts` (feature flag constants), `no-color-view.ts` (pass-specific material view), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
+> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder and single-mesh rebuild closure), `pbr-built-variant.ts` (per-mesh `rebuildMaterial()` check), `pbr-flags.ts` / `pbr-flag-bits.ts` (feature flag constants), `no-color-view.ts` (pass-specific material view), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
 
 ## Purpose
 
@@ -15,6 +15,13 @@ material creation or fallback-texture installation.
 The PBR Material module implements a physically-based rendering material with GGX microfacet BRDF, Smith-GGX height-correlated geometry, Schlick Fresnel, spherical harmonics diffuse IBL, specular IBL via split-sum approximation, normal mapping (tangent or cotangent), emissive (texture and/or uniform color), image processing (exposure, tone mapping, contrast), Kulla-Conty energy conservation, clearcoat, sheen, metallic reflectance extension, specular anti-aliasing, skeletal animation, morph targets, thin instances, a non-looping single-light path, generic multi-light loops, and ESM/PCF shadow receiving. It renders glTF metallic-roughness and specular-glossiness workflow meshes to match Babylon.js PBR output.
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`pbr-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken.
+
+`setPbrParallaxOcclusion(material, props)` opts into independently implemented
+height-map UV displacement with texel-limited adaptive marching, bisection
+contact refinement, single-level height reads, and explicit-gradient surface
+samples. It preserves existing normal maps and mesh depth.
+See [Parallax Occlusion Mapping](parallax-occlusion-mapping.md) for the complete
+API, solver, pass behavior, and limitations.
 
 ## ShaderFragment Composition System
 
@@ -49,6 +56,11 @@ pbr-renderable.ts:
 ```
 
 ## Dynamic Feature Flags (`pbr-flags.ts`)
+
+Bits used exclusively by one lazy fragment are declared in that fragment, with
+their numbers reserved in `pbr-flag-bits.ts`: clearcoat owns bit 20, and sheen
+owns its texture/albedo-scaling bits 23 and 30. Shared cross-fragment bits remain
+shared. Moving ownership does not change any bit value or shader-cache key.
 
 | Flag                               | Constant  | Condition                     | Shader effect                                        |
 | ---------------------------------- | --------- | ----------------------------- | ---------------------------------------------------- |
@@ -190,6 +202,8 @@ export interface PbrMaterialProps extends Material {
     occlusionStrength?: number;
     occlusionTexCoord?: number;
     occlusionTexture?: Texture2D;
+    bentNormalTexture?: Texture2D;
+    bentNormalStrength?: number;
     metallicF0Factor?: number;
     metallicReflectanceColor?: [number, number, number];
     useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
@@ -238,9 +252,11 @@ addToScene(scene, await loadGltf(engine, "model.glb"));
 
 PBR renderables accept `MaterialOrView`. A plain material computes/stores `_renderFeatures = _computePbrMaterialFeatures(mat)`. A view uses `view._renderFeatures` exactly while reading all uniform/texture state from `view.source`.
 
-`createPbrNoColorMaterialView(source)` creates a view that clears `PBR_HAS_ALPHA_BLEND` and sets `PBR2_NO_COLOR_OUTPUT`. This produces a no-color PBR pipeline suitable for passes that should execute the fragment stage without writing color, while retaining the source material's geometry-relevant state and textures.
+`createPbrNoColorMaterialView(source)` creates a view that clears `PBR_HAS_ALPHA_BLEND` and sets `PBR2_NO_COLOR_OUTPUT`. It also clears the shading-only `PBR_HAS_NORMAL_MAP` and `PBR_HAS_SPEC_GLOSS`, as the ESM shadow view does: a depth pass reads neither, so the view never needs their lazily loaded WGSL and binds neither texture. A group built before its material gained one of those maps can therefore still build the view through its closure while the group rebuild that adds the map is pending. It clears `PBR2_HAS_REFRACTION` too: a depth pass has no scene-colour grab to bind, and a view that kept the bit would defer its bind group to a refraction texture the pass never provides, so a transmissive caster stays an ordinary opaque caster. `createPbrGeometryMaterialView` drops it for the same reason: the geometry task grabs no scene colour either. This produces a no-color PBR pipeline suitable for passes that should execute the fragment stage without writing color, while retaining the source material's geometry-relevant state and textures.
 
 The `rebuildSingle` closure returned from `buildPbrRenderables()` is installed as `r` on the scene-local group and also cached on `pbrGroupBuilder._rebuildSingle`. Material swaps, `rebuildMaterial()`, and per-pass overrides use the scene-local closure: the builder-wide cache captures scene state and must not be used by an unfinished or missing group in another scene.
+
+`rebuildMaterial()` on a PBR material rebuilds the whole PBR group unless every PBR mesh of the material can be rebuilt through that closure with a variant its group build already composed; the full lifecycle (cold start, build-time snapshot, eligibility, per-mesh execution, fallback) is specified in 27-render-pipeline, PBR Material Rebuild Lifecycle.
 
 ### Pipeline (`pbr-pipeline.ts`)
 
@@ -420,6 +436,24 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
     - Shadertoy reference implementation: <https://www.shadertoy.com/view/DtlBWn>
     - Sébastien Lagarde, _Local Image-based Lighting with Parallax-Corrected Cubemaps_:
       <https://dl.acm.org/doi/10.1145/2343045.2343094>
+
+### `bent-normal-fragment.ts` — Bent Normal Reflection Occlusion (opt-in)
+
+Port of BJS `PBRMaterial.bentNormalTexture` (BENTNORMAL define, Babylon.js PR #19069). **Explicit opt-in**: call `enableBentNormals()` once before `registerScene`. Setting `bentNormalTexture` without that call has no effect. Neither `pbr-renderable.ts` nor `ibl-fragment.ts` references this module, so scenes that do not opt in pay zero bytes.
+
+- **API**: `enableBentNormals(): void` — idempotent and global. It augments the exported IBL `pbrExt` object in place (adding `detect`, `writeUbo` and `textures`, and wrapping `frag` and `bind`). This is required rather than registering a separate ext because the IBL `AI` code must be modified (later fragments such as clearcoat, sheen and refraction recompute from its `let`s) and `pbr-renderable` re-registers the `"ibl"` ext by id during its build.
+- **Factory**: `createBentNormalFragment(reuseTbn: boolean, doubleSided: boolean): ShaderFragment` — merged into the IBL fragment (same id `"ibl"`), with bent bindings appended after the IBL bindings.
+- **Flag**: `PBR_HAS_BENT_NORMAL` — a bent-normal-local material `features` bit (`1 << 4`, declared inside the fragment module and reserved in `pbr-flag-bits.ts`; that bit is free in `features` because `PBR_HAS_TONEMAP` only lives in `sceneFeatures`). Set by `detect` when the material is lit, not in skybox mode, has `bentNormalTexture`, and has an AO texture (`ormTexture` or `occlusionTexture`) with `occlusionStrength > 0` — mirroring BJS, which requires an ambient texture. Only takes effect when IBL is active.
+- **UBO**: `bentNormalParams: vec4<f32>` — `.x` is the strength (clamped with `saturate`, maps to BJS `bentNormalTexture.level`). A full `vec4` keeps the 16-byte packing that later fragments' writers (e.g. reflectance) assume.
+- **Bindings**: `bentNormalTexture_`, `bentNormalSampler_`
+- **Helper WGSL**: `bentNormalSGOverlap()`, `bentNormalSGOcclusion()`, `environmentBentNormalOcclusion()` — spherical-Gaussian overlap between the AO visibility cone around the bent normal and the GGX reflection lobe, normalized by the open-hemisphere overlap.
+- **Fragment slots**:
+    - `AC` — builds the tangent frame (reusing the vertex `TBN` only when the normal map samples UV1 with no UV transform, so its tangents share the bent map's basis — mirrors BJS's `BENTNORMALDIRECTUV && BUMPDIRECTUV` gate; otherwise the screen-space cotangent frame), decodes `bentNormalW` from the tangent-space map (sampled with UV1), applies the double-sided back-face flip once (explicitly on the vertex-TBN path; the cotangent frame is built from the already-flipped `N_geom` with negated UVs, which is equivalent to BJS's flip), and defines `bentNormalStrength` for the IBL `AI` code.
+    - `AI` — the IBL `AI` code is string-patched: the analytic specular occlusion (`seo`) is dropped from `colorSpecularEnvReflectance`, and the environment radiance is multiplied by `mix(1, environmentBentNormalOcclusion(...), bentNormalStrength)` before energy conservation. Search/replacement strings are `wgsl`-tagged so the bundle WGSL minifier rewrites them identically to the IBL source.
+- **Tangent frame**: reuses the template's vertex `TBN` when a normal map and vertex tangents are present without thin instances; otherwise builds a screen-space cotangent frame from `N_geom` using the same convention as the base normal map (negated bitangent, mirrored UV on back faces; both axes reversed in the right-handed build).
+- **Known differences vs BJS**: requires the explicit `enableBentNormals()` opt-in; the bent texture always samples UV1 with no UV transform; a mesh with tangents but no normal map uses the cotangent frame (BJS would reuse vTBN, which Lite only emits on the normal-map path); BJS' non-uniform-scaling check is not mirrored (Lite has no non-uniform-scaling mesh feature; its base normal mapping does not mirror it either); skybox-mode materials ignore the bent texture.
+- **Texture discovery / MeshLoD**: `getMaterialTextures()` lists `bentNormalTexture` after the other PBR slots. MeshLoD rejects bent-normal materials with `MLOD_UNSUPPORTED_MATERIAL` (`actual: "bent normals"`) because its shader path does not run the IBL extension.
+- **Parity scenes**: scene 230 (`scene230-bent-normals`), from BJS PG `#ZH5HB3#3`, and its right-handed twin scene 353 (`scene353-rh-bent-normals`).
 
 ### `clearcoat-fragment.ts` — Clearcoat Layer
 
@@ -605,16 +639,28 @@ setEnvironmentBlur(scene: SceneContext, blur: number): void;
 setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 ```
 
+`setEnvironmentRotation` turns the image-based lighting and the visible skybox together. Two narrower setters split it, for
+callers whose skybox keeps its own orientation while the lighting turns (Babylon.js builds `createDefaultSkybox` from a
+clone of the environment texture, so later `rotationY` changes do not reach it):
+
+```ts
+setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void; // lighting only, never registers the skybox patch
+setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void; // skybox only, angle compiled into the shader
+```
+
+`setEnvironmentSkyboxRotation` fills the same direction slot as `setEnvironmentRotation`, so whichever of the two is called
+last before the skybox is built decides the skybox patch. Its angle is fixed at build time.
+
 Each setter registers one feature-owned patch loader in an ordered composition slot with a feature-agnostic composer stored on that scene. Rotation therefore always applies before blur regardless of setter call order. Configuring one scene cannot activate a feature for another scene.
 
 The canonical builders contain only one optional call to the scene-local composer. They do not import the composer or either feature patch, keeping non-feature skybox consumers at the canonical-builder baseline. This follows the PBR/Standard extension principle without a global registry: generic composition is retained only by consumers that import an environment feature setter.
 
 The core skybox shader has two composition slots:
 
-| Slot      | Default                   | Optional contribution                                                                                     |
-| --------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Direction | Normalized cube direction | `setEnvironmentRotation` rotates the sampling direction around Y using the `envRotationY` scene uniform   |
-| LOD       | Mip level `0.0`           | `setEnvironmentBlur` computes a clamped fractional cubemap LOD from blur, cubemap size, scale, and offset |
+| Slot      | Default                   | Optional contribution                                                                                                                                                    |
+| --------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Direction | Normalized cube direction | `setEnvironmentRotation` rotates the sampling direction around Y using the `envRotationY` scene uniform; `setEnvironmentSkyboxRotation` uses a compiled-in angle instead |
+| LOD       | Mip level `0.0`           | `setEnvironmentBlur` computes a clamped fractional cubemap LOD from blur, cubemap size, scale, and offset                                                                |
 
 Blur and rotation patches are separate modules. Importing one setter does not retain the other patch. The rotation registration loads its patch only when the scene-local composer first runs during visible-skybox construction, while the blur registration resolves its statically imported patch. Lighting-only consumers do not fetch the rotation patch.
 
@@ -626,7 +672,7 @@ The first call to either setter must occur before the visible skybox is built so
 
 PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
 
-The environment rotation slot remains in this fixed layout for alignment and shader compatibility, but the base scene packer and cache key do not read it. Rotation is setter-only: `setEnvironmentRotation` owns the internal scene value, lazy skybox-patch registration, contributor registration, and task-cache invalidation. Environment loaders register the same contributor for SH data, while glTF image-based lights may initialize the internal value from asset metadata.
+The environment rotation slot remains in this fixed layout for alignment and shader compatibility, but the base scene packer and cache key do not read it. Rotation is setter-only: `setEnvironmentRotation` owns the internal scene value, lazy skybox-patch registration, contributor registration, and task-cache invalidation; `setEnvironmentLightingRotation` does the same without the skybox patch. Environment loaders register the same contributor for SH data, while glTF image-based lights may initialize the internal value from asset metadata.
 
 Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `_hasSingleLight` or `_hasMultiLight` is enabled.
 
@@ -668,6 +714,8 @@ Supports both metallic-roughness and specular-glossiness workflows via `_hasSpec
 ### Composed Shader Caching
 
 `pbr-renderable.ts` maintains composed shader caches keyed by material features, extended features, mesh features, scene features, light mode, and shader variant key. The same captured composer is used by the `rebuildSingle` closure returned from the initial build.
+
+The composer (`createPbrComposer` in `pbr-compose.ts`) caches each variant under `_pbrComposeKey(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, vbKey, uv2Mask, pluginIndex)` = `` `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}` `` and exposes that cache read-only as `composePbr._c`. Right after building its meshes, `buildPbrRenderables()` snapshots the keys into `_PbrGeometryContext._b` (`ReadonlySet<string>`). Keys composed later through the closure are not added, because the build may not have loaded every module such a variant needs. `_pbrRebuildsComposed` (`pbr-built-variant.ts`) recomputes a mesh's key with the same function and checks it against `_b`.
 
 ### Renderable Builder (`pbr-renderable.ts`)
 
@@ -715,8 +763,8 @@ its descriptor-construction loop; Standard and PBR share that receiver-only impl
     N_local = normalize(normal)
     T_local = normalize(tangent.xyz)
     B_local = cross(N_local, T_local) * tangent.w
-    worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
-    worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
+    worldTangent = (finalWorld × vec4(T_local, 0)).xyz
+    worldBitangent = (finalWorld × vec4(B_local, 0)).xyz
     ```
 7. `/*VB*/` — Shadow light-space transform (if `MSH_RECEIVE_SHADOWS`)
 
@@ -832,6 +880,8 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `shadow fragment ESM`                      | ESM shadow factor computation per light                     |
 | `shadow fragment PCF`                      | PCF shadow factor computation per light                     |
 | `single rebuild`                           | Material swap rebuilds one mesh without full scene teardown |
+| `_pbrRebuildsComposed`                     | Accepts only variants its group build composed              |
+| `rebuildMaterial per-mesh path`            | Eligible PBR rebuild skips the whole-group rebuild          |
 | `GGX NDF at roughness=0.5, NdotH=1`        | D = α⁴/(π) ≈ 0.001245                                       |
 | `Fresnel at cosθ=0`                        | F = 1.0 (full reflection)                                   |
 | `Image processing: exposure=1, contrast=1` | Tone map only                                               |
@@ -848,6 +898,7 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `src/material/pbr/pbr-template.ts`                     | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings                  |
 | `src/material/pbr/pbr-pipeline.ts`                     | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management                                 |
 | `src/material/pbr/pbr-renderable.ts`                   | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure |
+| `src/material/pbr/pbr-built-variant.ts`                | ~60 lines  | `_pbrRebuildsComposed()` — whether a PBR `rebuildMaterial()` can rebuild each mesh through the group closure (lazy)                       |
 | `src/material/pbr/no-color-view.ts`                    | ~18 lines  | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper                                                            |
 | `src/material/pbr/fragments/singlelight-wgsl.ts`       | ~75 lines  | Lazy WGSL helpers for the non-looping one-light direct path                                                                               |
 | `src/material/pbr/fragments/multilight-wgsl.ts`        | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()`                                                    |

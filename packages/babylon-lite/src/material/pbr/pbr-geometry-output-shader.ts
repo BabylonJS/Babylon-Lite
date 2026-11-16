@@ -26,11 +26,14 @@
  *  the lit `color` written to the optional real-colour attachment. */
 
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
+import { _rightHanded } from "#coordinate-system";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { pbrGeometryVelocity } from "./pbr-geometry-velocity-hooks.js";
+import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -38,45 +41,24 @@ const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
 // ─── PBR extension contributing the geometry-params fragment ──────────
 
-function needsGpUbo(attachments: readonly GeometryTextureType[]): boolean {
-    for (const t of attachments) {
-        if (t === GeometryTextureType.NORMALIZED_VIEW_DEPTH || t === GeometryTextureType.LINEAR_VELOCITY) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function needsVelocity(attachments: readonly GeometryTextureType[]): boolean {
-    return attachments.includes(GeometryTextureType.LINEAR_VELOCITY);
-}
-
-function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
-    return attachments.includes(GeometryTextureType.LOCAL_POSITION);
-}
-
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-pos varyings.
  *  PBR-specific: world-position varying is `out.worldPos`. */
-function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
+function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean, meshFeatures: number): ShaderFragment {
     const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
     const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
-    if (needsVelocityVaryings) {
-        varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
-    }
-    if (needsLocalPosVarying) {
-        varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
-    }
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
+        varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
         vbParts.push(wgsl`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.worldPos, 1.0);`);
         vbParts.push(wgsl`out.vPreviousClip = gp.previousViewProjection * vec4<f32>(out.worldPos, 1.0);`);
     }
     if (needsLocalPosVarying) {
+        varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
         vbParts.push(wgsl`out.vLocalPos = position;`);
     }
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
-    return {
+    const fragment: ShaderFragment = {
         _id: "pbr-geometry-params",
         _bindings: bindings,
         _helperFunctions: helpers,
@@ -84,6 +66,7 @@ function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityV
         _varyings: varyings,
         _vertexSlots: slots,
     };
+    return pbrGeometryVelocity && needsVelocityVaryings ? pbrGeometryVelocity.extendPbrGeometryParams(fragment, meshFeatures, needsLocalPosVarying) : fragment;
 }
 
 /** PBR extension that wires the geometry-params fragment + gp UBO bind entry.
@@ -107,23 +90,23 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
                 return null;
             }
             const att = getAttachments() ?? [];
-            const wantsGp = needsGpUbo(att);
-            const wantsVelocity = needsVelocity(att);
-            const wantsLocalPos = needsLocalPos(att);
-            if (!wantsGp && !wantsVelocity && !wantsLocalPos) {
+            const wantsVelocity = att.includes(GeometryTextureType.LINEAR_VELOCITY);
+            const wantsGp = wantsVelocity || att.includes(GeometryTextureType.NORMALIZED_VIEW_DEPTH);
+            const wantsLocalPos = att.includes(GeometryTextureType.LOCAL_POSITION);
+            if (!wantsGp && !wantsLocalPos) {
                 return null;
             }
-            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos);
+            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, ctx._meshFeatures);
         },
         bind(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number {
             if ((ctx._features2 & PBR2_GEOMETRY_OUTPUT) === 0) {
                 return b;
             }
-            const view = ctx._material as { _gpUBO?: GPUBuffer | null };
+            const view = ctx._material as PbrGeometryMaterialView;
             if (view._gpUBO) {
                 entries.push({ binding: b++, resource: { buffer: view._gpUBO } });
             }
-            return b;
+            return pbrGeometryVelocity?.bindPbrGeometryVelocity(view, entries, b) ?? b;
         },
     };
     _registerPbrExt(ext);
@@ -135,7 +118,7 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
  *  in-scope PBR fragment vars at the BC slot location (after tonemap +
  *  gamma + contrast; same scope as the alpha-block).
  *  @internal */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): WgslSource {
+export function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS PREPASS_IRRADIANCE (pbrBlockPrePass.fx): `finalDiffuse + finalIrradiance`
@@ -154,24 +137,34 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean):
             // the whole vec4 masked by writeGeometryInfo. Lite's `colorF0` is the F0 reflectance.
             return wgsl`vec4<f32>(colorF0, 1.0 - roughness) * ${wg}`;
         case GeometryTextureType.VIEW_DEPTH:
-            return wgsl`vec4<f32>((scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`;
+            // Babylon.js's right-handed view space is the Z-mirrored scene view.
+            return _rightHanded
+                ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>((scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
+            // The engine's view z is the positive distance in both builds, like the positive near/far bounds: [0, 1].
             return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz), ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz * vec3<f32>(1.0, 1.0, -1.0)), ${wg})`
+                : wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
             return wgsl`vec4<f32>(N * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:
             // BJS uses `surfaceAlbedo` for PBR (post diffuse / metallic split).
             return wgsl`vec4<f32>(surfaceAlbedo, ${wg})`;
         case GeometryTextureType.LINEAR_VELOCITY: {
+            if (pbrGeometryVelocity?.geometryVelocityKey()) {
+                return pbrGeometryVelocity.geometryVelocityOutput(wg);
+            }
             const cur = `(input.vCurrentClip.xy / input.vCurrentClip.w)`;
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 // ─── Composer entry ────────────────────────────────────────────────────
@@ -215,7 +208,7 @@ export function composePbrGeometryShader(
         singleLightType,
         esmShadowDepthCode,
         vbStrides,
-        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`,
+        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}${pbrGeometryVelocity?.geometryVelocityKey() ?? ""}`,
         uv2Mask,
         pluginIndex
     );
@@ -237,8 +230,9 @@ export function composePbrGeometryShader(
     //    real lit colour (matches BJS `targetTexture`).
     const colorSlot = attachments.length;
     const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
+    const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const outputStruct = wgsl`struct FragmentOutput {
-${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`)).join("\n")}${extraColorLine}
 };
 `;
     frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
@@ -246,7 +240,9 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     // 3) Replace the alpha-block return with MRT writes. With ALPHA_BLEND
     //    stripped, the template emits the simpler return form.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`).join("\n")}`;
+    const writes = wgsl`${attachments
+        .map((type, i) => (type === extension?.type ? extension.pbrWrite(i, features) : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`))
+        .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = vec4<f32>(color, alpha * material.materialAlpha);` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

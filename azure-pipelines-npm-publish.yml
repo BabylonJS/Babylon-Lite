@@ -1,11 +1,23 @@
-# Azure Pipelines — Babylon Lite npm Publish
+# Azure Pipelines — Babylon Lite npm Publish (RETIRED)
+#
+# RETIRED: this pipeline is no longer the source of @babylonjs/lite releases and
+# has no automatic triggers (no CI trigger, no PR trigger, no schedule).
+#
+# Releases of @babylonjs/lite, @babylonjs/lite-compat and @babylonjs/lite-gl
+# now come from the internal Azure DevOps release pipeline, which publishes to
+# npm and then creates the npm-lite-v<X.Y.Z> tag and GitHub release on the
+# released master commit. The versioned playground snapshot
+# (liteplayground.babylonjs.com/v/<ver>/) and the /v/versions.json manifest are
+# deployed by azure-pipelines-playground-release.yml, which is triggered by that
+# tag. config/release.json no longer triggers anything.
+#
+# Kept only as a manual emergency fallback. A manual run publishes to npm and
+# pushes the npm-lite-v<X.Y.Z> tag, which in turn triggers the versioned
+# playground deploy. Do not run it alongside the internal release.
 #
 # Publishes the built @babylonjs/lite package to npm. NPM_TOKEN is provided by
-# the NPM_Publish variable group.
-#
-# Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
-# Pushes to master that change config/release.json read the release type from
-# that file, so repeated patch releases can be requested by bumping its nonce.
+# the NPM_Publish variable group. Manual runs can choose patch, minor, major, or
+# auto.
 #
 # The same run also publishes @babylonjs/lite-compat as `<lite-version>-preview`
 # under the `latest` dist-tag. npm requires every package to carry a `latest`
@@ -17,23 +29,9 @@
 # uploading to npm or pushing a release tag. In dry-run mode both `npm publish`
 # calls use `--dry-run` and the git tag is created locally but not pushed.
 
-trigger:
-    branches:
-        include:
-            - master
-    paths:
-        include:
-            - config/release.json
+trigger: none
 
 pr: none
-
-schedules:
-    - cron: "0 8 * * 1"
-      displayName: "Weekly npm publish"
-      branches:
-          include:
-              - master
-      always: true
 
 parameters:
     - name: releaseType
@@ -52,11 +50,6 @@ parameters:
 
 variables:
     - group: NPM_Publish
-    - group: BabylonJS-Deployment
-    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
-    # liteplayground.babylonjs.com, so versioned playground snapshots serve
-    # same-origin as nightly (required by the client-side deploy coordinator).
-    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -246,88 +239,3 @@ stages:
                   displayName: "Publish compat package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
-
-                # --- Versioned playground snapshot ------------------------------
-                # After a successful publish, build the Lite Playground from this
-                # tagged commit and deploy it to an immutable per-version sub-path
-                # on the tools account (served at liteplayground.babylonjs.com/v/<ver>/),
-                # so every release gets a permanent, self-consistent playground URL
-                # served same-origin as nightly (its self-hosted engine is built
-                # from — and stamped with — the published version via PACKAGE_VERSION).
-                # PLAYGROUND_BASE matches the public sub-path so assets, the runner,
-                # the engine, and SPA snippet routes resolve under it.
-                #
-                # The build itself runs unconditionally. It is the heaviest step in
-                # this pipeline and the only one that has broken a release so far (a
-                # Node OOM, which struck *after* npm publish had already succeeded),
-                # so a dry run has to exercise it to be worth running. Only the steps
-                # with external side effects — the upload and the shared versions
-                # manifest — are compile-time gated on dryRun.
-                - script: pnpm build:playground
-                  displayName: "Build versioned playground"
-                  env:
-                      PACKAGE_VERSION: $(PACKAGE_VERSION)
-                      PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
-
-                - ${{ if eq(parameters.dryRun, false) }}:
-                      - template: config/templates/upload-static-site.yml
-                        parameters:
-                            siteDir: $(System.DefaultWorkingDirectory)/playground/dist
-                            deployPath: litePlayground/v/$(PACKAGE_VERSION)
-                            storageAccount: $(TOOLS_STORAGE_ACCOUNT)
-                            siteName: "Lite Playground v$(PACKAGE_VERSION)"
-                            postComment: false
-
-                      # Record this release in the deployed-versions manifest the
-                      # playground reads to populate its version selector (only
-                      # versions with a live /v/<ver>/ snapshot are offered). The
-                      # manifest lives at the origin root (/v/versions.json), shared
-                      # by every snapshot. Read-modify-write: fetch the current list,
-                      # add this version, dedupe + sort newest first, then re-upload
-                      # just that file to the /v path. The deploy server overlays at
-                      # the given path, so sibling /v/<ver>/ snapshots are left
-                      # intact. Finally purge the manifest (a .json, otherwise cached
-                      # at the CDN default TTL) so the new release shows up promptly.
-                      - script: |
-                            set -euo pipefail
-
-                            VER="$(PACKAGE_VERSION)"
-                            MANIFEST_URL="https://liteplayground.babylonjs.com/v/versions.json"
-                            WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
-                            mkdir -p "$WORK"
-
-                            # Fetch the current manifest, distinguishing "not there yet"
-                            # from a transient failure. A 404 is the first-run empty
-                            # case; any other non-200 (5xx, network error) must NOT be
-                            # treated as empty, or we'd overwrite the manifest with just
-                            # this version and drop older still-deployed releases from
-                            # the selector. On such failures, skip the update (the step
-                            # is continueOnError) and leave the manifest intact — this
-                            # version is picked up by the next successful publish.
-                            HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
-                            if [ "$HTTP_CODE" = "404" ]; then
-                              echo "No existing manifest (404); starting a new list."
-                              echo '[]' > "$WORK/current.json"
-                            elif [ "$HTTP_CODE" != "200" ]; then
-                              echo "Manifest fetch failed (HTTP $HTTP_CODE); skipping update to avoid clobbering existing versions."
-                              exit 1
-                            fi
-
-                            node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
-
-                            echo "Updated manifest:"; cat "$WORK/versions.json"
-
-                            (cd "$WORK" && zip -j versions.zip versions.json)
-
-                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
-                              -H "Content-Type: multipart/form-data" \
-                              -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-                              -F "path=litePlayground/v" \
-                              -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
-                              -F "zip=@$WORK/versions.zip"
-
-                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=lite-playground&profileName=$(CDN_PROFILE_TOOLS)" --fail-with-body -i -X POST \
-                              -H "Authorization: Bearer $(DEPLOY_TOKEN)"
-                        displayName: "Update deployed-versions manifest"
-                        condition: succeeded()
-                        continueOnError: true

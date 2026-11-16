@@ -6,6 +6,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
+import type { ParallaxOcclusionProps } from "../parallax/parallax-occlusion.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
 import { getPbrGroupBuilder } from "./pbr-group-builder.js";
@@ -29,6 +30,8 @@ export interface PbrMaterialProps extends Material {
     normalTexture?: Texture2D;
     /** Normal map scale (glTF normalTexture.scale). Default 1.0. */
     normalTextureScale?: number;
+    /** @internal Set via {@link setPbrParallaxOcclusion}; independent height-map UV displacement. */
+    _parallaxOcclusion?: ParallaxOcclusionProps;
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
     ormTexture?: Texture2D;
     emissiveTexture?: Texture2D;
@@ -80,6 +83,17 @@ export interface PbrMaterialProps extends Material {
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
+    /** Tangent-space bent normal map (linear RGB, same encoding as a normal map) sampled with UV1.
+     *  Replaces the analytic specular occlusion of the environment reflection with a
+     *  spherical-Gaussian visibility-cone estimate driven by the bent normal and ambient occlusion.
+     *  Only active on lit materials with an environment (IBL) and an occlusion texture
+     *  (`ormTexture` or `occlusionTexture`, with `occlusionStrength > 0`).
+     *  Maps to BJS PBRMaterial.bentNormalTexture. Explicit opt-in: call `enableBentNormals()`
+     *  before `registerScene` (otherwise ignored; keeps other bundles free of bent-normal code). */
+    bentNormalTexture?: Texture2D;
+    /** Blend factor of the bent normal occlusion (clamped to [0,1]). Default 1.0.
+     *  Maps to BJS `bentNormalTexture.level`. */
+    bentNormalStrength?: number;
     /** Baked lightmap texture. Added to the shaded color by default, or multiplied
      *  when `useLightmapAsShadowmap` is true. Set via {@link setPbrLightmap}. */
     lightmapTexture?: Texture2D;
@@ -99,7 +113,7 @@ export interface PbrMaterialProps extends Material {
     _specularWeight?: number;
     /** @internal Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    _metallicReflectanceColor?: [number, number, number];
+    _metallicReflectanceColor?: readonly [number, number, number];
     /** @internal Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
     _metallicReflectanceTexture?: Texture2D;
@@ -219,7 +233,7 @@ export interface SheenProps {
     /** Whether sheen is active. Default false. */
     isEnabled: boolean;
     /** Sheen color (linear RGB). Default [1, 1, 1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Sheen roughness. Default 0.0. */
     roughness?: number;
     /** Sheen intensity (0=off, 1=full). Default 1.0. */
@@ -263,7 +277,7 @@ export interface AnisotropyProps {
     /** Anisotropy strength (0=isotropic, 1=fully anisotropic). Default 1.0. */
     intensity?: number;
     /** Anisotropy direction in tangent space (u, v). Default [1, 0]. */
-    direction?: [number, number];
+    direction?: readonly [number, number];
     /** KHR_materials_anisotropy anisotropyTexture (linear). RG = per-texel direction
      *  (×2-1, rotated by `direction`), B = per-texel strength (multiplies `intensity`).
      *  May carry a KHR_texture_transform that an animation pointer can drive. */
@@ -275,7 +289,7 @@ export interface TranslucencyProps {
     /** Translucency intensity (0=off, 1=full). Default 1.0. */
     intensity?: number;
     /** Translucency color (linear RGB). Tints the transmitted light. Default [1,1,1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Translucency color texture (sampled sRGB). RGB multiplies `color`.
      *  KHR_materials_diffuse_transmission.diffuseTransmissionColorTexture. */
     colorTexture?: Texture2D;
@@ -284,14 +298,14 @@ export interface TranslucencyProps {
     intensityTexture?: Texture2D;
     /** Diffusion distance for the Burley transmittance BRDF. Controls how far
      *  light travels through the material per RGB channel. Default [1,1,1]. */
-    diffusionDistance?: [number, number, number];
+    diffusionDistance?: readonly [number, number, number];
 }
 
 /** Scattering sub-feature. Presence enables screen-space subsurface scattering.
  *  NOTE: PrePass/SSS pipeline is not yet implemented — this type is reserved. */
 export interface ScatteringProps {
     /** Per-channel scattering diffusion distance. */
-    diffusionDistance?: [number, number, number];
+    diffusionDistance?: readonly [number, number, number];
     /** World-space scale factor for the diffusion kernel. Default 1.0. */
     metersPerUnit?: number;
 }
@@ -334,7 +348,7 @@ export interface RefractionProps {
 /** Tint sub-feature. Controls absorption tint color for transmittance. */
 export interface TintProps {
     /** Tint color (linear RGB). Default [1,1,1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Distance at which the tint color is reached. Default 1.0. */
     atDistance?: number;
 }

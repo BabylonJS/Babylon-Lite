@@ -20,7 +20,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { MotionController, XrMotionControllerProfileOptions } from "./xr-motion-controller.js";
 import type { XrHandedness } from "./xr-support.js";
 import type { XrInputManager } from "./xr-input.js";
@@ -35,6 +35,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
+import { _rightHanded } from "#coordinate-system";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -131,7 +132,7 @@ function defaultMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     mesh.receiveShadows = false;
     // Handle: ~4 cm cross-section, ~12 cm along the barrel.
     mesh.scaling.set(0.04, 0.04, 0.12);
-    mesh.visible = false;
+    (mesh as _WritableVisibility).visible = false;
     return mesh;
 }
 
@@ -156,7 +157,7 @@ function loadingMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     mesh.receiveShadows = false;
     // Slightly smaller than the solid handle so it reads as an insubstantial ghost.
     mesh.scaling.set(0.035, 0.035, 0.11);
-    mesh.visible = false;
+    (mesh as _WritableVisibility).visible = false;
     return mesh;
 }
 
@@ -321,9 +322,9 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
         const m = src.gripMatrix as unknown as Mat4;
         const rot = decomposeMat4(m).rotation;
         unit.active.position.set(m[12]!, m[13]!, m[14]!);
-        if (unit.model) {
-            // Babylon's LH profile-model path parents the glTF root under a π Y rotation.
-            // Compose gripRotation * yawY(π) without allocating a second quaternion.
+        if (unit.model && _rightHanded === null) {
+            // Babylon's LH profile-model path parents the glTF root under a π Y rotation (its right-handed
+            // path does not). Compose gripRotation * yawY(π) without allocating a second quaternion.
             unit.active.rotationQuaternion.set(-rot.z, rot.w, rot.x, -rot.y);
         } else {
             unit.active.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);

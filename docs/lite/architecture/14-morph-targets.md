@@ -10,6 +10,33 @@ Morph targets (aka blend shapes) allow per-vertex position and normal deltas to 
 
 ## Public API Surface
 
+### Morph-set discovery and names
+
+```typescript
+interface MorphTargetData {
+    readonly count: number;
+    readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];
+    readonly weights: Float32Array<ArrayBuffer>;
+    readonly names?: readonly string[];
+}
+
+function createMorphTargets(
+    engine: EngineContext,
+    targets: { positions: Float32Array; normals: Float32Array | null }[],
+    vertexCount: number,
+    morphWeights: number[] | null,
+    names?: readonly string[]
+): MorphTargetData;
+
+function setMorphTargetWeights(engine: EngineContext, data: MorphTargetData, weights: ArrayLike<number>): void;
+```
+
+Enumerate `scene.meshes[*].morphTargets`, deduping by identity because clones share ref-counted data. Names are index-aligned with targets and weights: glTF reuses `mesh.extras.targetNames` only if it is an array containing exactly one string per target; malformed or mismatched asset metadata is ignored. USD forwards its target names. Authored callers may pass the optional trailing array without count validation. Names are retained by reference, not copied. Enumerate targets using `data.count`, read `data.names?.[i]`, and use an index-based label for missing names; extra names do not represent additional targets. Callers must preserve index alignment.
+
+The factory assigns an own `names` property only when names were supplied. Recovery's existing `Object.assign` with rebuilt, unnamed GPU data therefore preserves the original metadata and object identity. The optional names reference adds storage only for named sets; source validation and forwarding add small feature-specific runtime costs.
+
+Read `data.weights[i]` for `i < data.count`. For editing, copy all weights, change the desired slot, then call `setMorphTargetWeights(scene.surface.engine, data, copy)`; omitted slots are zero-filled. Active morph animations may overwrite weights every frame. Writes after final disposal throw. Tests cover authored names with matching and mismatched counts, absent own properties, valid and malformed glTF metadata, USD forwarding, and recovery-style assignment. Discovery introduces no shader or rendering changes.
+
 ### Interfaces
 
 ```typescript

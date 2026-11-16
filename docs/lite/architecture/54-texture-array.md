@@ -18,6 +18,7 @@ export interface Texture2DArray extends Texture2D {
 export interface TextureArrayOptions {
     mipMaps?: boolean;
     srgb?: boolean;
+    format?: GPUTextureFormat;
     addressModeU?: GPUAddressMode;
     addressModeV?: GPUAddressMode;
     minFilter?: GPUFilterMode;
@@ -164,12 +165,18 @@ Preflight validates:
 
 ## Pipeline Configuration
 
-RGBA image/pixel arrays use:
+Empty arrays default to RGBA8 but may select another renderable format through `options.format`,
+which takes precedence over `srgb`. Fill data formats with `updateTextureRegion`, or render into a
+layer/mip with `createTextureRenderTarget`. Image helpers require a format supported by WebGPU
+external-image copies. Raw pixel helpers remain explicitly RGBA8: they accept only `"rgba8unorm"`
+and `"rgba8unorm-srgb"`, rejecting another format before allocation/upload.
+
+Image/pixel array allocation uses:
 
 ```typescript
 {
     dimension: "2d",
-    format: srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+    format: options.format ?? (srgb ? "rgba8unorm-srgb" : "rgba8unorm"),
     mipLevelCount: mipMaps ? floor(log2(max(width, height))) + 1 : 1,
     usage: TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT
 }
@@ -196,6 +203,8 @@ Image uploads default to a physical Y flip. Codec-decoded KTX2 data is uploaded 
 ### Empty/image/pixel arrays
 
 1. Validate positive dimensions, layer count, layer index, mip index, and payload size.
+   Pixel helpers additionally validate the RGBA8 allocation format; format rejection cannot publish
+   a partially created texture or enqueue an upload.
 2. Create the texture, `"2d-array"` view, and pooled sampler.
 3. Acquire one logical texture ownership reference before returning.
 4. Upload image/pixel data.

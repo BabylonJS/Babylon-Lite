@@ -7,11 +7,14 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { SpotLight } from "../light/spot-light.js";
-import { addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import { _enableTaskMeshPopulation, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
+import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
+import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 export interface PcfLightMatrix {
     /** @internal */
@@ -22,6 +25,24 @@ export interface PcfLightMatrix {
     _near: number;
     /** @internal */
     _far: number;
+}
+
+interface PcfCasterSnapshot {
+    /** @internal */
+    _material: Material;
+    /** @internal */
+    _terminal: Material;
+    /** @internal */
+    _renderableGen: number | undefined;
+}
+
+interface PcfMaterialSnapshot {
+    /** @internal The depth view of this terminal material, shared by every receive-material override chain. */
+    _view: MaterialView | undefined;
+    /** @internal */
+    _generation: number | undefined;
+    /** @internal Features captured by the cached view; dropped features do not replace this snapshot. */
+    _features: unknown;
 }
 
 export interface PcfTaskState extends ShadowTaskInternalState {
@@ -35,14 +56,16 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal Floating-origin offset version (active camera worldMatrixVersion) at last shadow-map render; -1 when never rendered. */
     _lastFoVersion: number;
+    /** @internal Floating-origin camera at last shadow-map render. A replacement camera can report the same version. */
+    _lastFoCamera?: Camera | null;
     /** @internal */
     _shadowUboData: Float32Array;
     /** @internal */
     _casterMeshes: readonly Mesh[];
-    /** @internal Terminal caster material last resolved for each caster mesh. */
-    _casterMaterials: (Material | null)[];
-    /** @internal Generation of each terminal caster material when the task was built. */
-    _casterMatGens: number[];
+    /** @internal Actual task meshes, independent of deformable wrappers' source arrays. Null means held or materialless. */
+    _casterSnapshots: Map<Mesh, PcfCasterSnapshot | null>;
+    /** @internal Cached depth views and their generation/features, keyed only by terminal caster material. */
+    _materialSnapshots: Map<Material, PcfMaterialSnapshot>;
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
 }
@@ -115,27 +138,15 @@ export function ensurePcfShadowTaskState(
 ): PcfTaskState {
     const existing = existingState as PcfTaskState | null;
     if (existing) {
-        let casterMaterialChanged = false;
-        for (let i = 0; i < casterMeshes.length; i++) {
-            const material = casterMeshes[i]!.material;
-            const terminal = material ? resolveShadowCasterMaterial(material) : null;
-            if (existing._casterMaterials[i] !== terminal || existing._casterMatGens[i] !== (terminal?._csmGen ?? 0)) {
-                casterMaterialChanged = true;
-                break;
-            }
-        }
-        if (existing._casterMeshes === casterMeshes && !casterMaterialChanged) {
+        const rt = existing._task._config.rt;
+        if (rt._depthTexture === sg._depthTexture && rt._width === sg._config._mapSize) {
+            reconcilePcfCasters(scene, sg, existing, casterMeshes);
             return existing;
         }
-        // The old task's GPU buffers may still be referenced by the frame command buffer that is being
-        // recorded (a caster re-supply lands mid-frame, or during async pre-first-frame construction),
-        // so retire them only after that frame has submitted and drained. Mirrors the CSM hooks.
+        // The task captured a different target. Its buffers may still be referenced by this frame.
         retireGpuResources(engine, existing._task.dispose);
     }
 
-    const materialViews = new Map<Material, MaterialView>();
-    const casterMaterials: (Material | null)[] = [];
-    const casterMatGens: number[] = [];
     const camera = createShadowCamera(sg);
     const rt = createShadowRenderTarget(sg);
     const state: PcfTaskState = {
@@ -145,6 +156,9 @@ export function ensurePcfShadowTaskState(
                 rt,
                 clr: true,
                 cam: camera,
+                // The render list is the caster set only: an empty set must not mirror the scene into the map
+                // (the receivers sample this depth texture — see the CSM hooks).
+                autoMirror: false,
                 _skipClusteredLights: true,
             },
             engine,
@@ -155,23 +169,120 @@ export function ensurePcfShadowTaskState(
         _lastLightVersion: -1,
         _lastFoVersion: -1,
         _shadowUboData: new F32(24),
-        _casterMeshes: casterMeshes,
-        _casterMaterials: casterMaterials,
-        _casterMatGens: casterMatGens,
+        _casterMeshes: [],
+        _casterSnapshots: new Map(),
+        _materialSnapshots: new Map(),
         _scene: scene,
     };
 
+    reconcilePcfCasters(scene, sg, state, casterMeshes);
+    return state;
+}
+
+/** Reconcile only changed packets; the scheduler resolves the queue in one recording transaction. */
+function reconcilePcfCasters(scene: SceneContext, sg: ShadowGenerator, state: PcfTaskState, casterMeshes: readonly Mesh[]): void {
+    const casters = state._casterSnapshots;
+    const materials = state._materialSnapshots;
+    let drop: Set<Mesh> | undefined;
+    let queued: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
         const material = mesh.material;
         const terminal = material ? resolveShadowCasterMaterial(material) : null;
-        casterMaterials.push(terminal);
-        casterMatGens.push(terminal?._csmGen ?? 0);
-        if (material) {
-            addMeshToTask(state._task, mesh, { material: getNoColorView(material, materialViews) });
+        const previous = casters.get(mesh);
+        const snapshot = terminal ? materials.get(terminal) : undefined;
+        const materialChanged =
+            terminal && (!snapshot || snapshot._generation !== terminal._csmGen || (!!terminal._renderFeatures && snapshot._features !== terminal._renderFeatures));
+        const changed = materialChanged || !previous || previous._material !== material || previous._terminal !== terminal || previous._renderableGen !== mesh._renderableGen;
+        if (!material || (changed && holdShadowCaster(scene, sg, material))) {
+            if (previous) {
+                (drop ??= new Set()).add(mesh);
+            }
+            casters.set(mesh, null);
+            continue;
+        }
+        if (changed) {
+            if (materialChanged) {
+                // Every view is created after this scan: later casters of this terminal also see the invalidation.
+                materials.delete(terminal!);
+            }
+            if (previous) {
+                (drop ??= new Set()).add(mesh);
+            }
+            (queued ??= new Set()).add(mesh);
+            casters.delete(mesh);
         }
     }
+    if (!drop && !queued && state._casterMeshes === casterMeshes && casters.size === casterMeshes.length) {
+        return;
+    }
+    const next = new Set(casterMeshes);
+    for (const [mesh, snapshot] of casters) {
+        if (!next.has(mesh)) {
+            casters.delete(mesh);
+            if (snapshot) {
+                (drop ??= new Set()).add(mesh);
+            }
+        }
+    }
+    const task = state._task;
+    if (drop) {
+        _dropTaskMeshes(task, drop);
+    }
+    if (drop || queued) {
+        task._lastVersion = -1;
+        task._ob.length = 0;
+        state._lastCasterVersion = -1;
+    }
+    if (queued) {
+        state._recordedVersion = -1;
+        _enableTaskMeshPopulation(task);
+        for (const mesh of queued) {
+            const material = mesh.material;
+            const terminal = resolveShadowCasterMaterial(material);
+            let snapshot = materials.get(terminal);
+            if (!snapshot) {
+                snapshot = { _view: createNoColorView(terminal), _generation: terminal._csmGen, _features: terminal._renderFeatures };
+                materials.set(terminal, snapshot);
+            }
+            task._pendingMeshes!.push({ mesh, material: snapshot._view ?? material });
+            casters.set(mesh, { _material: material, _terminal: terminal, _renderableGen: mesh._renderableGen });
+        }
+    }
+    const used = new Set<Material>();
+    for (const snapshot of casters.values()) {
+        if (snapshot) {
+            used.add(snapshot._terminal);
+        }
+    }
+    for (const material of materials.keys()) {
+        if (!used.has(material)) {
+            materials.delete(material);
+        }
+    }
+    state._casterMeshes = casterMeshes;
+}
 
-    return state;
+/** @internal Whether the no-colour view of a caster material cannot be built yet, so the caster has to stay out of the
+ *  shadow task for now. When the view factory of the family the caster casts through is not imported, building the view
+ *  would call an undefined factory: this re-supplies the generator's registered caster set through
+ *  `setShadowTaskCasterMeshes`, which parks the generator while the factory imports, as any re-supplied set does. A caster
+ *  casting through its own material also waits while that material's group is not built in this scene, or recording the
+ *  view would throw inside the frame: the mesh's swap drain or runtime build builds it. A build that fails reports its own
+ *  error, and the hold lasts until the caster's material is reassigned or the caster leaves the set. A
+ *  `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's lifecycle builds it:
+ *  recording it throws as before, naming the problem. Shared by the PCF and CSM hooks. */
+export function holdShadowCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
+    const terminal = resolveShadowCasterMaterial(material);
+    if (!hasNoColorViewFactory(terminal)) {
+        // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
+        // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
+        const registered = _getShadowTaskCasterMeshes(sg);
+        if (registered && !sg._preloadPending) {
+            setShadowTaskCasterMeshes(sg, registered);
+        }
+        return true;
+    }
+    return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
 }
 
 /** @internal Resolve the terminal material used by the shadow caster view. */
@@ -183,17 +294,47 @@ export function resolveShadowCasterMaterial(material: Material): Material {
     return terminal;
 }
 
-/** @internal Record the terminal caster identity and generation for invalidation checks. */
-export function snapshotShadowCasterMaterial(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): void {
+/** @internal Record the terminal caster identity, generation and render features for invalidation checks. */
+export function snapshotShadowCasterMaterial(
+    material: Material,
+    terminals: Map<Material, Material>,
+    generations: Map<Material, number | undefined>,
+    features: Map<Material, unknown>
+): void {
     const terminal = resolveShadowCasterMaterial(material);
     terminals.set(material, terminal);
     generations.set(material, terminal._csmGen);
+    features.set(material, terminal._renderFeatures);
 }
 
-/** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. */
-export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): boolean {
+/** @internal Whether an override changed, was cleared, or its terminal material was rebuilt (`_csmGen`) or has
+ *  recomputed render features: a no-colour view copies the features it was built from, and some changes (material
+ *  plugins) only drop `_renderFeatures` and rebuild the material's meshes one by one. Dropped features that are not
+ *  recomputed yet do not count: a view built now would read none of them, so the current one stays until the rebuild
+ *  recomputes them. A material missing from the snapshot counts as changed too: the snapshot cannot vouch for a view
+ *  that was never built for it. */
+export function shadowCasterMaterialChanged(
+    material: Material,
+    terminals: Map<Material, Material>,
+    generations: Map<Material, number | undefined>,
+    features: Map<Material, unknown>
+): boolean {
     const terminal = resolveShadowCasterMaterial(material);
-    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen);
+    const current = terminal._renderFeatures;
+    return terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen || (!!current && features.get(material) !== current);
+}
+
+/** Whether `getNoColorView` can build the view of a terminal caster material now: the no-colour view factory of its family
+ *  has been imported. A family without a factory builds no view, so it needs none. */
+function hasNoColorViewFactory(terminal: Material): boolean {
+    const family = terminal._buildGroup._materialFamily;
+    return !!(family === "standard"
+        ? createStandardNoColorMaterialView
+        : family === "pbr"
+          ? createPbrNoColorMaterialView
+          : family === "node"
+            ? createNodeNoColorMaterialView
+            : family !== "shader" || createShaderNoColorMaterialView);
 }
 
 export function renderPcfShadowMap(
@@ -213,12 +354,13 @@ export function renderPcfShadowMap(
     const offX = foCam ? foCam.worldMatrix[12]! : 0;
     const offY = foCam ? foCam.worldMatrix[13]! : 0;
     const offZ = foCam ? foCam.worldMatrix[14]! : 0;
-    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && foVersion === state._lastFoVersion) {
+    const foChanged = foVersion !== state._lastFoVersion || foCam !== state._lastFoCamera;
+    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && !foChanged) {
         return 0;
     }
 
     const matrix = computeLightMatrix(casterMeshes, offX, offY, offZ);
-    const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion || foVersion !== state._lastFoVersion;
+    const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion || foChanged;
     if (matrixChanged) {
         packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
         sg._version++;
@@ -230,6 +372,7 @@ export function renderPcfShadowMap(
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastFoVersion = foVersion;
+    state._lastFoCamera = foCam;
     return state._task.execute?.() ?? 0;
 }
 
@@ -260,11 +403,12 @@ export function getNoColorView(material: Material, cache: Map<Material, Material
     // with a sampler-free / alpha-clip caster instead of this material's shadow-map-aliasing view. Cache under
     // THIS material so the lookup at the call site (keyed by the receive material) hits.
     const override = material._shadowCasterMaterial;
-    if (override) {
-        const overrideView = getNoColorView(override, cache);
-        cache.set(material, overrideView);
-        return overrideView;
-    }
+    const view = override ? getNoColorView(override, cache) : createNoColorView(material);
+    cache.set(material, view);
+    return view;
+}
+
+function createNoColorView(material: Material): MaterialView {
     const family = material._buildGroup._materialFamily;
     let view: MaterialView;
     if (family === "standard") {
@@ -278,6 +422,5 @@ export function getNoColorView(material: Material, cache: Map<Material, Material
         // shadow target on its own, so the view just hands it a private system UBO (shadow-camera VP).
         view = createShaderNoColorMaterialView(material as Parameters<typeof createShaderNoColorMaterialView>[0]);
     }
-    cache.set(material, view!);
     return view!;
 }

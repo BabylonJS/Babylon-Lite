@@ -13,12 +13,13 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import type { Renderable, DrawBinding, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import { pbrBindingDecorator } from "./pbr-binding-decorator.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
-import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache } from "./pbr-pipeline.js";
+import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache, _pbrBindingIdentity } from "./pbr-pipeline.js";
 import {
     _registerPbrExt,
     _getPbrExts,
@@ -34,7 +35,7 @@ import {
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
-import { createPbrComposer } from "./pbr-compose.js";
+import { createPbrComposer, _pbrLazyWgslNeeds, PBR_LAZY_COTANGENT_NORMAL, PBR_LAZY_SPEC_GLOSS, PBR_LAZY_TANGENT_NORMAL } from "./pbr-compose.js";
 import { StandardToneMapping, type ToneMapping } from "./tone-mapping.js";
 import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -44,13 +45,60 @@ import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import { _computeMeshFeatures, _meshTangentFeature, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+import type { SingleLightShaderSource } from "../../light/lighting-extension.js";
 
-type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
-interface SingleLightWgslModule {
-    SINGLE_LIGHT_STRUCTS: string;
-    getSingleLightBlock(): string;
+type SingleLightType = string;
+
+// PBR shader paths whose WGSL a group build loads only when one of its meshes needs it. The group's
+// synchronous rebuild closure cannot compose a path its build did not load, so `group._w` (consulted on
+// material swaps) routes a mesh needing a missing one to the asynchronous group rebuild instead.
+// The normal-map / spec-gloss caps come from `_pbrLazyWgslNeeds` — the very rule `composePbr` applies.
+const LAZY_CAP_GAMMA = 1;
+const ALL_LAZY_CAPS = LAZY_CAP_GAMMA | PBR_LAZY_TANGENT_NORMAL | PBR_LAZY_COTANGENT_NORMAL | PBR_LAZY_SPEC_GLOSS;
+interface LoadedLightPaths {
+    readonly _s: readonly SingleLightType[];
+    readonly _m: boolean;
+}
+type LazyCapsWidening = ((mesh: Mesh) => unknown) & { _c: number; _p: LoadedLightPaths };
+
+/** @internal Lazy caps a mesh's current material needs (exported for the composition-parity test). */
+export function _lazyPbrCaps(mesh: Mesh): number {
+    const mat = mesh.material as PbrMaterialProps | null;
+    if (!mat) {
+        return 0;
+    }
+    // The feature bits `rebuildSingle` hands to `composePbr`; read without populating the cache, since
+    // extensions this build registers later may still contribute `detect` bits.
+    const features = ((mat._renderFeatures as MaterialRenderFeatures | undefined) ?? _computePbrMaterialFeatures(mat)).features;
+    return (mat._gammaAlbedo ? LAZY_CAP_GAMMA : 0) | _pbrLazyWgslNeeds(features, _meshTangentFeature(mesh));
+}
+
+function _neededLightPath(scene: SceneContext, mesh: Mesh, hasShadows: boolean): SingleLightType | true | null {
+    const mat = mesh.material as PbrMaterialProps | null;
+    if (!mat) {
+        return null;
+    }
+    const features2 = (((mat._renderFeatures as MaterialRenderFeatures | undefined) ?? _computePbrMaterialFeatures(mat)).features2 ?? 0) as number;
+    const lr = writeMeshLightSelection(mesh, scene.lights);
+    const lightCount = lr > 0 ? 1 : -lr;
+    if (!lightCount) {
+        return null;
+    }
+    const shadowOutput = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
+    const receiveShadows = !shadowOutput && mesh.receiveShadows && hasShadows;
+    // `true` stands for the multi-light loop; a type string for that single-light block.
+    return lightCount === 1 && !receiveShadows ? getPackedSingleLightType(scene.lights, lr - 1) : true;
+}
+
+/** Widening predicate for a closure built with `caps` and `paths` loaded (null when nothing can be missing). */
+function lazyCapsWidening(scene: SceneContext, caps: number, paths: LoadedLightPaths, hasShadows: boolean): LazyCapsWidening | null {
+    const missesLightPath = (mesh: Mesh): boolean => {
+        const needed = _neededLightPath(scene, mesh, hasShadows);
+        return needed === null ? false : needed === true ? !paths._m : !paths._s.includes(needed);
+    };
+    return Object.assign((mesh: Mesh) => (caps === ALL_LAZY_CAPS ? 0 : _lazyPbrCaps(mesh) & ~caps) || missesLightPath(mesh), { _c: caps, _p: paths });
 }
 
 type SyncThinInstanceBuffers = (
@@ -81,23 +129,25 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let needsSingleLightPath = false;
     let needsMultiLightPath = false;
     const singleLightTypes: SingleLightType[] = [];
-    for (const mesh of meshes) {
-        const lr = writeMeshLightSelection(mesh, scene.lights);
-        const affectedCount = lr > 0 ? 1 : -lr;
-        hasAnyAffectedLight ||= affectedCount > 0;
-        if (affectedCount === 1) {
-            needsSingleLightPath = true;
-            const type = getPackedSingleLightType(scene.lights, lr - 1);
-            if (!singleLightTypes.includes(type)) {
-                singleLightTypes.push(type);
+
+    const scanLightPaths = (): void => {
+        for (const mesh of meshes) {
+            const lr = writeMeshLightSelection(mesh, scene.lights);
+            const affectedCount = lr > 0 ? 1 : -lr;
+            hasAnyAffectedLight ||= affectedCount > 0;
+            if (affectedCount === 1) {
+                needsSingleLightPath = true;
+                const type = getPackedSingleLightType(scene.lights, lr - 1);
+                if (!singleLightTypes.includes(type)) {
+                    singleLightTypes.push(type);
+                }
+                needsMultiLightPath ||= mesh.receiveShadows && hasSomeShadows;
+            } else if (affectedCount > 0) {
+                needsMultiLightPath = true;
             }
-            // A mono-light shadow receiver uses the multi-light path in the main pass,
-            // but its no-color caster override disables receiving and falls back to single-light.
-            needsMultiLightPath ||= mesh.receiveShadows && hasSomeShadows;
-        } else if (affectedCount > 0) {
-            needsMultiLightPath = true;
         }
-    }
+    };
+    scanLightPaths();
 
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
@@ -112,7 +162,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
-    let hasGammaAlbedo = false;
+    let lazyCaps = 0;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
@@ -128,12 +178,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
-        hasGammaAlbedo ||= !!mat._gammaAlbedo;
+        lazyCaps |= _lazyPbrCaps(m);
     }
     const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
-    if (!hasGammaAlbedo || !group.r) {
-        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?._gammaAlbedo;
-    }
+    // While a previous build's closure is still live (`group.r`), a swap must also route around what IT
+    // lacks; the committed result's own predicate replaces this one (scene-rebuild).
+    const livePredicate = group.r ? (group._w as LazyCapsWidening | null | undefined) : undefined;
+    const liveCaps = lazyCaps & (group.r ? (livePredicate?._c ?? ALL_LAZY_CAPS) : ALL_LAZY_CAPS);
+    // Without a live closure nothing reaches a synchronous rebuild (the swap routes a group with no `r`
+    // to the runtime build), so only the live closure's own light WGSL can be the limit here.
+    group._w = lazyCapsWidening(scene, liveCaps, livePredicate?._p ?? { _s: singleLightTypes, _m: needsMultiLightPath }, hasSomeShadows);
 
     // ── Dynamically import fragment creators based on scene capabilities ──
 
@@ -159,24 +213,44 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const singleLightBlocks: Partial<Record<SingleLightType, () => string>> = {};
     let _multiLightWGSL = "";
     let _multiLightLoop = "";
-    if (needsSingleLightPath) {
-        for (const type of singleLightTypes) {
-            const single = await importSingleLightWgsl(type);
-            _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
-            singleLightBlocks[type] = single.getSingleLightBlock;
+    let multiLightLoaded = false;
+
+    const loadLightPaths = async (): Promise<void> => {
+        if (needsSingleLightPath) {
+            for (const type of singleLightTypes) {
+                if (singleLightBlocks[type]) {
+                    continue;
+                }
+                const single = scene._lighting?._single?.(type) ?? (await importSingleLightWgsl(type));
+                _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
+                singleLightBlocks[type] = single.getSingleLightBlock;
+            }
+            _getSingleLightBlock = (type) => singleLightBlocks[type]?.() ?? "";
         }
-        _getSingleLightBlock = (type) => singleLightBlocks[toSingleLightType(type)]?.() ?? "";
-    }
-    if (needsMultiLightPath) {
-        const wgslMod = await import("./fragments/multilight-wgsl.js");
-        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
-        _multiLightLoop = wgslMod.getMultiLightLoop();
-    }
-    if (hasAnyAffectedLight && hasSomeShadows) {
-        const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
-        _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
-        shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
-    }
+        if (needsMultiLightPath && !multiLightLoaded) {
+            multiLightLoaded = true;
+            const contribution = scene._lighting?._multi?.();
+            if (contribution) {
+                _multiLightWGSL = contribution._helpers;
+                _multiLightLoop = contribution._loop;
+            } else {
+                const wgslMod = await import("./fragments/multilight-wgsl.js");
+                _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+                _multiLightLoop = wgslMod.getMultiLightLoop();
+            }
+        }
+        if (hasAnyAffectedLight && hasSomeShadows && !_createPbrShadowFragment) {
+            const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
+            _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
+            shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
+        }
+    };
+    /** Whether a light path the current selection needs has not been loaded yet. */
+    const lightPathsMissing = (): boolean =>
+        (needsSingleLightPath && singleLightTypes.some((type) => !singleLightBlocks[type])) ||
+        (needsMultiLightPath && !multiLightLoaded) ||
+        (hasAnyAffectedLight && hasSomeShadows && !_createPbrShadowFragment);
+    await loadLightPaths();
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
     // Each optional PBR fragment module exports a uniform `pbrExt`, so registration
@@ -225,7 +299,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // from the per-frame update() below (which always runs). It is version-gated, so static instances
     // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
     // bundle's setVertexBuffer reference valid.
-    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null = null;
+    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -254,6 +328,20 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock = fogMod.PBR_FOG_BLOCK;
     }
 
+    // Recomputed now that this build's extensions are registered, so any `detect` bit they add is seen.
+    let loadCaps = 0;
+    for (const m of meshes) {
+        loadCaps |= _lazyPbrCaps(m);
+    }
+    // Normal-map and spec-gloss WGSL
+    const _tangentNormal = loadCaps & PBR_LAZY_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined;
+    const _cotangentNormal = loadCaps & PBR_LAZY_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined;
+    const _specGloss = loadCaps & PBR_LAZY_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined;
+    scanLightPaths();
+    while (lightPathsMissing()) {
+        await loadLightPaths();
+        scanLightPaths();
+    }
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -264,6 +352,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock,
         _createPbrTemplateExt,
         _flatNormalWgsl,
+        _tangentNormal,
+        _cotangentNormal,
+        _specGloss,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,
@@ -272,6 +363,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (toneMapping ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
     const syncThinInstanceForDraw = _syncThinInstanceForDraw;
+    // The per-scene PBR context the geometry-renderer path reuses (published on the scene below). Created
+    // before the renderables so each one can be stamped with the context it was composed against.
+    const geometryContext: _PbrGeometryContext = {
+        _composePbr: composePbr,
+        _sceneFeatures: sceneFeatures,
+        _envTextures: envTextures ?? null,
+        _shadowLights: shadowLights,
+        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+        _syncThinInstanceForDraw,
+    };
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
@@ -282,11 +383,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const isOverride = materialOverride != null;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
+        const sceneFeatures = geometryContext._sceneFeatures | (s._lighting?._pbrFeatures?.(mesh) ?? 0);
         const lightCount = lr > 0 ? 1 : -lr;
-        const features = renderFeatures.features;
         const features2 = renderFeatures.features2 ?? 0;
         const shadowOutput = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
+        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+        const features = renderFeatures.features | (!(features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) ? (meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND : 0);
         const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
         const singleLightType = lightMode === 1 ? getPackedSingleLightType(s.lights, lr - 1) : "";
         // The lazy glTF primitive feature's bits (topology index, uint32-strip flag, load-time mirror
@@ -295,7 +398,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // there cost every Standard-only scene ~11 bytes for a value that is always zero in it.
         // `_computeMeshFeatures` is evaluated first, so `enableMirroredMeshes` has already reconciled
         // the mirror bit against the live world matrix by the time it is read.
-        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
         const esmShadowDepthCode = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0 ? (mat as PbrMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
 
         // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
@@ -342,7 +444,24 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
-        const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
+        if (pbrBindingDecorator) {
+            pbrBindingDecorator._prepare(mat._preparedPlugins, s);
+        }
+        const materialBindGroupStatic = needsTaskRefraction
+            ? null
+            : createPbrMeshBindGroup(
+                  engine,
+                  bindings,
+                  composed,
+                  meshUBO,
+                  materialUBO,
+                  mat,
+                  envTextures ?? null,
+                  mesh,
+                  undefined,
+                  _pbrBindingIdentity?.(s._lighting?._bindingId),
+                  disposers
+              );
 
         const shadowBindGroup = receiveShadows && bindings._shadowBGL ? shadowBindings!(bindings._shadowBGL) : null;
 
@@ -400,7 +519,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             // _syncThinInstanceForDraw declaration above). This is what makes per-frame animated
             // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
             if (hasTI) {
-                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu.indexCount);
+                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -459,11 +578,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             if (cullBinding) {
-                cullBinding.draw(pass, gpu.indexCount, ti!.count);
+                cullBinding.draw(pass, gpu, ti!.count);
             } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount, ti?.count);
+                pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, gpu._firstIndex ?? 0, gpu._baseVertex);
             }
             return 1;
         };
@@ -473,20 +592,64 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             isTransparent,
             _transmissive: needsTaskRefraction,
             mesh,
+            _gen: [geometryContext, meshFeatures, lightMode, singleLightType, renderFeatures],
             bind(eng, sig) {
+                if (pbrBindingDecorator) {
+                    pbrBindingDecorator._prepare(mat._preparedPlugins, s);
+                }
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
-                    ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
+                    ? createPbrMeshBindGroup(
+                          engine,
+                          bindings,
+                          composed,
+                          meshUBO,
+                          materialUBO,
+                          mat,
+                          envTextures ?? null,
+                          mesh,
+                          sig._transmissionTexture,
+                          _pbrBindingIdentity?.(s._lighting?._bindingId),
+                          disposers
+                      )
                     : materialBindGroupStatic!;
                 // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
                 const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update, sig);
-                return {
+                const binding: DrawBinding = {
                     renderable: r,
                     pipeline,
                     ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
                     draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
+                if (!pbrBindingDecorator) {
+                    return binding;
+                }
+                return pbrBindingDecorator(
+                    binding,
+                    engine,
+                    mat._preparedPlugins,
+                    composed._fragmentKey,
+                    features,
+                    features2,
+                    () =>
+                        createPbrMeshBindGroup(
+                            engine,
+                            bindings,
+                            composed,
+                            meshUBO,
+                            materialUBO,
+                            mat,
+                            envTextures ?? null,
+                            mesh,
+                            sig._transmissionTexture,
+                            _pbrBindingIdentity?.(s._lighting?._bindingId),
+                            disposers
+                        ),
+                    (pass, group) => drawWith(pass, group, cb),
+                    disposers,
+                    s
+                );
             },
         };
         if (sortCenter) {
@@ -497,24 +660,18 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     };
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
+    geometryContext._b = new Set(composePbr._c.keys());
 
     // Stash the per-scene PBR context on the scene so the PBR geometry-renderer
     // path can reuse the same composer / env / shadow setup without re-running
     // the scene-wide scan above. Stored on the scene (not on pbrGroupBuilder)
     // to avoid a static cycle: pbrGroupBuilder lives in pbr-material.ts which
     // already dynamic-imports this module.
-    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = {
-        _composePbr: composePbr,
-        _sceneFeatures: sceneFeatures,
-        _envTextures: envTextures ?? null,
-        _shadowLights: shadowLights,
-        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
-        _syncThinInstanceForDraw,
-    };
+    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = geometryContext;
 
     scene._disposables.push(clearPbrPipelineCache);
 
-    return { renderables, rebuildSingle, _G: hasGammaAlbedo };
+    return { renderables, rebuildSingle, _w: lazyCapsWidening(scene, loadCaps, { _s: singleLightTypes.slice(), _m: needsMultiLightPath }, hasSomeShadows) };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`
@@ -535,11 +692,11 @@ export interface _PbrGeometryContext {
     /** @internal */
     readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
-    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null;
-}
-
-function toSingleLightType(type: string): SingleLightType {
-    return type === "hemispheric" || type === "directional" || type === "spot" ? type : "point";
+    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null;
+    /** @internal The variant keys (`_pbrComposeKey`) this context's group build composed, each with everything it needs
+     *  loaded. A variant composed later through the build's closure (a runtime material assignment) may lack something
+     *  the build never loaded, so it is not listed. */
+    _b?: ReadonlySet<string>;
 }
 
 function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): SingleLightType {
@@ -549,14 +706,14 @@ function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: n
             continue;
         }
         if (packed === packedIndex) {
-            return toSingleLightType(light.lightType);
+            return light.lightType;
         }
         packed++;
     }
     return "point";
 }
 
-async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLightWgslModule> {
+async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLightShaderSource> {
     if (type === "hemispheric") {
         return import("./fragments/singlelight-hemispheric-wgsl.js");
     }

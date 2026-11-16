@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import { createSceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { RenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target";
+import { clearStorageBuffer, readStorageBufferAfterFrame } from "../../../../packages/babylon-lite/src/resource/storage-buffer-operations";
+import { createStorageBuffer } from "../../../../packages/babylon-lite/src/resource/storage-buffer";
 import { enterXr, exitXr } from "../../../../packages/babylon-lite/src/xr/xr-session";
 
 const gpuGlobals = globalThis as Record<string, unknown>;
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 };
+gpuGlobals.GPUBufferUsage ??= { MAP_READ: 0x1, COPY_SRC: 0x4, COPY_DST: 0x8, UNIFORM: 0x40, STORAGE: 0x80 };
 gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 };
 gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 };
 
@@ -44,11 +46,20 @@ function makeMockEngine(): EngineContext {
                 } as unknown as GPURenderPassEncoder;
             },
             copyTextureToTexture: () => undefined,
+            copyBufferToBuffer: () => undefined,
+            clearBuffer: () => undefined,
             finish: () => ({}) as GPUCommandBuffer,
         }) as unknown as GPUCommandEncoder;
     const device = {
+        limits: { maxBufferSize: 1024 },
         createBindGroupLayout: (d: GPUBindGroupLayoutDescriptor) => d as unknown as GPUBindGroupLayout,
-        createBuffer: (d: GPUBufferDescriptor) => ({ descriptor: d, destroy: () => undefined }) as unknown as GPUBuffer,
+        createBuffer: (d: GPUBufferDescriptor) =>
+            ({
+                descriptor: d,
+                destroy: () => undefined,
+                getMappedRange: () => new ArrayBuffer(Number(d.size)),
+                unmap: () => undefined,
+            }) as unknown as GPUBuffer,
         createBindGroup: (d: GPUBindGroupDescriptor) => d as unknown as GPUBindGroup,
         createSampler: (d: GPUSamplerDescriptor) => d as unknown as GPUSampler,
         createShaderModule: (d: GPUShaderModuleDescriptor) => d as unknown as GPUShaderModule,
@@ -573,6 +584,46 @@ describe("xr-session lifecycle", () => {
 
         expect(engine._retirements).toBeNull();
         await vi.waitFor(() => expect(retired).toHaveBeenCalledOnce());
+        await exitXr(ctx);
+    });
+
+    it("applies frame-bound storage shadow mutations after XR submission", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4]));
+        const scene = createSceneContext(engine);
+        const ctx = await enterXr(scene, { input: false });
+        ctx.scene._update = () => clearStorageBuffer(engine, storage);
+
+        currentSession.drive(16, makeFrame(makeViewerPose()));
+
+        expect(storage._data).toEqual(new Uint8Array(4));
+        await exitXr(ctx);
+    });
+
+    it("cancels frame-bound storage readback when XR recording fails", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4]), { writable: true });
+        const destroy = vi.fn();
+        engine._device.createBuffer = vi.fn(
+            () =>
+                ({
+                    destroy,
+                }) as unknown as GPUBuffer
+        );
+        const scene = createSceneContext(engine);
+        const ctx = await enterXr(scene, { input: false });
+        let readback!: Promise<ArrayBuffer>;
+        ctx.scene._update = () => {
+            readback = readStorageBufferAfterFrame(storage);
+            throw new Error("XR recording failed");
+        };
+
+        expect(() => currentSession.drive(16, makeFrame(makeViewerPose()))).toThrow("XR recording failed");
+        await expect(readback).rejects.toThrow("Storage-buffer readback was abandoned before its frame could be submitted.");
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(submitCount).toBe(0);
         await exitXr(ctx);
     });
 

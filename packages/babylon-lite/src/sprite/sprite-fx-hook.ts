@@ -19,12 +19,34 @@ import type { Sprite2DLayer, Sprite2DLayerOptions } from "./sprite-2d.js";
 import type { BillboardSpriteSystem, BillboardSpriteSystemOptions } from "./billboard-sprite.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 
+/** @internal Opaque instance-layout extension owned by an opt-in sprite module. */
+export interface SpriteVertexExtension {
+    /** @internal Identity of the module that owns this extension. */
+    readonly _owner: object;
+    /** @internal */
+    readonly _key: string;
+    /** @internal Shader identity independent of the instance-buffer attribute offset. */
+    readonly _shaderKey: string;
+    /** @internal */
+    readonly _attribute: GPUVertexAttribute;
+    /** @internal */
+    readonly _input: string;
+    /** @internal */
+    readonly _output: string;
+    /** @internal */
+    readonly _assignment: string;
+    /** @internal */
+    readonly _initInstance: (data: Float32Array, base: number) => void;
+}
+
 /** @internal Generic 2D-sprite custom-shader hook. The impl reads `layer.customShader` / `layer.shaderParams`. */
 export interface SpriteFxHook {
     /** Copy `opts.customShader` (+ a zeroed `shaderParams`) onto a freshly built layer, if present. */
     initLayer(layer: Sprite2DLayer, opts: Sprite2DLayerOptions): void;
     /** Extra pipeline-cache key part for `layer` (`""` when it has no custom shader). */
     pipelineKeyPart(layer: Sprite2DLayer): string;
+    /** Optional precomputed instance attribute, or `null` for the ordinary layout. */
+    vertexAttribute(layer: Sprite2DLayer): GPUVertexAttribute | null;
     /** Custom shader module for `layer`, or `null` to fall back to the default sprite shader. */
     shaderModule(engine: EngineContext, hasDepth: boolean, layer: Sprite2DLayer): GPUShaderModule | null;
     /** Extra bind-group-layout entries for `layer`, or `null` when it has no custom shader. */

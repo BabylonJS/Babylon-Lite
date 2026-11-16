@@ -1,6 +1,7 @@
 /**
- * Shared WGSL raymarch library for the screen-space contact-shadow and global-illumination
- * producers (see `docs/lite/architecture/52-screen-space-effects.md`).
+ * Shared WGSL depth-reconstruction library for the screen-space ambient-occlusion,
+ * contact-shadow, and global-illumination producers (see
+ * `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * `screenSpaceRaymarchWGSL()` is a pure string factory: it allocates nothing at module
  * scope and has no side effects, so importing this module costs nothing unless a caller
@@ -22,8 +23,11 @@
 /** Build the shared raymarch WGSL function library. Splice the returned source once per
  *  shader module (producer or temporal resolve) before any code that calls into it. */
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 export function screenSpaceRaymarchWGSL(): string {
+    // `ssNormalFromDepth`: a right-handed world mirrors the screen axes' cross product, so its operands
+    // swap to keep the normal facing the viewer.
     return wgsl`struct SsHit{hit:bool,uv:vec2f,rayDist:f32,surfaceDist:f32}
 
 fn ssIsClearDepth(depth:f32)->bool{return depth<=0.0;}
@@ -86,9 +90,9 @@ fn ssNormalFromDepth(uv:vec2f,dims:vec2f,invViewProj:mat4x4f,depthTex:texture_de
   else if(coord.y>=dim.y-1){pV=pC-ssWorldFromDepth(ssTexelUv(cU,dims),dU,invViewProj);}
   else if(abs(dU-dC)<abs(dD-dC)){pV=pC-ssWorldFromDepth(ssTexelUv(cU,dims),dU,invViewProj);}
   else{pV=ssWorldFromDepth(ssTexelUv(cD,dims),dD,invViewProj)-pC;}
-  let n=cross(pH,pV);
+  let n=cross(${_rightHanded ? "pV,pH" : "pH,pV"});
   let n2=dot(n,n);
-  if(n2<=1e-12){return vec3f(0.0,1.0,0.0);}
+  if(n2<=1e-12*dot(pH,pH)*dot(pV,pV)){return vec3f(0.0,1.0,0.0);}
   return n*inverseSqrt(n2);
 }
 

@@ -28,6 +28,7 @@ import type { SceneContext } from "../../scene/scene-core.js";
 import type { AnimationGroup } from "../../animation/animation-group.js";
 import { NODE_TRS_PROPS } from "./object-model-mapping.js";
 import { resolveAnimationPointer, type PointerContext, type PointerMaterial } from "../../loader-gltf/animation-pointer.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Loader-supplied resolution context: the glTF node map plus the runtime
  *  material map (glTF material index → PBR material) and raw JSON for reuse of
@@ -183,12 +184,16 @@ function resolveActiveCamera(pointer: string, ctx: PointerResolveContext): FgAcc
     };
     const numeric = (get: () => number): FgAccessor => ({ type: FgType.Number, get });
     switch (tail) {
+        // glTF is right-handed: a left-handed engine converts the camera pose (Babylon.js negates x and w), a
+        // right-handed one returns it as is.
         case "position":
             return {
                 type: FgType.Vector3,
                 get: () => {
                     const value = camera();
-                    return value ? { x: -value.worldMatrix[12]!, y: value.worldMatrix[13]!, z: value.worldMatrix[14]! } : { x: NaN, y: NaN, z: NaN };
+                    return value
+                        ? { x: _rightHanded ? value.worldMatrix[12]! : -value.worldMatrix[12]!, y: value.worldMatrix[13]!, z: value.worldMatrix[14]! }
+                        : { x: NaN, y: NaN, z: NaN };
                 },
             };
         case "rotation":
@@ -200,7 +205,7 @@ function resolveActiveCamera(pointer: string, ctx: PointerResolveContext): FgAcc
                         return { x: NaN, y: NaN, z: NaN, w: NaN };
                     }
                     const q = quatFromMatrix(value.worldMatrix);
-                    return { x: -q.x, y: q.y, z: q.z, w: -q.w };
+                    return { x: _rightHanded ? q.x : -q.x, y: q.y, z: q.z, w: _rightHanded ? q.w : -q.w };
                 },
             };
         case "perspective/aspectRatio":

@@ -38,6 +38,8 @@ export interface Material {
      *  mirror. The shadow pass takes the override's own no-colour view (so an alpha-clip caster can still set
      *  depthOnlyFragment). Honoured by the CSM + PCF caster passes (the ESM exponential path has its own shadow views). */
     _shadowCasterMaterial?: Material;
+    /** @internal Explicit vertex encodings declared by a material, also used to validate default picking. */
+    _attributeFormats?: Readonly<Partial<Record<string, GPUVertexFormat>>>;
 }
 
 /** Exact material render-feature override used by MaterialView.

@@ -1,7 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { flushGpuResourceRetirements, retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
-import type { RenderTargetDescriptor } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import type { RenderTargetDescriptor, RenderTargetSurfaceSize } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
 import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
@@ -15,14 +15,28 @@ export function createSurfaceRenderTargetTexture(
     engine: EngineContext,
     descriptor: RenderTargetDescriptor & { size: SurfaceContext },
     sampleDepth?: RenderTargetDepthSampler
+): RenderTargetTextureResult;
+export function createSurfaceRenderTargetTexture(
+    engine: EngineContext,
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
+    sampleDepth?: RenderTargetDepthSampler
+): RenderTargetTextureResult;
+export function createSurfaceRenderTargetTexture(
+    engine: EngineContext,
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
+    sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult {
+    const size = descriptor.size;
+    if (!("canvas" in size || "surface" in size)) {
+        throw new Error("createSurfaceRenderTargetTexture: descriptor.size must be a SurfaceContext or { surface, scale }.");
+    }
     const result = _createRenderTargetTexture(engine, descriptor, sampleDepth);
     try {
         _shareTextureBacking(result.texture);
         if (result.depthTexture && result.depthTexture !== result.texture) {
             _shareTextureBacking(result.depthTexture);
         }
-        installSurfaceResizeSync(engine, descriptor.size, result);
+        installSurfaceResizeSync(engine, result);
         return result;
     } catch (error) {
         runGpuResourceCallbacks([() => disposeRenderTargetTexture(result)]);
@@ -30,7 +44,7 @@ export function createSurfaceRenderTargetTexture(
     }
 }
 
-function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext, result: RenderTargetTextureResult): void {
+function installSurfaceResizeSync(engine: EngineContext, result: RenderTargetTextureResult): void {
     const { rt, texture, depthTexture } = result;
     const depthFacade = depthTexture;
     const callbacks = (result._resizeCallbacks ??= new Set());
@@ -107,8 +121,8 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
         if (rt._disposed) {
             throw new Error("RenderTargetTexture has been disposed.");
         }
-        const canvas = surface.canvas;
-        if (allocationDevice === currentEngine._device && rt._width === canvas.width && rt._height === canvas.height) {
+        const size = _resolveRenderTargetSize(rt._descriptor);
+        if (allocationDevice === currentEngine._device && rt._width === size.width && rt._height === size.height) {
             notifyResize(currentEngine);
             return;
         }

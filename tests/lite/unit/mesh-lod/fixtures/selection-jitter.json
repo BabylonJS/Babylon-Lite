@@ -1,0 +1,36 @@
+{
+    "description": "Jitter/hysteresis equivalence fixture. Same two-level DAG as selection-lod (terminal pinned coarse group 0 -> fine group 1), driven by a sequence of small camera dollies straddling the hysteresis band [1.7, 2.3] px around the T=2.0 threshold. The equivalence spec threads prior fineRequired state through the sequence for BOTH the CPU oracle and the GPU model and asserts they agree at every step (the oracle is ground truth; no cut is hardcoded), proving hysteresis transitions match and small camera motion never oscillates the cut.",
+    "hierarchy": {
+        "levelCount": 2,
+        "groupPageRefs": [0, 1],
+        "pageStoredBytes": [65536, 65536],
+        "groups": [
+            { "center": [0, 0, 0], "radius": 1, "simplifiedError": 0, "depth": 0, "firstCluster": 0, "clusterCount": 2, "firstPageRef": 0, "pageRefCount": 1, "terminal": true },
+            { "center": [0, 0, 0], "radius": 1, "simplifiedError": 5, "depth": 1, "firstCluster": 2, "clusterCount": 2, "firstPageRef": 1, "pageRefCount": 1, "terminal": false }
+        ],
+        "clusters": [
+            { "center": [0, 0, 0], "radius": 1, "error": 5, "groupId": 0, "refinedGroupId": 1, "pageId": 0, "triangleCount": 10 },
+            { "center": [0, 0, 0], "radius": 1, "error": 5, "groupId": 0, "refinedGroupId": 1, "pageId": 0, "triangleCount": 10 },
+            { "center": [0, 0, 0], "radius": 1, "error": 0, "groupId": 1, "refinedGroupId": -1, "pageId": 1, "triangleCount": 20 },
+            { "center": [0, 0, 0], "radius": 1, "error": 0, "groupId": 1, "refinedGroupId": -1, "pageId": 1, "triangleCount": 20 }
+        ],
+        "nodes": [
+            { "center": [0, 0, 0], "radius": 2, "error": 5, "groupId": 0, "childOffset": 0, "childCount": 0 },
+            { "center": [0, 0, 0], "radius": 2, "error": 5, "groupId": 1, "childOffset": 0, "childCount": 0 }
+        ]
+    },
+    "screenSpaceError": 2.0,
+    "lodHysteresis": 0.15,
+    "residentPages": [0, 1],
+    "jitter": [
+        { "name": "settle-fine (close, refines)", "position": [0, 0, 5] },
+        { "name": "dolly out into band", "position": [0, 0, 2288] },
+        { "name": "jitter further out, stays fine", "position": [0, 0, 2360] },
+        { "name": "jitter back in", "position": [0, 0, 2210] },
+        { "name": "jitter within band", "position": [0, 0, 2300] },
+        { "name": "dolly far, coarsens", "position": [0, 0, 6000] },
+        { "name": "jitter far into band, stays coarse", "position": [0, 0, 2288] },
+        { "name": "jitter within band, stays coarse", "position": [0, 0, 2260] },
+        { "name": "dolly back close, refines again", "position": [0, 0, 5] }
+    ]
+}

@@ -62,6 +62,18 @@ export abstract class Camera extends Node {
         return "Camera";
     }
 
+    /**
+     * Babylon.js `Camera.resetViewHistory()` invalidates temporal history owned by
+     * every render pass using this camera. Lite's TAA/history state is owned by
+     * independently-created frame-graph tasks, with no camera-to-task registry.
+     */
+    public resetViewHistory(): never {
+        return unsupported(
+            "Camera.resetViewHistory",
+            "Babylon Lite's temporal history is owned by independent frame-graph tasks and exposes no camera-to-task registry through which a camera can invalidate every pass."
+        );
+    }
+
     public get fov(): number {
         return this._lite.fov;
     }
@@ -174,6 +186,21 @@ export abstract class Camera extends Node {
         return Matrix.FromArray(liteGetViewMatrix(this._lite));
     }
 
+    /** Babylon.js `camera.getDirection(localAxis)`: `localAxis` in world space, without translation. */
+    public getDirection(localAxis: Vector3): Vector3 {
+        const result = Vector3.Zero();
+        this.getDirectionToRef(localAxis, result);
+        return result;
+    }
+
+    /** Babylon.js `camera.getDirectionToRef(localAxis, result)`: `localAxis` turned by the camera's world matrix, which Lite
+     *  keeps current. `result` may be `localAxis`. */
+    public getDirectionToRef(localAxis: Vector3, result: Vector3): void {
+        const w = this._lite.worldMatrix;
+        const { x, y, z } = localAxis;
+        result.set(x * w[0]! + y * w[4]! + z * w[8]!, x * w[1]! + y * w[5]! + z * w[9]!, x * w[2]! + y * w[6]! + z * w[10]!);
+    }
+
     /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
     public getProjectionMatrix(): Matrix {
         return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()));
@@ -252,12 +279,17 @@ export class ArcRotateCamera extends Camera {
         this._lite.radius = value;
     }
 
+    /** Live, as in Babylon.js: `camera.target.x = …` and in-place vector math move the target. */
     public get target(): Vector3 {
-        const t = this._lite.target;
-        return new Vector3(t.x, t.y, t.z);
+        return liteBackedVector3(this._lite.target);
     }
     public set target(value: Vector3) {
-        this._lite.target = { x: value.x, y: value.y, z: value.z };
+        // Write into Lite's observable target. Replacing the object would drop its change notification, so neither
+        // this assignment nor Lite's later pans would move the view until alpha, beta or radius changed.
+        const target = this._lite.target;
+        target.x = value.x;
+        target.y = value.y;
+        target.z = value.z;
     }
 
     /** Babylon.js `setTarget` — point the arc-rotate camera at a world-space target. */

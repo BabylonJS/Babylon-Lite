@@ -11,35 +11,20 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
-import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
+import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "./pbr-brdf-wgsl.js";
 
 type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
+/** Tangent-space normal-map WGSL (fragments/pbr-normal-tangent-wgsl.ts). */
+export type PbrTangentNormalWgsl = typeof import("./fragments/pbr-normal-tangent-wgsl.js");
+/** Cotangent-frame normal-map WGSL (fragments/pbr-normal-cotangent-wgsl.ts). */
+export type PbrCotangentNormalWgsl = typeof import("./fragments/pbr-normal-cotangent-wgsl.js");
+/** Specular-glossiness WGSL (fragments/pbr-spec-gloss-wgsl.ts). */
+export type PbrSpecGlossWgsl = typeof import("./fragments/pbr-spec-gloss-wgsl.js");
 
 const STAGE_FRAGMENT = 0x2;
-
-// ── BRDF functions (always present in PBR) ──────────────────────
-
-const BRDF_FUNCTIONS = wgsl`
-const PI:f32=3.14159265358979323846;
-fn distributionGGX(NdotH:f32,alphaG:f32)->f32{
-let a2=alphaG*alphaG;
-let d=NdotH*NdotH*(a2-1.0)+1.0;
-return a2/(PI*d*d);
-}
-fn geometrySmithGGX(NdotL:f32,NdotV:f32,alphaG:f32)->f32{
-let a2=alphaG*alphaG;
-let gl=NdotL*sqrt(NdotV*(NdotV-a2*NdotV)+a2);
-let gv=NdotV*sqrt(NdotL*(NdotL-a2*NdotL)+a2);
-return 0.5/(gl+gv);
-}
-fn fresnelSchlick(cosTheta:f32,F0:vec3<f32>,F90:vec3<f32>)->vec3<f32>{
-let t=1.0-cosTheta;
-let t2=t*t;
-return F0+(F90-F0)*(t2*t2*t);
-}
-`;
 
 export interface PbrTemplateConfig {
     /** When true, generates a non-looping single-light direct block + lights UBO binding. */
@@ -62,9 +47,12 @@ export interface PbrTemplateConfig {
     /** Pre-built WGSL for the multi-light direct lighting loop body. */
     /** @internal */
     readonly _multiLightLoop?: string;
-    /** Normal map mode (default: "none") */
-    /** @internal */
-    readonly _normalMode?: "tangent" | "cotangent" | "none";
+    /** @internal Tangent-space normal-map WGSL. Supplying it selects the tangent normal-map path;
+     *  pbr-renderable loads it lazily, only when a normal-mapped mesh has vertex tangents. */
+    readonly _tangentNormal?: PbrTangentNormalWgsl;
+    /** @internal Cotangent-frame normal-map WGSL. Supplying it (without `_tangentNormal`) selects the
+     *  cotangent path; pbr-renderable loads it lazily, only when a normal-mapped mesh lacks tangents. */
+    readonly _cotangentNormal?: PbrCotangentNormalWgsl;
     /** @internal Mesh has no NORMAL attribute → flat-shade via screen-space derivatives (glTF spec). */
     readonly _flatGeometricNormal?: boolean;
     /** @internal Flat-normal WGSL (from flat-normal-wgsl.ts), lazily supplied only when a no-NORMAL mesh exists. */
@@ -72,9 +60,9 @@ export interface PbrTemplateConfig {
     /** Has emissive texture */
     /** @internal */
     readonly _hasEmissiveTexture?: boolean;
-    /** Has specular-glossiness workflow */
-    /** @internal */
-    readonly _hasSpecGloss?: boolean;
+    /** @internal Specular-glossiness WGSL. Supplying it selects the specular-glossiness workflow;
+     *  pbr-renderable loads it lazily, only when a material has a specular-glossiness texture. */
+    readonly _specGloss?: PbrSpecGlossWgsl;
     /** Has double-sided rendering */
     /** @internal */
     readonly _hasDoubleSided?: boolean;
@@ -146,10 +134,6 @@ export interface PbrTemplateConfig {
     /** ESM shadow depth output code. Supplied by the ESM material view so normal PBR bundles don't retain it. */
     /** @internal */
     readonly _esmShadowDepthCode?: string;
-    /** @internal Per-attribute vertex-buffer interleave layout. Undefined (or per-attribute
-     *  undefined) → canonical tight strides (12/12/16/8). Only set for meshes
-     *  sourcing attributes from a strided bufferView. */
-    readonly _vbStrides?: MeshVbLayout;
 }
 
 /**
@@ -164,11 +148,12 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _singleLightBlock = "",
         _multiLightWGSL = "",
         _multiLightLoop = "",
-        _normalMode = "none",
+        _tangentNormal,
+        _cotangentNormal,
         _flatGeometricNormal = false,
         _flatNormalWgsl = "",
         _hasEmissiveTexture = false,
-        _hasSpecGloss = false,
+        _specGloss,
         _hasDoubleSided = false,
         _hasTonemap = false,
         _fogHelper = "",
@@ -192,33 +177,19 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
-        _vbStrides,
     } = config;
-    const hasNormal = _normalMode === "tangent";
-    const hasCotangentNormal = _normalMode === "cotangent";
-    const hasAnyNormal = hasNormal || hasCotangentNormal;
+    const hasNormal = !!_tangentNormal;
+    const hasAnyNormal = hasNormal || !!_cotangentNormal;
 
     // ── Base vertex attributes ──────────────────────────────────
-    // arrayStride defaults to the canonical tight element size; interleaved meshes
-    // override it (e.g. 48 for POSITION+NORMAL+UV+TANGENT sharing one stride-48
-    // bufferView). `_offset` is the attribute's byte offset WITHIN that shared
-    // buffer (0 for tight meshes); it is baked into the pipeline vertex layout so
-    // the draw can bind the shared buffer at offset 0 (matches Babylon.js WebGPU —
-    // a non-zero setVertexBuffer bind offset corrupts vertex fetch on some AMD/Dawn paths).
     const _baseVertexAttributes: VertexAttribute[] = [
-        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._p?._stride ?? 12, _offset: _vbStrides?._p?._offset ?? 0 },
-        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._n?._stride ?? 12, _offset: _vbStrides?._n?._offset ?? 0 },
+        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
     ];
     if (hasNormal) {
-        _baseVertexAttributes.push({
-            _name: "tangent",
-            _type: "vec4<f32>",
-            _gpuFormat: "float32x4",
-            _arrayStride: _vbStrides?._t?._stride ?? 16,
-            _offset: _vbStrides?._t?._offset ?? 0,
-        });
+        _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
     }
-    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: _vbStrides?._u?._stride ?? 8, _offset: _vbStrides?._u?._offset ?? 0 });
+    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     if (_ext) {
         _baseVertexAttributes.push(..._ext.extraVertexAttributes);
     }
@@ -279,7 +250,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     if (_hasEmissiveTexture) {
         _baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
     }
-    if (_hasSpecGloss) {
+    if (_specGloss) {
         _baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
     }
     if (_esmShadowOutput) {
@@ -294,13 +265,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
 
     // The vertex template uses morphedPos/morphedNorm when morph fragment is present,
     // falling back to position/normal. The morph fragment's VR defines these vars.
-    const tangentBlock = hasNormal
-        ? wgsl`let N_local=normalize(${normVar});
-let T_local=normalize(tangent.xyz);
-let B_local=cross(N_local,T_local)*tangent.w;
-out.worldTangent=(finalWorld*vec4<f32>(T_local,0.0)).xyz;
-out.worldBitangent=(finalWorld*vec4<f32>(B_local,0.0)).xyz;`
-        : "";
+    const tangentBlock = _tangentNormal ? _tangentNormal.tangentFrameVertex(normVar) : "";
 
     const _vertexTemplate = wgsl`/*SU*/
 /*MU*/
@@ -333,27 +298,10 @@ return out;
     const normalRef = _ext?.normalScaleMod ? "scaledNormal" : "normalMapRaw";
     const normalRefCt = _ext?.normalScaleMod ? "scaledNormalCT" : "normalMapSample";
     let normalBlock: string;
-    if (hasNormal) {
-        normalBlock = wgsl`let normalMapRaw=textureSample(normalTexture,normalSampler_,${normalUV}).rgb*2.0-1.0;
-${normalScaleMod}let normalMapNorm=normalize(${normalRef});
-var N_geom=normalize(input.worldNormal);
-let TBN=mat3x3<f32>(input.worldTangent,input.worldBitangent,input.worldNormal);
-var N=normalize(TBN*normalMapNorm);`;
-    } else if (hasCotangentNormal) {
-        normalBlock = wgsl`let normalMapSample=textureSample(normalTexture,normalSampler_,${normalUV}).rgb*2.0-1.0;
-${normalScaleMod.replace(/normalMapRaw/g, "normalMapSample").replace(/scaledNormal/g, "scaledNormalCT")}var N_geom=normalize(input.worldNormal);
-let dp1=dpdx(input.worldPos);
-let dp2=dpdy(input.worldPos);
-let duv1=dpdx(${normalUV});
-let duv2=dpdy(${normalUV});
-let dp2perp=cross(dp2,N_geom);
-let dp1perp=cross(N_geom,dp1);
-let tangent_ct=dp2perp*duv1.x+dp1perp*duv2.x;
-let bitangent_ct=-(dp2perp*duv1.y+dp1perp*duv2.y);
-let det=max(dot(tangent_ct,tangent_ct),dot(bitangent_ct,bitangent_ct));
-let invmax=select(inverseSqrt(det),0.0,det==0.0);
-let cotangentFrame=mat3x3<f32>(tangent_ct*invmax,bitangent_ct*invmax,N_geom);
-var N=normalize(cotangentFrame*normalize(${normalRefCt}));`;
+    if (_tangentNormal) {
+        normalBlock = _tangentNormal.tangentNormalFragment(normalUV, normalScaleMod, normalRef);
+    } else if (_cotangentNormal) {
+        normalBlock = _cotangentNormal.cotangentNormalFragment(normalUV, normalScaleMod, normalRefCt);
     } else if (_flatGeometricNormal && _flatNormalWgsl) {
         // glTF spec: a primitive without a NORMAL attribute MUST be flat-shaded.
         // WGSL (face normal from screen-space derivatives, oriented to the viewer)
@@ -379,12 +327,10 @@ var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 
     // Roughness / metallic
     const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";
-    const roughnessMetallic = _hasSpecGloss
-        ? wgsl`let specGloss=textureSample(specGlossTexture,specGlossSampler,${specGlossUV});
-let roughness=clamp(1.0-specGloss.a,0.0,1.0);
-let metallic=0.0;`
-        : wgsl`let roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
-let metallic=orm.b*material.metallicFactor;`;
+    const roughnessMetallic = _specGloss
+        ? _specGloss.specGlossRoughness(specGlossUV)
+        : wgsl`var roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
+var metallic=orm.b*material.metallicFactor;`;
 
     // Material-view / pass variants can skip extension slots while still compiling the colour path.
     const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
@@ -392,36 +338,23 @@ let metallic=orm.b*material.metallicFactor;`;
         _hasEmissiveColor || !_hasEmissiveTexture ? wgsl`var emissive:vec3f;` : wgsl`let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
-    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`let occlusion=orm.r;` : wgsl`let occlusion=1.0;`;
+    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`var occlusion=orm.r;` : wgsl`var occlusion=1.0;`;
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = _hasReflectanceExt
         ? ``
-        : _hasSpecGloss
-          ? wgsl`var colorF0=specGloss.rgb;
-let colorF90=vec3<f32>(1.0);
-let maxSpecular=max(colorF0.r,max(colorF0.g,colorF0.b));
-let surfaceAlbedo=baseColor*(1.0-maxSpecular);`
+        : _specGloss
+          ? _specGloss.SPEC_GLOSS_F0
           : wgsl`let dielectricF0=material.reflectance;
 var colorF0=mix(vec3<f32>(dielectricF0),baseColor,metallic);
 let colorF90=vec3<f32>(1.0);
-let surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
+var surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
 
     // Specular AA + geometric-curvature roughness factors (BJS getAARoughnessFactors).
     // AA_factor_x is the direct-light roughness floor (matches BJS `computeSheenLighting`
     // which clamps info.roughness upward). AA_factor_y is the IBL/alphaG additive bump.
     // Emitted unconditionally as vars so sheen/other fragments can reference them
     // without needing a define; when SPECULARAA is disabled they remain zero.
-    const specularAABlock = wgsl`var AA_factor_x=0.0;
-var AA_factor_y=0.0;${
-        _hasSpecularAA
-            ? wgsl`{let nDfdx_AA=dpdx(N);
-let nDfdy_AA=dpdy(N);
-let slopeSquare_AA=max(dot(nDfdx_AA,nDfdx_AA),dot(nDfdy_AA,nDfdy_AA));
-AA_factor_x=pow(saturate(slopeSquare_AA),0.333);
-AA_factor_y=sqrt(slopeSquare_AA)*0.75;
-alphaG+=AA_factor_y;}`
-            : ""
-    }`;
+    const specularAABlock = _hasSpecularAA ? PBR_SPECULAR_AA_WGSL : "";
 
     // Direct lighting block — use the compact non-looping shader for one non-shadow light,
     // and the generic multi-light loop for multiple lights or shadow receivers.
@@ -437,7 +370,7 @@ var directSpecular=vec3<f32>(0.0);
     // StandardToneMapping upstream in pbr-renderable — so _toneMappingCall is always non-empty here when
     // _hasTonemap). When disabled, only exposure is applied. Helpers are emitted alongside the call.
     const toneMappingHelpersBlock = _hasTonemap ? _toneMappingHelpers : "";
-    const tonemapBlock = _hasTonemap ? _toneMappingCall : wgsl`color*=scene.vImageInfos.x;`;
+    const tonemapBlock = _hasTonemap ? _toneMappingCall : PBR_EXPOSURE_WGSL;
 
     // Fog (opt-in via scene.fog). The fog WGSL — `_fogHelper` (calcFogFactor) and `_fogBlock`
     // (the blend, emitted just before the tonemap block) — is supplied by pbr-renderable, which
@@ -494,7 +427,7 @@ ${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, dep
 /*HF*/
 /*FB*/
 /*FI*/
-${BRDF_FUNCTIONS}
+${PBR_BRDF_WGSL}
 ${toneMappingHelpersBlock}
 ${fogHelper}
 ${anisoBrdfBlock}
@@ -523,11 +456,11 @@ ${doubleSidedFlip}
 ${anisotropyTBBlock}
 /*AC*/
 let V=normalize(scene.vEyePosition.xyz-input.worldPos);
-let NdotVUnclamped=dot(N,V);
-let NdotV=abs(NdotVUnclamped)+0.0000001;
+var NdotVUnclamped=dot(N,V);
+var NdotV=abs(NdotVUnclamped)+0.0000001;
 ${f0Default}
 /*MF*/
-var alphaG=roughness*roughness+0.0005;
+${PBR_ROUGHNESS_WGSL}
 ${specularAABlock}
 ${directLightBlock}
 var color=directDiffuse+directSpecular+emissive;
@@ -535,12 +468,7 @@ var color=directDiffuse+directSpecular+emissive;
 /*NI*/
 ${fogBlock}
 ${tonemapBlock}
-color=pow(color,vec3<f32>(1.0/2.2));
-color=clamp(color,vec3<f32>(0.0),vec3<f32>(1.0));
-let highContrast=color*color*(3.0-2.0*color);
-if(scene.vImageInfos.y<1.0){color=mix(vec3<f32>(0.5),color,scene.vImageInfos.y);}
-else{color=mix(color,highContrast,scene.vImageInfos.y-1.0);}
-color=max(color,vec3<f32>(0.0));
+${PBR_DISPLAY_OUTPUT_WGSL}
 /*BC*/
 ${alphaBlock}`
 }

@@ -1,4 +1,4 @@
-import type { Mesh } from "../mesh/mesh.js";
+import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
@@ -10,7 +10,13 @@ import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
+import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { Renderable } from "../render/renderable.js";
+import { createDevice } from "./device.js";
+import type { DeviceContext } from "./device.js";
+
+export { _getAdapterOptions, _installAdapterOptions, _installDeviceFeaturesResolver } from "./device.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -32,14 +38,17 @@ export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 /**
  * Handle to the WebGPU engine — pure state, no attached methods.
  *
- * The engine owns the `GPUDevice` and all device-scoped GPU resources (textures, buffers,
- * pipelines, bind groups). It also **is itself a {@link SurfaceContext}** bound to the
+ * The engine owns its {@link DeviceContext} and all device-scoped GPU resources (textures,
+ * buffers, pipelines, bind groups). It also **is itself a {@link SurfaceContext}** bound to the
  * canvas passed into `createEngine` — the primary surface. Additional canvases can be
  * attached via `createSurface(engine, canvas, ...)`; GPU resources are shared across all
  * surfaces because they're device-scoped, while each surface owns its own swapchain
  * context.
  */
 export interface EngineContext extends SurfaceContext {
+    /** Device owned by this engine and destroyed by `disposeEngine`, whether it was passed in
+     *  from `createDevice` or acquired by `createEngine`. */
+    readonly device: DeviceContext;
     /** Rendering surfaces attached to this engine, in registration order. Index 0 is
      *  the engine itself (the primary surface) — the tuple type guarantees at least
      *  one entry so `engine.surfaces[0]` is always defined. Use
@@ -87,8 +96,8 @@ export interface EngineContext extends SurfaceContext {
     _gpuTaskTimingResult?: RenderTaskGpuTimings;
     /** @internal Restores frame graphs wrapped by the optional task GPU profiler. */
     _gpuTaskTimerDisable?: () => void;
-    /** @internal Optional task-profiler resolver included in `_gpuTimerResolve` after the frame command buffer is submitted. */
-    _gpuTaskTimerResolve?: () => void;
+    /** @internal Optional task-profiler and frame-work resolver included in `_gpuTimerResolve` after the frame command buffer is submitted. */
+    _gpuTaskTimerResolve?: (encoder?: GPUCommandEncoder, submitted?: boolean) => void;
 
     /**
      * When true, world matrices are computed using Float64 intermediate precision
@@ -110,20 +119,18 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
-    /** @internal Original creation options retained for optional subsystems such as recovery. */
-    _options?: EngineOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
     _storageBuffers?: Set<StorageBuffer>;
-    /** @internal Storage-related limits retained lazily for device-loss recovery. */
-    _storageRequiredLimits?: Record<string, GPUSize64>;
-    /** @internal Installed lazily by the storage-buffer module. */
-    _rebuildStorageBuffers?: () => void;
     /** @internal Installed lazily by the storage-buffer module. */
     _disposeStorageBuffers?: () => void;
     /** @internal Managed resource disposal callbacks installed behind `_disposeStorageBuffers`. */
     _managedResourceDisposers?: Array<() => void>;
     /** @internal Installed only while independent managed resource families are live. */
     _disposeManagedResources?: () => void;
+    /** @internal Constant missing-attribute buffer, installed only by storage-backed geometry. */
+    _getVertexDefaultBuffer?: (gpu: MeshGPU) => GPUBuffer | null;
+    /** @internal Bumped when a managed resource handle is destroyed or replaced. */
+    _resourceEpoch?: number;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
@@ -133,8 +140,14 @@ export interface EngineContext extends SurfaceContext {
      *  before rebuilding PBR groups so the resolver recreates it on the replacement
      *  device. */
     _pbrFallbackTex?: Texture2D;
+    /** @internal GPU error / device-lost listeners, installed by the first `onEngineGpuError` / `onEngineDeviceLost`. */
+    _gpuEvents?: EngineGpuEvents;
+    /** @internal Seam device-lost recovery calls after replacing `_device`, so listeners follow the new device. */
+    _attachGpuEvents?: (engine: EngineContext) => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
+    /** @internal Installed only by recovery opt-in; keeps already-captured dynamic sources current across disable/re-enable. */
+    _updateCapturedDynamicTexture?: (tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean) => void;
     /** @internal */
     _deviceLostRecovery?: DeviceLostRecoveryState;
     /** @internal */
@@ -152,6 +165,8 @@ export interface EngineContext extends SurfaceContext {
     _cbs: GPUCommandBuffer[];
     /** @internal Frame-boundary flush installed on the first queued GPU resource retirement. */
     _flushGpuRetirements?: (engine: EngineContext) => void;
+    /** @internal Opt-in frame boundary for features collecting per-draw work. */
+    _finishOptionalFrame?: (submitted: boolean) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
@@ -184,7 +199,7 @@ export interface EngineContext extends SurfaceContext {
         scene: import("../scene/scene-core.js").SceneContext
     ) => (view: Float32Array, mat: import("../math/types.js").Mat4 | Float32Array | Float64Array, offsetFloats: number, srcOffsetFloats: number) => void;
 
-    /** @internal Active-camera `worldMatrixVersion` for the lights UBO version,
+    /** @internal Active-camera floating-origin revision for the lights UBO version,
      *  and the floating-origin offset applier for positional light entries.
      *  Both are set only when the engine was created with
      *  `useFloatingOrigin: true` (dynamic-imported from
@@ -256,6 +271,8 @@ export function getRenderingContextKind(context: RenderingContext): string {
 /** @internal */
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;
+    dt(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, levels: number, samplerDesc: GPUSamplerDescriptor): void;
+    c<Args extends unknown[]>(renderable: Renderable, builder: (...args: Args) => Renderable | Promise<Renderable>, ...args: Args): void;
     x(
         source: GPUCopyExternalImageSource,
         width: number,
@@ -273,7 +290,7 @@ interface DeviceLostRecoveryCapture {
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
     p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;
     r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
-    w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
+    w(tex: Texture2D, data: ArrayBufferView, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,
@@ -322,6 +339,8 @@ export interface RenderTargetSize {
  * the engine options as a single union: `createEngine(canvas, opts: EngineOptions & SurfaceOptions)`.
  */
 export interface EngineOptions extends SurfaceOptions {
+    /** Use {@link EngineDeviceOptions} when supplying a previously created device. */
+    device?: never;
     /**
      * Extra WebGPU device limits to request when calling `adapter.requestDevice()`.
      * Use to raise per-device caps such as `maxColorAttachmentBytesPerSample` (default 32),
@@ -346,38 +365,16 @@ export interface EngineOptions extends SurfaceOptions {
     useFloatingOrigin?: boolean;
 }
 
-/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
- *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
- *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
- *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
- *  so `createEngine`'s adapter request stays byte-identical. */
-let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
-/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
-export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
-    _adapterOptionsHook = hook;
-}
-/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
- *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
-export function _getAdapterOptions(): GPURequestAdapterOptions {
-    return _adapterOptionsHook ? _adapterOptionsHook() : {};
+/** Engine/surface settings for a device from createDevice; acquisition settings belong to createDevice. */
+export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
+    device: DeviceContext;
+    requiredLimits?: never;
+    requiredFeatures?: never;
 }
 
-const OPTIONAL_DEVICE_FEATURES = [
-    "float32-filterable",
-    "texture-compression-astc",
-    "texture-compression-bc",
-    "texture-compression-etc2",
-    "texture-compression-unaligned" as GPUFeatureName,
-    "timestamp-query",
-    "primitive-index",
-] as const satisfies readonly GPUFeatureName[];
-
-/** @internal Select every optional feature supported by the adapter. The returned list is
- *  passed unchanged to `requestDevice` and later captured by device-lost recovery. */
-export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName[] {
-    return OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
-}
-
+/** Create an engine that takes ownership of a device from `createDevice`. A device backs only one engine;
+ *  if initialization fails before ownership transfers, the caller retains an unclaimed device. */
+export function createEngine(canvas: RenderCanvas, options: EngineDeviceOptions): Promise<EngineContext>;
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -387,20 +384,8 @@ export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName
  *
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
-export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
-    if (!adapter) {
-        throw new Error("WebGPU adapter not available");
-    }
-
-    // Optional features are requested opportunistically so their public enable functions can activate
-    // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    const features = _getSupportedDeviceFeatures(adapter);
-    const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
-
-    // eslint-disable-next-line no-console
-    console.log(`${_ENGINE_TAG} - WebGPU engine`);
-
+export function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
+export async function createEngine(canvas: RenderCanvas, options?: EngineOptions | EngineDeviceOptions): Promise<EngineContext> {
     const useHpm = !!options?.useHighPrecisionMatrix;
     const useFO = !!options?.useFloatingOrigin;
     if (useFO && !useHpm) {
@@ -444,22 +429,29 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _applyLightFoOffset = applyLightFoOffset;
     }
 
+    // Forward the engine options whole: `requiredLimits` is the only acquisition setting they carry, and an installed
+    // feature resolver (`createEngineWithFeatures`) reads its extra fields from the same object.
+    const deviceContext = options?.device ?? (await createDevice(options));
+    if (deviceContext._claimed) {
+        throw new Error("A DeviceContext can be used by only one engine and not after disposeDevice.");
+    }
+    // eslint-disable-next-line no-console
+    console.log(`${_ENGINE_TAG} - WebGPU engine`);
     // The engine extends `SurfaceContext`, so we need to assemble both the engine-only
     // fields AND the per-canvas surface fields onto a single object. `_buildSurface`
     // reads `engine._device` at call time, so we seed the object with `_device` up front;
     // `Object.assign` then evaluates both source expressions (the engine-only literal and
     // the `_buildSurface` result) before copying, letting us merge both in one call. The
-    // `surfaces` field is the same array as `_surfaces`, exposed publicly as a readonly tuple.
-    const engine = { _device: device } as EngineContext;
+    // surface supplies the engine's self-reference, and `surfaces` exposes `_surfaces`
+    // as a readonly tuple.
+    const engine = { _device: deviceContext._device } as EngineContext;
     const surfaces: [EngineContext, ...SurfaceContext[]] = [engine];
     Object.assign(
         engine,
         {
-            engine, // self-reference: the engine IS its primary surface
             surfaces, // public readonly view of `_surfaces` (same underlying array)
             _surfaces: surfaces,
-            _device: device,
-            _options: options,
+            device: deviceContext,
             drawCallCount: 0,
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
@@ -482,6 +474,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // `_colorView`/`_width`/`_height` are non-null before the frame graph builds.
     resizeSurface(engine);
     _refreshScRT(engine);
+    // Ownership transfers only after initialization succeeds, so a failed call leaves the device disposable.
+    deviceContext._claimed = true;
 
     return engine;
 }
@@ -602,6 +596,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
+    let submitted = false;
     try {
         // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
         // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
@@ -643,6 +638,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
+        submitted = true;
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
@@ -650,6 +646,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerResolve?.();
     } finally {
         engine._currentEncoder = undefined!;
+        engine._finishOptionalFrame?.(submitted);
     }
 }
 

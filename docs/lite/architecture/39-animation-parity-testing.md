@@ -115,9 +115,7 @@ test("Scene N — Animated model matches reference", async ({ page }) => {
     // Wait for exact animation frame
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     // Screenshot and compare against golden
-    const screenshot = await page.screenshot({
-        /* … */
-    });
+    const screenshot = await page.screenshot({/* … */});
     // … pixel comparison …
 });
 ```
@@ -125,6 +123,40 @@ test("Scene N — Animated model matches reference", async ({ page }) => {
 ---
 
 ## Golden Capture
+
+### Scene startup reliability (scenes 112 and 121)
+
+Scene 112 serves the Flight Helmet KTX2 model from
+`/models/FlightHelmetKTX/`. `pnpm fetch:flight-helmet` restores the model,
+buffer and 15 textures from BabylonJS/Assets commit
+`183f26290601abe1d5282eed00c306f4c8228307`. Every file is checked against its
+Git blob digest before being written or reused. Downloads have a bounded
+timeout and failures stop setup with the asset URL and HTTP status. The
+generated asset directory is ignored by git; binaries remain in
+BabylonJS/Assets, not the Lite package. Lab startup, static lab builds and
+bundle builds selecting scene 112 prepare these files before serving them.
+
+Scene 121 uses the existing checked-in `/splats/Halo_Believe.splat`. Its BJS
+reference constructs an unloaded mesh and calls `loadFileAsync` once.
+Both scenes report initialization failures through `canvas.dataset.error`
+as well as `console.error`. Their parity tests use `waitForCanvasReady`,
+which polls from Node to keep the BrowserStack connection active and
+rejects immediately on `data-error`. The 150-second readiness budget fits
+inside the 180-second test deadline, preserving the actual startup error
+instead of a teardown-induced "browser closed" error.
+
+These two parity tests only compare Lite output with committed goldens;
+they never open a live BJS reference or replace a golden at test time.
+The scene 112 golden is unchanged. The scene 121 golden is the `reference`
+attachment from its passing test in
+[CI build 60995 / 20261019.6](https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/20261019.6/testResults/parity/index.html):
+`data/37dcbe75cd41caf80e7133f2cb2675fa1e91e9b1.png`.
+It was captured by Babylon.js, not Lite, and the run reported MAD 0.014.
+
+Focused non-visual startup tests block jsDelivr, exercise both local asset
+paths, and inject asset failures to verify that the error reaches the
+readiness waiter. Downloader unit tests cover verified reuse, HTTP errors
+and corrupt downloads. Existing MAD and bundle-size ceilings are unchanged.
 
 `scripts/capture-golden.ts` is a CLI tool that captures golden reference PNGs:
 

@@ -1,10 +1,16 @@
 import type { EngineContext } from "./engine.js";
-import { _getAdapterOptions, resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { _getAdapterOptions } from "./device.js";
 import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 import { TU } from "./gpu-flags.js";
 import { _refreshScRT } from "./surface.js";
 import type { DeviceLostRecoveryRegistration, DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { Texture2D } from "../texture/texture-2d.js";
+import type * as CpuStorageRecovery from "../resource/storage-buffer-recovery.js";
+
+function loadCpuStorageRecovery(): Promise<typeof CpuStorageRecovery> {
+    return import("../resource/storage-buffer-recovery.js");
+}
 
 /**
  * Runs the device-level half of recovery: acquire a replacement adapter/device, reconfigure
@@ -50,13 +56,20 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
     if (missingFeatures.length) {
         throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
     }
-    engine._device = await runRecoveryStep("requesting a replacement device", () =>
+    const storageRecovery = engine._storageBuffers?.size ? await loadCpuStorageRecovery() : undefined;
+    const device = await runRecoveryStep("requesting a replacement device", () =>
         adapter.requestDevice({
             requiredFeatures: state._requiredFeatures,
-            requiredLimits: { ...engine._options?.requiredLimits, ...engine._storageRequiredLimits },
+            // The device's creation options (from `createDevice`, or forwarded there by `createEngine`) carry the original limits.
+            requiredLimits: { ...engine.device._options?.requiredLimits, ...storageRecovery?.getCpuStorageRecoveryLimits(engine) },
         })
     );
-    await runRecoveryStep("rebuilding engine storage buffers", () => engine._rebuildStorageBuffers?.());
+    engine._device = engine.device._device = device;
+    engine._attachGpuEvents?.(engine);
+    await runRecoveryStep("rebuilding engine storage buffers", async () => {
+        const recovery = storageRecovery ?? (engine._storageBuffers?.size ? await loadCpuStorageRecovery() : undefined);
+        recovery?.rebuildCpuStorageBuffers(engine);
+    });
 
     await runRecoveryStep("reconfiguring rendering surfaces", () => {
         for (const surface of engine.surfaces) {

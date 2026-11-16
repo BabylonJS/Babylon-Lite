@@ -15,6 +15,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const liteMocks = vi.hoisted(() => ({
+    attachPositionGizmoToNode: vi.fn(),
+    attachRotationGizmoToNode: vi.fn(),
+    attachScaleGizmoToNode: vi.fn(),
     createPositionGizmo: vi.fn(),
     createRotationGizmo: vi.fn(),
     disposePositionGizmo: vi.fn(),
@@ -32,6 +35,12 @@ import type { PickingInfo as LitePickingInfo, PointerDragEndEvent, PointerDragMo
 import { AxisDragGizmo, PlaneDragGizmo, PlaneRotationGizmo, AxisScaleGizmo, PositionGizmo, RotationGizmo, ScaleGizmo } from "../src/gizmos/gizmos";
 import type { DragEvent, DragStartEndEvent, UtilityLayerRenderer } from "../src/index";
 import { PointerEventTypes, PointerInfo, Ray, Vector3 } from "../src/index";
+import { NullEngine } from "../src/engine/engine";
+import { TransformNode, type AbstractMesh } from "../src/meshes/meshes";
+import { Scene } from "../src/scene/scene";
+import { ArcRotateCamera, FreeCamera } from "../src/cameras/cameras";
+import { HemisphericLight, PointLight } from "../src/lights/lights";
+import { LiteCompatError } from "../src/error";
 
 type FakeDrag = { drag: { enabled: boolean } };
 
@@ -306,5 +315,96 @@ describe("compat composite gizmo drag observables", () => {
         notifyMove(1, 0);
 
         expect(distances).toEqual([0, 5, 2]);
+    });
+});
+
+describe("compat composite gizmo attachment", () => {
+    const composites = [
+        ["PositionGizmo", PositionGizmo, liteMocks.attachPositionGizmoToNode],
+        ["RotationGizmo", RotationGizmo, liteMocks.attachRotationGizmoToNode],
+        ["ScaleGizmo", ScaleGizmo, liteMocks.attachScaleGizmoToNode],
+    ] as const;
+
+    type Composite = PositionGizmo | RotationGizmo | ScaleGizmo;
+
+    /** A composite wrapper over a fake Lite gizmo, without running the constructor (no engine). */
+    function makeComposite(Ctor: { prototype: Composite }): Composite {
+        const g = Object.create(Ctor.prototype as object) as { _lite: unknown; _layer: unknown; _attached: unknown };
+        g._lite = {};
+        g._layer = {};
+        g._attached = null;
+        return g as unknown as Composite;
+    }
+
+    beforeEach(() => {
+        for (const [, , attach] of composites) {
+            attach.mockClear();
+        }
+    });
+
+    // A TransformNode keeps its Lite node in `_node`; only meshes have `_lite`. Reading `_lite` attached the gizmo to null,
+    // so it stood at the origin and moved nothing.
+    it.each(composites)("%s attaches to a TransformNode through attachedNode and attachedMesh", (_name, Ctor, attach) => {
+        const node = new TransformNode("root", new Scene(new NullEngine()));
+        const gizmo = makeComposite(Ctor);
+
+        gizmo.attachedNode = node;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, node._node);
+        expect(gizmo.attachedNode).toBe(node);
+
+        gizmo.attachedMesh = null;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, null);
+
+        // Babylon.js code also hands a TransformNode to `attachedMesh` (the setter accepts any node at run time).
+        gizmo.attachedMesh = node as unknown as AbstractMesh;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, node._node);
+        expect(gizmo.attachedMesh).toBe(node);
+    });
+
+    it.each(composites)("%s still attaches a mesh through its Lite mesh", (_name, Ctor, attach) => {
+        const liteMesh = { position: {}, rotationQuaternion: {}, scaling: {} };
+        const mesh = { _lite: liteMesh } as unknown as AbstractMesh;
+        const gizmo = makeComposite(Ctor);
+
+        gizmo.attachedMesh = mesh;
+
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, liteMesh);
+        expect(gizmo.attachedNode).toBe(mesh);
+    });
+
+    // Lights have native SceneNode transforms, so the gizmos can edit them.
+    it.each(composites)("%s attaches to a light", (_name, Ctor, attach) => {
+        const scene = new Scene(new NullEngine());
+        for (const light of [new PointLight("point", new Vector3(1, 2, 3), scene), new HemisphericLight("hemi", new Vector3(0, 1, 0), scene)]) {
+            const gizmo = makeComposite(Ctor);
+
+            gizmo.attachedNode = light;
+
+            expect(attach).toHaveBeenLastCalledWith(gizmo._lite, light._lite);
+            expect(gizmo.attachedNode).toBe(light);
+        }
+    });
+
+    // Lite cameras have no editable transform (an orbit camera has no position, rotation or scaling, a free camera only a
+    // position), so the first drag would dereference a missing field. They are rejected before attachment.
+    it.each(composites)("%s rejects a camera before attaching it", (name, Ctor, attach) => {
+        const scene = new Scene(new NullEngine());
+        const cameras = [new ArcRotateCamera("arc", 0, Math.PI / 3, 10, Vector3.Zero(), scene), new FreeCamera("free", new Vector3(0, 1, -5), scene)];
+        for (const camera of cameras) {
+            const gizmo = makeComposite(Ctor);
+
+            expect(() => {
+                gizmo.attachedNode = camera;
+            }).toThrow(LiteCompatError);
+            expect(() => {
+                gizmo.attachedNode = camera;
+            }).toThrow(`${name}.attachedNode`);
+            expect(() => {
+                gizmo.attachedMesh = camera as unknown as AbstractMesh;
+            }).toThrow(LiteCompatError);
+
+            expect(attach).not.toHaveBeenCalled();
+            expect(gizmo.attachedNode).toBeNull();
+        }
     });
 });

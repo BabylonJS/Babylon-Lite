@@ -6,7 +6,7 @@
 // against the Babylon.js oracle.
 
 import {
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     animateParticleSystem,
     attachControl,
     buildNodeParticleSet,
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
 
     const billboard = createParticleBillboard(system);
     syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+    addBillboardSystemToScene(scene, billboard);
 
     await registerScene(scene);
     await startEngine(engine);

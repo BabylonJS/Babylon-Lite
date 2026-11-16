@@ -5,9 +5,11 @@ vi.mock("babylon-lite", async (importOriginal) => {
     return { ...actual, resizeMeshGeometry: vi.fn() };
 });
 
-import { resizeMeshGeometry } from "babylon-lite";
+import { createTransformNode, resizeMeshGeometry } from "babylon-lite";
 import { Mesh } from "../src/meshes/meshes";
 import { Matrix } from "../src/math/matrix";
+import { Quaternion } from "../src/math/quaternion";
+import { Vector3 } from "../src/math/vector";
 
 /**
  * GPU-free forwarding tests for the shared transform-bake helper (`_bakeMatrix`)
@@ -23,6 +25,8 @@ const mockedResize = vi.mocked(resizeMeshGeometry);
 function makeMesh(overrides?: { normals?: Float32Array; uvs?: Float32Array; uv2?: Float32Array; tangents?: Float32Array; colors?: Float32Array }): Mesh {
     const mesh = Object.create(Mesh.prototype) as Mesh;
     const lite = {
+        // No GPU geometry is modelled, so the write takes the (mocked) resize path.
+        _gpu: {},
         _cpuPositions: new Float32Array([1, 1, 1]),
         _cpuNormals: overrides?.normals,
         _cpuIndices: new Uint32Array([0, 1, 2]),
@@ -47,6 +51,16 @@ describe("Mesh transform bake (issue #475)", () => {
         (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(Matrix.Scaling(2, 3, 4));
         const positions = mockedResize.mock.calls[0]![2];
         expect(Array.from(positions)).toEqual([2, 3, 4]);
+    });
+
+    it("leaves the caller's matrix unchanged when baking normals", () => {
+        const mesh = makeMesh({ normals: new Float32Array([1, 1, 0]) });
+        const matrix = Matrix.Scaling(2, 1, 1);
+        const before = Array.from(matrix.m);
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(matrix);
+
+        expect(Array.from(matrix.m)).toEqual(before);
     });
 
     it("transforms normals by the inverse-transpose (correct under non-uniform scale)", () => {
@@ -135,17 +149,7 @@ describe("Mesh transform bake (issue #475)", () => {
 
     it("bakeCurrentTransformIntoVertices bakes the node transform and resets it to identity", () => {
         const mesh = makeMesh();
-        const vec = (x: number, y: number, z: number) => ({
-            x,
-            y,
-            z,
-            set(a: number, b: number, c: number) {
-                this.x = a;
-                this.y = b;
-                this.z = c;
-            },
-        });
-        const node = { position: vec(5, 0, 0), rotation: vec(0, 0, 0), scaling: vec(2, 2, 2), rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } };
+        const node = createTransformNode("baked", 5, 0, 0, 0, 0, 0, 1, 2, 2, 2);
         (mesh as unknown as { _node: unknown })._node = node;
         const bakeSpy = vi.fn((_m: Matrix) => true);
         (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = bakeSpy;
@@ -159,6 +163,71 @@ describe("Mesh transform bake (issue #475)", () => {
         expect([node.position.x, node.position.y, node.position.z]).toEqual([0, 0, 0]);
         expect([node.rotation.x, node.rotation.y, node.rotation.z]).toEqual([0, 0, 0]);
         expect([node.scaling.x, node.scaling.y, node.scaling.z]).toEqual([1, 1, 1]);
+    });
+
+    it("does not resurrect a quaternion-mode rotation when the mode is cleared after baking", () => {
+        const node = createTransformNode("quaternion-bake");
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("quaternion-bake", node as never);
+        const bakeSpy = vi.fn((_matrix: Matrix) => true);
+        (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = bakeSpy;
+
+        const euler = new Vector3(0.3, 0.5, -0.2);
+        mesh.rotation = euler;
+        mesh.rotationQuaternion = Quaternion.FromEulerAngles(0.1, 0.6, 0.2);
+        expect(mesh.rotation.asArray()).toEqual([0, 0, 0]);
+        // Euler edits made after enabling quaternion mode must also be reset by a bake.
+        mesh.rotation.set(euler.x, euler.y, euler.z);
+        expect(mesh.rotation.asArray()).toEqual(euler.asArray());
+
+        mesh.bakeCurrentTransformIntoVertices();
+        expect(bakeSpy).toHaveBeenCalledOnce();
+        expect(mesh.rotation.asArray()).toEqual([0, 0, 0]);
+        expect(mesh.rotationQuaternion).not.toBeNull();
+        expect([node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w]).toEqual([0, 0, 0, 1]);
+
+        mesh.rotationQuaternion = null;
+        expect(mesh.rotationQuaternion).toBeNull();
+        expect(mesh.rotation.asArray()).toEqual([0, 0, 0]);
+        expect([node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w]).toEqual([0, 0, 0, 1]);
+    });
+
+    it("keeps the Euler-mode cached angle and physical quaternion at identity after baking", () => {
+        const node = createTransformNode("euler-bake");
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("euler-bake", node as never);
+        const bakeSpy = vi.fn((_matrix: Matrix) => true);
+        (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = bakeSpy;
+
+        mesh.rotation = new Vector3(0.3, 0.5, -0.2);
+        mesh.bakeCurrentTransformIntoVertices();
+
+        expect(mesh.rotationQuaternion).toBeNull();
+        // The angles are re-derived from the identity quaternion, which may yield signed zeros.
+        expect(mesh.rotation.asArray().map(Math.abs)).toEqual([0, 0, 0]);
+        expect([node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w]).toEqual([0, 0, 0, 1]);
+    });
+
+    it("leaves both Euler and quaternion rotation state untouched if baking fails", () => {
+        const node = createTransformNode("failed-bake");
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("failed-bake", node as never);
+        (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = vi.fn(() => false);
+
+        mesh.rotation = new Vector3(0.2, 0.4, 0.6);
+        const q = Quaternion.FromEulerAngles(-0.3, 0.5, -0.1);
+        mesh.rotationQuaternion = q;
+        // Assigning a quaternion clears Euler rotation (Babylon.js); later Euler edits are stored independently.
+        mesh.rotation.set(0.2, 0.4, 0.6);
+
+        mesh.bakeCurrentTransformIntoVertices();
+
+        expect(mesh.rotation.asArray()).toEqual([0.2, 0.4, 0.6]);
+        expect(mesh.rotationQuaternion).not.toBeNull();
+        expect(node.rotationQuaternion.x).toBeCloseTo(q.x, 8);
+        expect(node.rotationQuaternion.y).toBeCloseTo(q.y, 8);
+        expect(node.rotationQuaternion.z).toBeCloseTo(q.z, 8);
+        expect(node.rotationQuaternion.w).toBeCloseTo(q.w, 8);
     });
 
     it("bakeTransformIntoVertices bakes an arbitrary matrix WITHOUT resetting the node transform", () => {

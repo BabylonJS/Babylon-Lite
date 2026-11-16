@@ -23,7 +23,6 @@ function makeThinInstances(): ThinInstanceData {
         _capacity: 1,
         _version: 1,
         _gpuBuffer: null,
-        _gpuBufferStorage: false,
         _gpuVersion: 0,
         _dirtyMin: 0,
         _dirtyMax: 0,
@@ -38,6 +37,80 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("ShaderMaterial thin instances", () => {
+    it.each([false, true])("captures generic packed layouts once (external texture: %s)", (external) => {
+        const engine = { _device: {} } as EngineContext;
+        const material = {
+            attributes: ["position"],
+            _externalTextureSlots: external ? new Map([["videoSampler", { name: "videoSampler", current: null }]]) : undefined,
+            needAlphaBlending: false,
+        } as unknown as ShaderMaterial;
+        const mesh = {
+            material,
+            thinInstances: makeThinInstances(),
+            worldMatrix: new Float32Array(16),
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint16",
+                _vbLayout: { position: { _stride: 20, _offset: 4 } },
+                _vbKey: "packed",
+            },
+        } as unknown as Mesh;
+        const scene = { surface: { engine } } as SceneContext;
+        const systemSpec = { _totalBytes: 16, _offsets: new Map(), _structBody: "" };
+        const bindings = {
+            group1BGL: {} as GPUBindGroupLayout,
+            systemSpec,
+            customSpec: null,
+            vertexBuffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as const }] }],
+            pipelines: new Map(),
+            _pipelineLayout: {} as GPUPipelineLayout,
+        };
+        const packet = {
+            mesh,
+            systemUBO: {} as GPUBuffer,
+            systemData: new Float32Array(4),
+            _systemDependencies: 0,
+            _bindGroup: {} as GPUBindGroup,
+            _lastResourceVersion: 0,
+            _boundTextures: [],
+        } as ShaderPacket;
+        const getPipeline = vi.fn((..._args: Parameters<Parameters<typeof buildShaderRenderablesWithInstancing>[7]>): GPURenderPipeline => ({}) as GPURenderPipeline);
+        const register = vi.fn();
+        const built = buildShaderRenderablesWithInstancing(
+            scene,
+            [mesh],
+            () => {
+                throw new Error("No plain meshes");
+            },
+            () => packet,
+            vi.fn(),
+            vi.fn(),
+            () => mesh._gpu.positionBuffer,
+            getPipeline,
+            () => bindings,
+            undefined,
+            undefined,
+            undefined,
+            register
+        );
+        expect(built.renderables[0]!._direct).toBe(external);
+        built.renderables[0]!.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 });
+        built.renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 });
+        const layouts = getPipeline.mock.calls[0]![5]!;
+        expect(getPipeline.mock.calls[0]![4]).toBe("0packed");
+        expect(getPipeline.mock.calls[1]![5]).toBe(layouts);
+        expect(layouts[0]).toEqual({ arrayStride: 20, attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] });
+        expect(layouts[1]!.attributes).toEqual([
+            { shaderLocation: 1, offset: 0, format: "float32x4" },
+            { shaderLocation: 2, offset: 16, format: "float32x4" },
+            { shaderLocation: 3, offset: 32, format: "float32x4" },
+            { shaderLocation: 4, offset: 48, format: "float32x4" },
+        ]);
+        expect(register).toHaveBeenCalledWith(mesh, material, false, { _key: "packed", _vbs: [layouts[0]] });
+    });
+
     it("forwards explicit ownership for material-override packets", () => {
         const engine = {
             _device: {
@@ -65,6 +138,7 @@ describe("ShaderMaterial thin instances", () => {
             mesh,
             systemUBO: {} as GPUBuffer,
             systemData: new Float32Array(4),
+            _systemDependencies: 0,
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
@@ -107,6 +181,65 @@ describe("ShaderMaterial thin instances", () => {
         expect(plainRebuild).toHaveBeenLastCalledWith(scene, mesh, override, plainResources);
     });
 
+    it("keys the async warm-up recipe by mesh for its own material and by renderable for an override", () => {
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(),
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const material = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const caster = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const mesh = {
+            material,
+            thinInstances: makeThinInstances(),
+            _gpu: { positionBuffer: {} as GPUBuffer, indexBuffer: {} as GPUBuffer, indexCount: 3, indexFormat: "uint16" },
+            worldMatrix: new Float32Array(16),
+        } as unknown as Mesh;
+        const scene = { surface: { engine } } as unknown as SceneContext;
+        const systemSpec = { _totalBytes: 16, _offsets: new Map(), _structBody: "" };
+        const packet = {
+            mesh,
+            systemUBO: {} as GPUBuffer,
+            systemData: new Float32Array(4),
+            _systemDependencies: 0,
+            _bindGroup: {} as GPUBindGroup,
+            _lastResourceVersion: 0,
+            _boundTextures: [],
+        } as ShaderPacket;
+        const registerPipeline = vi.fn();
+        const result = buildShaderRenderablesWithInstancing(
+            scene,
+            [mesh],
+            vi.fn(() => ({ renderables: [], rebuildSingle: vi.fn() })),
+            vi.fn((): ShaderPacket => packet),
+            vi.fn(),
+            vi.fn(),
+            () => mesh._gpu.positionBuffer,
+            () => ({}) as GPURenderPipeline,
+            () => ({
+                group1BGL: {} as GPUBindGroupLayout,
+                systemSpec,
+                customSpec: null,
+                vertexBuffers: [],
+                pipelines: new Map(),
+                _pipelineLayout: {} as GPUPipelineLayout,
+            }),
+            undefined,
+            undefined,
+            undefined,
+            registerPipeline
+        );
+
+        result.rebuildSingle(scene, mesh, undefined, { _lifetimeDisposers: [] });
+        expect(registerPipeline).toHaveBeenLastCalledWith(mesh, material, expect.any(Boolean), undefined);
+
+        // A shadow-caster or depth-prepass override must not replace the mesh's own recipe: it is keyed by its renderable.
+        const overrideRenderable = result.rebuildSingle(scene, mesh, caster, { _lifetimeDisposers: [] });
+        expect(registerPipeline).toHaveBeenLastCalledWith(overrideRenderable, caster, expect.any(Boolean), undefined);
+        expect(registerPipeline.mock.calls.filter(([key]) => key === mesh).every(([, m]) => m === material)).toBe(true);
+    });
+
     it("lets a color-independent material override share matrices without binding the mesh color stream", () => {
         const engine = {
             _device: {
@@ -142,6 +275,7 @@ describe("ShaderMaterial thin instances", () => {
             mesh,
             systemUBO: {} as GPUBuffer,
             systemData: new Float32Array(4),
+            _systemDependencies: 0,
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
@@ -212,6 +346,7 @@ describe("ShaderMaterial thin instances", () => {
             mesh,
             systemUBO: {} as GPUBuffer,
             systemData: new Float32Array(4),
+            _systemDependencies: 0,
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
@@ -249,7 +384,9 @@ describe("ShaderMaterial thin instances", () => {
         } as unknown as GPURenderBundleEncoder;
 
         expect(binding.draw(pass, engine)).toBe(1);
-        expect(drawIndexed).toHaveBeenCalledWith(3, 0);
+        // `baseVertex` is now passed through so a slab-backed mesh draws from its own slot;
+        // `undefined` is WebIDL's default for the optional argument, so this is the same call.
+        expect(drawIndexed).toHaveBeenCalledWith(3, 0, 0, undefined);
         expect(drawIndexedIndirect).not.toHaveBeenCalled();
 
         mesh.thinInstances!.count = 1;

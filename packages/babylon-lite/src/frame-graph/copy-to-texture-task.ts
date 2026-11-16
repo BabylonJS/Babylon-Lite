@@ -9,10 +9,10 @@
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
  *       * Source and target have the same format and are single-sampled.
- *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
+ *       * View-relative source mip dimensions match the target attachment's dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
- *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Source and target expose color GPU textures and any selected subresources.
  *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
@@ -65,8 +65,9 @@ export interface CopyToTextureTaskConfig {
      *  the whole target is overwritten and the encoder-copy fast path becomes
      *  available. When set, the blit path is used. */
     viewport?: NormalizedViewport | null;
-    /** Source mip level to copy from. Default 0. The fast path uses this as
-     *  the source `mipLevel`; the blit path samples with `textureSampleLevel`. */
+    /** View-relative source mip level. Default 0. A texture-backed wrapper exposes
+     *  one mip, so LOD clamps to zero and both paths read its selected physical mip.
+     *  Ordinary sources use this as their source `mipLevel` or `textureSampleLevel` LOD. */
     lodLevel?: number;
     /** Optional single-sample texture that receives a hardware MSAA-resolve of
      *  the task's MSAA color attachment at end-of-pass. Two modes:
@@ -232,6 +233,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             if (source === eng.scRT) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture cannot be the engine scRT because its GPU texture changes every frame.`);
             }
+            if (source._syncEager) {
+                buildRenderTarget(source, eng);
+            }
             if (!source._colorTexture) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
             }
@@ -241,7 +245,7 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // Already-built RTs are no-ops in `buildRenderTarget`. Keeps copy-only chains
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
-            const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
+            const needsBuild = (rt: RenderTarget) => !!rt._syncEager || !rt._colorTexture;
             if (task._ownedTarget && (!task.ownsTargetTexture || task._ownedTarget !== task.targetTexture)) {
                 disposeRenderTarget(task._ownedTarget);
                 task._ownedTarget = null;
@@ -380,8 +384,11 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcSamples !== 1 || dstSamples !== 1) {
         return false;
     }
-    const lod = task.lodLevel;
-    if (lod >= sourceTexture.mipLevelCount) {
+    const sourceSubresource = source._colorSubresource;
+    // A wrapper's sampling view exposes one mip, so its view-relative LOD always clamps to zero.
+    const lod = sourceSubresource ? 0 : task.lodLevel;
+    const sourceMipLevel = sourceSubresource?.mipLevel ?? lod;
+    if (sourceMipLevel >= sourceTexture.mipLevelCount) {
         return false;
     }
     const srcMipW = Math.max(1, source._width >> lod);
@@ -389,9 +396,12 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcMipW !== target._width || srcMipH !== target._height) {
         return false;
     }
+    const subresource = target._colorSubresource;
     task._fast = {
-        _source: { texture: sourceTexture, mipLevel: lod },
-        _target: { texture: targetTexture },
+        _source: sourceSubresource
+            ? { texture: sourceTexture, mipLevel: sourceMipLevel, origin: { x: 0, y: 0, z: sourceSubresource.layer } }
+            : { texture: sourceTexture, mipLevel: sourceMipLevel },
+        _target: subresource ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } } : { texture: targetTexture },
         _size: { width: srcMipW, height: srcMipH },
     };
     return true;
@@ -407,7 +417,7 @@ function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, ta
     const entries: GPUBindGroupEntry[] = multisampledSource
         ? [{ binding: 0, resource: source._colorView! }]
         : [
-              { binding: 0, resource: source._colorView! },
+              { binding: 0, resource: source._colorSamplingView ?? source._colorView! },
               { binding: 1, resource: task.lodLevel > 0 ? getTrilinearSampler(engine) : getBilinearSampler(engine) },
           ];
     const bindGroup = engine._device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });

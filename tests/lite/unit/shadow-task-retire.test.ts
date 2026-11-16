@@ -4,7 +4,6 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { ensureEsmShadowTaskState, setEsmShadowTaskResources, type EsmShadowTaskResources } from "../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator";
-import { ensurePcfShadowTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
 import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
 vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
@@ -20,26 +19,21 @@ vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => (
     addMeshToTask: vi.fn(),
 }));
 
-type EnsureState = (engine: EngineContext, scene: SceneContext, sg: ShadowGenerator, casterMeshes: readonly Mesh[], existing: ShadowTaskInternalState | null) => unknown;
-
 function makeEsmGenerator(): ShadowGenerator {
     const sg = { _shadowParamsUBO: {} } as unknown as ShadowGenerator;
     setEsmShadowTaskResources(sg, { _esmTexture: {}, _depthBuffer: {} } as unknown as EsmShadowTaskResources);
     return sg;
 }
 
-// Every supported generator reaches its state builder through the same `setShadowTaskCasterMeshes()` re-supply
-// path, so the old task must be retired behind the frame fence in each of them, not only in PCF.
-describe.each<[string, EnsureState, () => ShadowGenerator]>([
-    ["PCF", ensurePcfShadowTaskState as EnsureState, () => ({}) as ShadowGenerator],
-    ["ESM", ensureEsmShadowTaskState as EnsureState, makeEsmGenerator],
-])("%s shadow task state", (_name, ensureState, makeGenerator) => {
+// ESM still rebuilds on caster re-supply; PCF target replacement and incremental packet retirement are covered
+// in pcf-caster-reconcile.test.ts.
+describe("ESM shadow task state", () => {
     it("retires the superseded task behind the frame fence instead of disposing it synchronously", () => {
         const engine = {} as EngineContext;
         const dispose = vi.fn();
         const existing = { _casterMeshes: [] as Mesh[], _task: { dispose } } as unknown as ShadowTaskInternalState;
 
-        const next = ensureState(engine, {} as SceneContext, makeGenerator(), [], existing);
+        const next = ensureEsmShadowTaskState(engine, {} as SceneContext, makeEsmGenerator(), [], existing);
 
         expect(next).not.toBe(existing);
         expect(dispose).not.toHaveBeenCalled();
@@ -53,7 +47,7 @@ describe.each<[string, EnsureState, () => ShadowGenerator]>([
         const casters: Mesh[] = [];
         const existing = { _casterMeshes: casters, _task: { dispose: vi.fn() } } as unknown as ShadowTaskInternalState;
 
-        expect(ensureState(engine, {} as SceneContext, makeGenerator(), casters, existing)).toBe(existing);
+        expect(ensureEsmShadowTaskState(engine, {} as SceneContext, makeEsmGenerator(), casters, existing)).toBe(existing);
         expect(engine._retirements ?? []).toHaveLength(0);
     });
 });

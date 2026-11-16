@@ -9,9 +9,28 @@ import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { _rightHanded } from "#coordinate-system";
 import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
+
+type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPropertyGroups: boolean) => boolean;
+type PropertyMixerDirectHandler = (manager: AnimationManager, group: AnimationGroup) => void;
+type PropertyMixerFinishHandler = (manager: AnimationManager) => void;
+let _propertyMixerHandler: PropertyMixerHandler | null = null;
+let _propertyMixerDirectHandler: PropertyMixerDirectHandler | null = null;
+let _propertyMixerFinishHandler: PropertyMixerFinishHandler | null = null;
+
+/** @internal Install opt-in property-track handling for the skeletal blend manager. */
+export function _installPropertyMixerHandler(
+    handler: PropertyMixerHandler | null,
+    directHandler: PropertyMixerDirectHandler | null = null,
+    finishHandler: PropertyMixerFinishHandler | null = null
+): void {
+    _propertyMixerHandler = handler;
+    _propertyMixerDirectHandler = directHandler;
+    _propertyMixerFinishHandler = finishHandler;
+}
 
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
@@ -21,9 +40,10 @@ const T_OFF = 0;
 const R_OFF = 3;
 const S_OFF = 7;
 
-// RH->LH root transform (same as skeleton-updater.ts)
+// glTF root transform, same as the loader's `__root__` (load-gltf.ts): the RH→LH X mirror diag(-1, 1, 1, 1),
+// or identity in a right-handed engine, which keeps glTF's native space.
 // prettier-ignore
-const RH_TO_LH = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const ROOT_TRANSFORM = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
 
 const _boneTmp = new F32(16);
 
@@ -102,6 +122,7 @@ function getScratch(manager: AnimationManager): WeightedGltfScratch {
 }
 
 function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number): boolean {
+    const handledPropertyGroups = _propertyMixerHandler?.(manager, deltaMs, true) ?? false;
     const scratch = getScratch(manager);
     const keys = scratch.keys;
     keys.clear();
@@ -117,7 +138,21 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     }
 
     if (keys.size === 0) {
-        return false;
+        if (handledPropertyGroups) {
+            for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                const group = groups[groupIndex]!;
+                if (group._stopped) {
+                    continue;
+                }
+                if (group._propertyMixerHandled) {
+                    _propertyMixerDirectHandler?.(manager, group);
+                } else {
+                    tickAnimationCore(group, deltaMs, manager.engine);
+                }
+            }
+            _propertyMixerFinishHandler?.(manager);
+        }
+        return handledPropertyGroups;
     }
 
     scratch.targets.forEach(resetWeightedGltfTarget);
@@ -125,6 +160,10 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
         const group = groups[groupIndex]!;
         if (group._stopped) {
+            continue;
+        }
+        if (handledPropertyGroups && group._propertyMixerHandled) {
+            _propertyMixerDirectHandler?.(manager, group);
             continue;
         }
 
@@ -155,6 +194,9 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             uploadTarget(manager, target);
         }
     });
+    if (handledPropertyGroups) {
+        _propertyMixerFinishHandler?.(manager);
+    }
 
     return true;
 }
@@ -376,22 +418,25 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
 
 function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
     const clip = mixer[GLTF_CLIP];
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const isPlaying = group.isPlaying;
     if (isPlaying) {
         group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
     if (clip.duration <= 0) {
-        return 0;
+        group.currentTime = startTime;
+        return group.currentTime;
     }
 
     if (group.loopAnimation && isPlaying) {
-        group.currentTime %= clip.duration;
-        if (group.currentTime < 0) {
+        group.currentTime = startTime + ((group.currentTime - startTime) % clip.duration);
+        if (group.currentTime < startTime) {
             group.currentTime += clip.duration;
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, 0), clip.duration);
+        group.currentTime = Math.min(Math.max(group.currentTime, startTime), endTime);
     }
     return group.currentTime;
 }
@@ -456,7 +501,7 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         if (parentIdx >= 0) {
             multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {
-            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, ROOT_TRANSFORM, 0, localMat, nodeIdx * 16);
         }
     }
 

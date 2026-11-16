@@ -10,6 +10,13 @@ type BuiltEnvironmentPatch = {
     _apply(fragment: string, kind: "dds" | "hdr"): string;
 };
 
+type BuiltRotationPatch = BuiltEnvironmentPatch & {
+    _rotateSkyboxDirection(fragment: string, angle: string): string;
+};
+
+// Emitted by the skybox rotation helper itself; the angle is only spliced in when the patch runs.
+const ROTATION_PATCH = "let _erc=cos(";
+
 function decodeJsStringLiteral(literal: string): string {
     const value: unknown = runInNewContext(literal, Object.create(null), { timeout: 100 });
     if (typeof value !== "string") {
@@ -63,6 +70,20 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).not.toContain("scene._environmentRotation");
+        expect(result.code).not.toContain("SUN_ANGULAR_DIAMETER_COS");
+    });
+
+    it("retains procedural sky generation only when its loader is consumed", async () => {
+        const result = await runRollup({
+            entrySource: `import { loadProceduralSkyEnvironment } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(loadProceduralSkyEnvironment);\n`,
+            format: "es",
+            minify: false,
+        });
+
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).toContain("loadProceduralSkyEnvironment");
+        expect(result.code).toContain("SUN_ANGULAR_DIAMETER_COS");
     });
 
     it("keeps optional skybox shader code out of a non-feature environment consumer", async () => {
@@ -76,7 +97,7 @@ describe("environment setter tree shaking", () => {
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).toContain("textureSampleLevel");
         expect(result.code).not.toContain("textureNumLevels");
-        expect(result.code).not.toContain("cos(scene.envRotationY)");
+        expect(result.code).not.toContain(ROTATION_PATCH);
     });
 
     it("retains only the blur shader patch for setEnvironmentBlur", async () => {
@@ -89,7 +110,7 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).toContain("textureNumLevels");
-        expect(result.code).not.toContain("cos(scene.envRotationY)");
+        expect(result.code).not.toContain(ROTATION_PATCH);
         expect(result.code).not.toContain("scene._environmentRotation");
     });
 
@@ -103,9 +124,38 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).not.toContain("textureNumLevels");
-        expect(result.chunks?.find(({ isEntry }) => isEntry)?.code).not.toContain("cos(scene.envRotationY)");
-        expect(result.chunks?.some(({ code, isEntry }) => !isEntry && code.includes("cos(scene.envRotationY)"))).toBe(true);
+        expect(result.chunks?.find(({ isEntry }) => isEntry)?.code).not.toContain(ROTATION_PATCH);
+        expect(result.chunks?.some(({ code, isEntry }) => !isEntry && code.includes(ROTATION_PATCH) && code.includes('"scene.envRotationY"'))).toBe(true);
         expect(result.code).toContain("scene._environmentRotation");
+    });
+
+    it("keeps the skybox rotation patch out of setEnvironmentLightingRotation", async () => {
+        const result = await runRollup({
+            entrySource: `import { setEnvironmentLightingRotation } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(setEnvironmentLightingRotation);\n`,
+            format: "es",
+            minify: false,
+        });
+
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).not.toContain("textureNumLevels");
+        expect(result.code).not.toContain(ROTATION_PATCH);
+        expect(result.code).toContain("scene._environmentRotation");
+    });
+
+    it("retains only the lazy rotation shader patch for setEnvironmentSkyboxRotation", async () => {
+        const result = await runRollup({
+            entrySource: `import { setEnvironmentSkyboxRotation } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(setEnvironmentSkyboxRotation);\n`,
+            format: "es",
+            minify: false,
+        });
+
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).not.toContain("textureNumLevels");
+        expect(result.chunks?.find(({ isEntry }) => isEntry)?.code).not.toContain(ROTATION_PATCH);
+        expect(result.chunks?.some(({ code, isEntry }) => !isEntry && code.includes(ROTATION_PATCH))).toBe(true);
+        expect(result.code).not.toContain("scene._environmentRotation");
     });
 
     it("retains both patches when both setters are consumed", async () => {
@@ -120,7 +170,7 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).toContain("textureNumLevels");
-        expect(result.code).toContain("cos(scene.envRotationY)");
+        expect(result.code).toContain(ROTATION_PATCH);
     });
 
     it("applies each patch to the minified shaders shipped in build/lib", async () => {
@@ -128,7 +178,7 @@ describe("environment setter tree shaking", () => {
         const [rotationPatch, blurPatch] = (await Promise.all([
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-rotation-fragment.js")).href),
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-blur-fragment.js")).href),
-        ])) as [BuiltEnvironmentPatch, BuiltEnvironmentPatch];
+        ])) as [BuiltRotationPatch, BuiltEnvironmentPatch];
         const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js");
         const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js");
 
@@ -138,8 +188,15 @@ describe("environment setter tree shaking", () => {
         expect(hdr).not.toContain("var dir");
         expect(hdr).not.toContain("envCubemap");
         expect(hdr).not.toMatch(/\b_er[cs]\b/);
-        expect(rotationPatch._apply(dds, "dds")).not.toBe(dds);
-        expect(rotationPatch._apply(hdr, "hdr")).not.toBe(hdr);
+        for (const [fragment, kind] of [
+            [dds, "dds"],
+            [hdr, "hdr"],
+        ] as const) {
+            expect(rotationPatch._apply(fragment, kind)).toContain("let _erc=cos(scene.envRotationY);let _ers=sin(scene.envRotationY);");
+            const fixed = rotationPatch._rotateSkyboxDirection(fragment, "f32(0.5)");
+            expect(fixed).toContain("let _erc=cos(f32(0.5));let _ers=sin(f32(0.5));");
+            expect(fixed).not.toContain("envRotationY");
+        }
         expect(blurPatch._apply(dds, "dds")).not.toBe(dds);
         expect(blurPatch._apply(hdr, "hdr")).not.toBe(hdr);
         expect(() => rotationPatch._apply("", "dds")).toThrow();

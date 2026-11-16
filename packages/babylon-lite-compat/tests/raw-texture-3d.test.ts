@@ -34,7 +34,7 @@ function fakeScene(): { getEngine(): { _lite: object } } {
 
 describe("RawTexture3D", () => {
     it("is a BaseTexture flagged as 3D with BJS class name", () => {
-        const tex = new RawTexture3D(new Uint8Array(2 * 2 * 2 * 4), 2, 2, 2, 5, fakeScene() as never);
+        const tex = new RawTexture3D(new Uint8Array(2 * 2 * 2 * 4), 2, 2, 2, 5, fakeScene() as never, false);
         expect(tex).toBeInstanceOf(BaseTexture);
         expect(tex.getClassName()).toBe("RawTexture3D");
         expect(tex.is3D).toBe(true);
@@ -45,7 +45,7 @@ describe("RawTexture3D", () => {
     it("forwards the RGBA byte buffer and dimensions to the Lite factory", () => {
         createTexture3DFromPixelsMock.mockClear();
         const data = new Uint8Array(4 * 4 * 4 * 4);
-        const tex = new RawTexture3D(data, 4, 4, 4, 5, fakeScene() as never);
+        const tex = new RawTexture3D(data, 4, 4, 4, 5, fakeScene() as never, false);
         expect(createTexture3DFromPixelsMock).toHaveBeenCalledTimes(1);
         const call = createTexture3DFromPixelsMock.mock.calls[0]!;
         expect(call[1]).toBe(data);
@@ -57,7 +57,7 @@ describe("RawTexture3D", () => {
 
     it("coerces a null data argument into a zero-filled RGBA volume", () => {
         createTexture3DFromPixelsMock.mockClear();
-        new RawTexture3D(null, 2, 3, 4, 5, fakeScene() as never);
+        new RawTexture3D(null, 2, 3, 4, 5, fakeScene() as never, false);
         const bytes = createTexture3DFromPixelsMock.mock.calls[0]![1];
         expect(bytes).toBeInstanceOf(Uint8Array);
         expect(bytes.length).toBe(2 * 3 * 4 * 4);
@@ -70,7 +70,7 @@ describe("RawTexture3D", () => {
         // needs width*height*depth*4 = 4 RGBA8 bytes. The helper trims the trailing
         // bytes so the upload stays tightly packed, without copying off the buffer.
         const view = new Float32Array([1, 2, 3, 4]);
-        new RawTexture3D(view, 1, 1, 1, 5, fakeScene() as never);
+        new RawTexture3D(view, 1, 1, 1, 5, fakeScene() as never, false);
         const bytes = createTexture3DFromPixelsMock.mock.calls[0]![1];
         expect(bytes).toBeInstanceOf(Uint8Array);
         expect(bytes.length).toBe(4);
@@ -78,7 +78,7 @@ describe("RawTexture3D", () => {
     });
 
     it("re-uploads on update() using the recorded dimensions", () => {
-        const tex = new RawTexture3D(new Uint8Array(1 * 1 * 1 * 4), 1, 1, 1, 5, fakeScene() as never);
+        const tex = new RawTexture3D(new Uint8Array(1 * 1 * 1 * 4), 1, 1, 1, 5, fakeScene() as never, false);
         createTexture3DFromPixelsMock.mockClear();
         const next = new Uint8Array(1 * 1 * 1 * 4).fill(255);
         tex.update(next);
@@ -89,7 +89,15 @@ describe("RawTexture3D", () => {
     });
 
     it("resolves whenReadyAsync immediately (synchronous GPU handle)", async () => {
-        const tex = new RawTexture3D(new Uint8Array(1 * 1 * 1 * 4), 1, 1, 1, 5, fakeScene() as never);
+        const tex = new RawTexture3D(new Uint8Array(1 * 1 * 1 * 4), 1, 1, 1, 5, fakeScene() as never, false);
         await expect(tex.whenReadyAsync()).resolves.toBeUndefined();
+    });
+
+    it("fails loudly when Babylon.js mip generation is requested or defaulted", () => {
+        const createDefaultMipTexture = () => new RawTexture3D(new Uint8Array(4), 1, 1, 1, 5, fakeScene() as never);
+        const createExplicitMipTexture = () => new RawTexture3D(new Uint8Array(4), 1, 1, 1, 5, fakeScene() as never, true);
+
+        expect(createDefaultMipTexture).toThrow(/RawTexture3D\(generateMipMaps\)/);
+        expect(createExplicitMipTexture).toThrow(/dedicated shader\/pipeline/);
     });
 });

@@ -1,13 +1,19 @@
 # Module: Standard Material (Blinn-Phong)
 
 > Package path: `packages/babylon-lite/src/material/standard/`
-> Files: `standard-material.ts` (types), `create-standard-material.ts` (factory), `standard-group-builder.ts` (dynamic imports), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline/binding/composed-shader caches), `standard-renderable.ts` (renderable builder and single-mesh rebuild closure), `standard-flags.ts` (feature flags and extension registry), `enable-standard-mesh-features.ts` (published opt-in API), `geometry-view.ts` / `standard-geometry-renderable.ts` / `standard-geometry-output-shader.ts` (geometry-pass reuse), `standard-geometry-feature-hooks.ts` (lazy geometry factories), `no-color-view.ts` (pass-specific material view)
+> Files: `standard-material.ts` (types), `create-standard-material.ts` (factory), `standard-group-builder.ts` (dynamic imports), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline/binding/composed-shader caches), `standard-renderable.ts` (renderable builder and single-mesh rebuild closure), `standard-flags.ts` (feature flags and extension registry), `enable-standard-mesh-features.ts` (published opt-in API), `geometry-view.ts` / `standard-geometry-renderable.ts` / `standard-geometry-output-shader.ts` (geometry-pass reuse), `../geometry-deformation-hooks.ts` / `../geometry-deformation-velocity.ts` (shared opt-in previous-pose state), `no-color-view.ts` (pass-specific material view)
 
 ## Purpose
 
 The StandardMaterial module implements a Blinn-Phong shading model with point/directional light support, optional fog (linear, exponential, exponential-squared), optional diffuse texture, optional emissive texture, optional bump/normal-map texture, optional specular texture, optional ambient/occlusion texture, optional lightmap texture, optional opacity/transparency texture, optional reflection texture (spherical and planar modes), UV2 support for select texture channels, thin instances with per-instance color, `disableLighting` mode, and optional ESM/PCF shadow receiving. Explicit opt-ins add Standard-only mesh deformation/state for skeletal skinning and RGBA vertex color. The shared `enableMaterialUvTransform(material)` opt-in enables independent per-texture scale, offset, and rotation for Standard materials without retaining the UV-transform fragment in unrelated bundles. It matches the output of `BABYLON.StandardMaterial` with the corresponding defines active.
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`standard-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules (in `fragments/`) inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken. The old `standard-textured-material.ts` was merged into this unified system.
+
+`setStandardParallaxOcclusion(material, props)` opts into independently
+implemented height-map UV displacement across existing surface textures,
+including the bump map, while retaining their original texture gradients and
+normal-map frames. See [Parallax Occlusion Mapping](parallax-occlusion-mapping.md)
+for the complete API and pass behavior.
 
 ## ShaderFragment Composition System
 
@@ -52,7 +58,7 @@ import { enableStandardSkeleton, enableMaterialUvTransform, enableStandardVertex
 
 Call each enabler before `registerScene()` when the scene creates matching Standard meshes/material state. Enablers are idempotent and have no import-time registration side effects:
 
-- `enableStandardSkeleton()` installs a mesh predicate and lazy fragment loader. The fragment reuses the material-agnostic shared skeleton shader fragment used by PBR; skeletal geometry velocity is a second lazy chunk loaded only by a velocity pass over a matching mesh.
+- `enableStandardSkeleton()` installs a mesh predicate and lazy fragment loader. The fragment reuses the material-agnostic shared skeleton shader fragment used by PBR. A matching geometry velocity pass separately loads shared previous-skin/morph state; previous morph weights are applied before previous bones, as specified in [module 31](31-geometry-renderer.md).
 - `enableStandardVertexColors()` installs RGBA vertex-color composition and draw-time color-buffer binding.
 - `enableMaterialUvTransform(material)` marks a hand-built Standard material for independent texture transforms. Call it before `registerScene()`, then set `uScale`, `vScale`, `uOffset`, `vOffset`, or `uAng` on any bound `Texture2D`. The Standard group builder loads `std-uv-transform-fragment.ts` only when a marked material is present.
 - `enableStandardUvOffset()` remains the lightweight shared-material translation path for `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
@@ -785,8 +791,8 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `src/material/standard/standard-renderable.ts`                 | —          | `StdFragmentFactories`, effective mesh features, per-scene shader context, composed bindings/pipelines, draw-time deformation buffers         |
 | `src/material/standard/enable-standard-vertex-colors.ts`       | —          | Canonical process-global opt-in that installs Standard RGBA vertex-color support while preserving byte-identical non-feature bundles          |
 | `src/material/standard/enable-standard-mesh-features.ts`       | —          | Published idempotent skeleton and UV-offset enablers                                                                                          |
-| `src/material/standard/standard-geometry-feature-hooks.ts`     | —          | Scalar lazy-loader hook for opt-in skeletal geometry velocity                                                                                 |
-| `src/material/standard/standard-geometry-skeleton-velocity.ts` | —          | Double-buffered previous-bone textures loaded only by skeletal velocity passes                                                                |
+| `src/material/geometry-deformation-hooks.ts`                   | —          | Lazy geometry-only shared deformation-velocity feature                                                                                        |
+| `src/material/geometry-deformation-velocity.ts`                | —          | Renderable-local previous bone/morph snapshots and shader code shared by PBR and Standard                                                     |
 | `src/material/standard/fragments/std-skeleton-fragment.ts`     | —          | Standard wrapper around the shared skeleton fragment; bone texture + joints/weights binding                                                   |
 | `src/material/standard/std-fog-wgsl.ts`                        | —          | Dynamically imported Standard fog fragment (varying, helper, and final blend)                                                                 |
 | `src/shader/fragments/skeleton-fragment.ts`                    | —          | Material-agnostic 4/8-bone WGSL shared by PBR and Standard                                                                                    |

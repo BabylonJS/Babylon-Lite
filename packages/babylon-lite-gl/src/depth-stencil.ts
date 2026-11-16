@@ -588,7 +588,6 @@ function flushColorMask(engine: GLEngineContext): void {
  *
  * No-op on a lost/disposed context or a disposed target.
  *
- * @param engine - The engine that owns `rt`.
  * @param rt - The render target to attach the stencil buffer to.
  * @param options - `depth` (default `true`): when `true` the attachment is a
  *  packed depth+stencil buffer (`DEPTH24_STENCIL8` on `DEPTH_STENCIL_ATTACHMENT`)
@@ -598,7 +597,8 @@ function flushColorMask(engine: GLEngineContext): void {
  * @throws If a renderbuffer handle could not be allocated or the framebuffer is
  *  incomplete after attaching.
  */
-export function generateRenderTargetStencil(engine: GLEngineContext, rt: GLRenderTarget, options?: { depth?: boolean }): void {
+export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { depth?: boolean }): void {
+    const engine = rt._engine;
     if (engine._isLost || engine._disposed || rt._disposed) {
         return;
     }

@@ -8,7 +8,6 @@
  */
 
 import { _preloadStdMeshExt } from "./standard-group-builder.js";
-import { _enableStandardGeometrySkeletonVelocity } from "./standard-geometry-feature-hooks.js";
 import { _installStandardUvOffsetResolver } from "./standard-pipeline.js";
 
 let _skeletonEnabled = false;
@@ -18,7 +17,6 @@ export function enableStandardSkeleton(): void {
         return;
     }
     _skeletonEnabled = true;
-    _enableStandardGeometrySkeletonVelocity(() => import("./standard-geometry-skeleton-velocity.js"));
     // Eagerly preload + register the skinning ext so a skeletal mesh added AFTER the
     // initial group build (synchronous `_rebuildSingle`, which cannot import) is still
     // deformed. Registration is global + durable; the group builder awaits it as a

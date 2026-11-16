@@ -17,6 +17,8 @@ const liteMocks = vi.hoisted(() => ({
     markMaterialUboDirty: vi.fn(),
     createSolidTexture2D: vi.fn(() => ({ id: "solid" })),
     rebuildMaterial: vi.fn(),
+    createBox: vi.fn(() => ({ name: "", children: [] }) as Record<string, unknown>),
+    addToScene: vi.fn(),
     loadTexture2D: vi.fn(),
     loadBasisTexture2D: vi.fn(),
     loadKtxTexture2D: vi.fn(),
@@ -25,6 +27,7 @@ const liteMocks = vi.hoisted(() => ({
     createTexture3DFromPixels: vi.fn(),
     createDynamicTexture: vi.fn(),
     updateDynamicTexture: vi.fn(),
+    enableBentNormals: vi.fn(),
     // The opt-in PBR feature setters compat routes through instead of writing the backing
     // fields directly (the setter is what registers the feature's shader ext). They must
     // apply the same field write here, since the material paths under test read it back.
@@ -51,8 +54,9 @@ const liteMocks = vi.hoisted(() => ({
 vi.mock("babylon-lite", () => liteMocks);
 
 import { StandardMaterial, PBRMaterial } from "../src/materials/materials";
+import { Color3 } from "../src/math/color";
 import { Texture } from "../src/textures/textures";
-import { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractMesh, MeshBuilder } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
@@ -77,14 +81,22 @@ function fakeScene(started: boolean): {
     unregisterMaterial: ReturnType<typeof vi.fn>;
 } {
     const engineLite = { id: "engine-lite" };
-    const registerMaterial = vi.fn();
-    const unregisterMaterial = vi.fn();
+    const materials: object[] = [];
+    const registerMaterial = vi.fn((material: object) => materials.push(material));
+    const unregisterMaterial = vi.fn((material: object) => {
+        const index = materials.indexOf(material);
+        if (index !== -1) {
+            materials.splice(index, 1);
+        }
+    });
     const scene = {
         _hasStarted: started,
         _lite: { id: "scene-lite" },
+        materials,
         getEngine: () => ({ _lite: engineLite }),
         _registerMaterial: registerMaterial,
         _unregisterMaterial: unregisterMaterial,
+        _trackTextureLoad: vi.fn(),
     } as unknown as Scene;
     return { scene, engineLite, registerMaterial, unregisterMaterial };
 }
@@ -104,6 +116,7 @@ beforeEach(() => {
     liteMocks.createStandardMaterial.mockImplementation(() => ({ diffuseTexture: null, emissiveTexture: null, bumpTexture: null }));
     liteMocks.createPbrMaterial.mockImplementation(() => ({}));
     liteMocks.createSolidTexture2D.mockImplementation(() => ({ id: "solid" }));
+    liteMocks.createBox.mockImplementation(() => ({ name: "", children: [] }));
 });
 
 describe("BaseTexture._onReady", () => {
@@ -126,6 +139,134 @@ describe("BaseTexture._onReady", () => {
         let fired = 0;
         (texture as unknown as { _onReady(cb: () => void): void })._onReady(() => fired++);
         expect(fired).toBe(1);
+    });
+});
+
+describe("Texture.replaceImage", () => {
+    it("reuses a ready source handle and rebuilds materials that reference the target", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("https://h/target.png", scene);
+        const source = new Texture("https://h/source.png", scene);
+        const targetHandle = { id: "target" };
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve(targetHandle);
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const mat = new StandardMaterial("m", scene);
+        mat.diffuseTexture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.getInternalTexture()).toBe(sourceHandle);
+        expect(target.name).toBe(source.name);
+        expect(mat._lite.diffuseTexture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+
+    it("rebinds cloned Standard materials and PBR sheen textures", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const original = new StandardMaterial("original", scene);
+        original.diffuseTexture = target;
+        const clone = original.clone("clone");
+        const pbr = new PBRMaterial("pbr", scene);
+        pbr.sheen.texture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(original._lite.diffuseTexture).toBe(sourceHandle);
+        expect(clone._lite.diffuseTexture).toBe(sourceHandle);
+        expect((pbr._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(3);
+    });
+
+    it("preserves a custom target name while replacing its image source", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise).mockResolvedValueOnce({ id: "clone" });
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        target.name = "ground";
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.name).toBe("ground");
+        expect(target.clone().name).toBe("ground");
+    });
+
+    it("preserves a loader-produced sheen texture after facade access, finalization, and cloning", () => {
+        const { scene } = fakeScene(true);
+        const sheenTexture = { id: "loaded-sheen" };
+        const loaded = PBRMaterial._fromLite("loaded", { _sheen: { isEnabled: true, texture: sheenTexture } } as never, scene);
+
+        expect(loaded.sheen.intensity).toBe(1);
+        const clone = loaded.clone("clone");
+        loaded._ensureRenderable(scene.getEngine()._lite);
+        clone._ensureRenderable(scene.getEngine()._lite);
+
+        expect((loaded._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+        expect((clone._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+    });
+
+    it("rejects engine-only, unready, cross-engine, and differently oriented sources", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const pendingLoad = deferred<object>();
+        const otherLoad = deferred<object>();
+        const invertedLoad = deferred<object>();
+        const engineOnlyLoad = deferred<object>();
+        liteMocks.loadTexture2D
+            .mockReturnValueOnce(targetLoad.promise)
+            .mockReturnValueOnce(pendingLoad.promise)
+            .mockReturnValueOnce(otherLoad.promise)
+            .mockReturnValueOnce(invertedLoad.promise)
+            .mockReturnValueOnce(engineOnlyLoad.promise);
+        const target = new Texture("target.png", scene, false, true);
+        const pending = new Texture("pending.png", scene, false, true);
+        const otherEngine = new Texture("other.png", engineWrapper(), false, true);
+        const inverted = new Texture("inverted.png", scene, false, false);
+        const engineOnly = new Texture("engine-only.png", engineWrapper(), false, true);
+        targetLoad.resolve({ id: "target" });
+        otherLoad.resolve({ id: "other" });
+        invertedLoad.resolve({ id: "inverted" });
+        engineOnlyLoad.resolve({ id: "engine-only" });
+        await Promise.all([target.whenReadyAsync(), otherEngine.whenReadyAsync(), inverted.whenReadyAsync(), engineOnly.whenReadyAsync()]);
+
+        expect(target.replaceImage(pending)).toBe(false);
+        expect(target.replaceImage(otherEngine)).toBe(false);
+        expect(target.replaceImage(inverted)).toBe(false);
+        expect(engineOnly.replaceImage(target)).toBe(false);
+        expect(target.replaceImage(target)).toBe(true);
+    });
+
+    it("rejects a same-engine source whose effective upload flip differs", async () => {
+        const { scene, engineLite } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene, false, false);
+        const source = new Texture("source.png", { _lite: engineLite as import("babylon-lite").EngineContext }, false, false);
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(false);
     });
 });
 
@@ -197,6 +338,114 @@ describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
         expect(liteMocks.createSolidTexture2D).toHaveBeenCalledWith(engineLite, 1, 1, 1);
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
     });
+
+    it("rebuilds a started material when bent normals are removed", () => {
+        const { scene } = fakeScene(true);
+        const mat = new PBRMaterial("m", scene);
+        const texture = {
+            _lite: { id: "bent" },
+            level: 1,
+            _onReady: (listener: () => void) => listener(),
+            _onLevelChanged: vi.fn(() => vi.fn()),
+        } as unknown as Texture;
+
+        mat.bentNormalTexture = texture;
+        liteMocks.rebuildMaterial.mockClear();
+        mat.bentNormalTexture = null;
+
+        expect(mat._lite.bentNormalTexture).toBeUndefined();
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+});
+
+describe("PBRMaterial factor-only materials", () => {
+    it("applies albedo colour, metallic and roughness exactly once, also when they are set again after the first build", () => {
+        const { scene, engineLite } = fakeScene(true);
+        const floor = new PBRMaterial("floor", scene);
+        floor.albedoColor = new Color3(0.68, 0.67, 0.62);
+        floor.metallic = 0;
+        floor.roughness = 0.9;
+        floor._ensureRenderable(engineLite as never);
+
+        // Room code re-applies the same look on every refresh. With the values baked into the solid
+        // texel these writes went into the factor on top of it: colour² and roughness².
+        floor.albedoColor = new Color3(0.68, 0.67, 0.62);
+        floor.roughness = 0.9;
+        floor._ensureRenderable(engineLite as never);
+
+        // The backing textures are neutral, so texel × factor is the value itself.
+        for (const call of liteMocks.createSolidTexture2D.mock.calls) {
+            expect((call as unknown[]).slice(1).every((channel) => channel === 1)).toBe(true);
+        }
+        const lite = floor._lite as { baseColorFactor?: number[]; roughnessFactor?: number; metallicFactor?: number };
+        expect(lite.baseColorFactor).toEqual([0.68, 0.67, 0.62, 1]);
+        expect(lite.roughnessFactor).toBe(0.9);
+        expect(lite.metallicFactor).toBe(0);
+        // And the Babylon.js-facing getters keep reporting what the app set.
+        expect(floor.roughness).toBe(0.9);
+        expect(floor.metallic).toBe(0);
+        expect(floor.albedoColor.g).toBeCloseTo(0.67);
+    });
+});
+
+describe("StandardMaterial.disableLighting on a live material", () => {
+    it("rebuilds the material so the shader variant and the compensated diffuse switch together", () => {
+        const { scene } = fakeScene(true);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.emissiveColor = new Color3(0, 0, 1);
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+
+        // Lighting on/off selects a different shader. Marking the UBO dirty alone would keep the cached lit
+        // shader running with the neutral white diffuse, so a red scene light would turn the blue
+        // emissive magenta.
+        led.disableLighting = true;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([1, 1, 1]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
+
+        // Same value again: nothing to rebuild.
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+
+        // Back to lit: the app's diffuse returns and the lit variant is rebuilt.
+        led.disableLighting = false;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([0, 0, 0]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(2);
+    });
+
+    it("rebuilds a material built with no scene and assigned to a mesh before startup", () => {
+        // Babylon.js-style scene-less construction. The material used to stay without a scene (`_scene`
+        // undefined), so a post-start toggle rebuilt nothing and kept the cached lit shader.
+        const { scene, registerMaterial } = fakeScene(false);
+        const pendingAdds: Array<() => void> = [];
+        Object.assign(scene, { defaultMaterial: undefined, _deferAdd: (add: () => void) => pendingAdds.push(add), _registerMesh: vi.fn(), _unregisterNode: vi.fn() });
+        const led = new StandardMaterial("led");
+        led.diffuseColor = new Color3(0, 0, 0);
+        const strip = MeshBuilder.CreateBox("strip", {}, scene);
+        strip.material = led;
+        // Ownership is settled at assignment, before startup; GPU finalization waits for the engine.
+        expect(registerMaterial).toHaveBeenCalledWith(led);
+        expect(led.getScene()).toBe(scene);
+
+        // Engine start: the scene goes live and flushes its deferred mesh adds.
+        (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
+        for (const add of pendingAdds.splice(0)) {
+            add();
+        }
+
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
+    });
+
+    it("does not rebuild before the scene has started", () => {
+        const { scene } = fakeScene(false);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+    });
 });
 
 describe("Mesh material setter reconciliation (issue #476a)", () => {
@@ -208,7 +457,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
 
     it("ensures the renderable, adopts the scene, and rebinds when the mesh is live", () => {
         const { scene, engineLite } = fakeScene(true);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -222,9 +471,9 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         expect(liteMesh.material).toBe(mat._lite);
     });
 
-    it("only rebinds (no ensure/adopt) before the engine has started", () => {
+    it("adopts the scene and rebinds, without GPU finalization, before the engine has started", () => {
         const { scene } = fakeScene(false);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -232,7 +481,9 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const mat = fakeMaterial();
         materialSetter.call(mesh, mat);
 
-        expect(mat._adoptScene).not.toHaveBeenCalled();
+        // Ownership does not wait for startup: not every pre-start assignment is followed by a registration
+        // callback that sees this material (an imported mesh has none). Finalization needs the engine.
+        expect(mat._adoptScene).toHaveBeenCalledWith(scene);
         expect(mat._ensureRenderable).not.toHaveBeenCalled();
         expect(liteMesh.material).toBe(mat._lite);
     });
@@ -242,7 +493,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const defaultMaterial = fakeMaterial();
         Object.defineProperty(scene, "defaultMaterial", { value: defaultMaterial });
         const previousMaterial = fakeMaterial();
-        const liteMesh: { material: unknown } = { material: previousMaterial._lite };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: previousMaterial._lite, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;

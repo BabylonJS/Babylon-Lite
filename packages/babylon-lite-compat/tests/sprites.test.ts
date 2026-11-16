@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Sprite, SpriteManager, ThinSprite } from "../src/sprites/sprites";
+import { Sprite, SpriteManager, SpriteRenderer, ThinSprite } from "../src/sprites/sprites";
 
 /**
  * GPU-free coverage for the sprite wrappers. `SpriteManager` needs a real engine
@@ -9,6 +9,16 @@ import { Sprite, SpriteManager, ThinSprite } from "../src/sprites/sprites";
  * the lab compat-parity scenes (54/55/59/94/95).
  */
 describe("Sprite", () => {
+    it("reports an empty manager ready and waits for the Lite system when sprites exist", () => {
+        const manager = Object.create(SpriteManager.prototype) as SpriteManager & { _sprites: Sprite[] };
+        manager._sprites = [];
+        expect(manager.isReady()).toBe(true);
+        manager._sprites.push({} as Sprite);
+        expect(manager.isReady()).toBe(false);
+        manager._lite = {} as never;
+        expect(manager.isReady()).toBe(true);
+    });
+
     it("exposes Babylon.js default sprite properties", () => {
         const fakeManager = { _sprites: [] } as unknown as SpriteManager;
         const sprite = new Sprite("s", fakeManager);
@@ -75,5 +85,14 @@ describe("ThinSprite", () => {
         expect(s.cellIndex).toBe(12);
         expect(s.angle).toBeCloseTo(Math.PI / 6);
         expect(s.invertU).toBe(true);
+    });
+});
+
+describe("SpriteRenderer", () => {
+    it("reports readiness once its atlas has loaded", () => {
+        const renderer = Object.create(SpriteRenderer.prototype) as SpriteRenderer;
+        expect(renderer.isReady()).toBe(false);
+        (renderer as unknown as { _atlas: object })._atlas = {};
+        expect(renderer.isReady()).toBe(true);
     });
 });

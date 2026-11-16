@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Standalone device input</title>
+        <style>
+            body {
+                margin: 20px;
+                font-family: sans-serif;
+            }
+            canvas {
+                display: block;
+                width: 400px;
+                height: 200px;
+                background: #ddd;
+                touch-action: none;
+            }
+            iframe {
+                width: 300px;
+                height: 160px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Standalone device input</h1>
+        <p>Focus the canvas, hold WASD, drag, or scroll. This fixture observes input without a GPU.</p>
+        <canvas id="renderCanvas" width="800" height="400" tabindex="0"></canvas>
+        <button id="outside">Outside the input surface</button>
+        <input id="editor" aria-label="Other keyboard target" />
+        <div id="keyboard-container" tabindex="0"><input id="nested-editor" aria-label="Nested keyboard target" /></div>
+        <iframe
+            id="realm"
+            title="Independent input realm"
+            srcdoc="<canvas id='frameCanvas' tabindex='0' style='display:block;width:240px;height:120px;background:#ddd;touch-action:none'></canvas>"
+        ></iframe>
+        <script type="module" src="/lite/src/device-input.ts"></script>
+    </body>
+</html>

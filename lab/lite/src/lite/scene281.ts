@@ -1,7 +1,7 @@
 // Scene 281: Node Particle Editor - Noise Texture.
 
 import {
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     animateParticleSystem,
     attachControl,
     buildNodeParticleSetWithNoiseTextures,
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
 
         const billboard = createParticleBillboard(system);
         syncParticleBillboard(system, billboard);
-        addFacingBillboardSystem(scene, billboard);
+        addBillboardSystemToScene(scene, billboard);
     }
 
     await registerScene(scene);

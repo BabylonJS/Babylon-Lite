@@ -61,6 +61,29 @@ export function isExternalRequest(request: string): boolean {
     return DECLARED_DEPENDENCIES.some((dep) => request === dep || request.startsWith(`${dep}/`));
 }
 
+/** The `package.json` emitted beside `build/lib`: what an npm consumer's resolver reads. */
+const BUILD_PACKAGE_JSON = resolve(PACKAGE_DIR, "build/package.json");
+
+/** Resolves the package's private `#…` specifiers (e.g. `#coordinate-system`) from the emitted
+ *  `package.json` `imports` map under the default condition, i.e. the left-handed build. Bare Rollup
+ *  does not read `imports`; a real Rollup consumer gets it from `@rollup/plugin-node-resolve`, and
+ *  webpack/Vite/esbuild read it natively. See docs/lite/architecture/61-right-handed-system.md. */
+export function packageImportsPlugin(): RollupPlugin {
+    let imports: Record<string, string | { default?: string }> | undefined;
+    return {
+        name: "babylon-lite-package-imports",
+        resolveId(source) {
+            if (!source.startsWith("#")) {
+                return null;
+            }
+            imports ??= (JSON.parse(readFileSync(BUILD_PACKAGE_JSON, "utf-8")) as { imports?: typeof imports }).imports ?? {};
+            const target = imports[source];
+            const path = typeof target === "string" ? target : target?.default;
+            return path ? resolve(PACKAGE_DIR, "build", path) : null;
+        },
+    };
+}
+
 /** Warnings that are inherent to bundling a large library and say nothing about our code health.
  *  Everything else must be zero for the bundling tests to pass. */
 export const BENIGN_WARNING_RE = /asset size limit|entrypoint size limit|performance recommendations|exceed the recommended size limit|bigger than 244 KiB|Circular dependenc/i;
@@ -270,6 +293,7 @@ export async function runRollup(opts: RollupOpts): Promise<BundleResult> {
     try {
         const plugins: RollupPlugin[] = opts.minify
             ? [
+                  packageImportsPlugin(),
                   {
                       name: "test-terser-minify",
                       async renderChunk(chunkCode) {
@@ -278,7 +302,7 @@ export async function runRollup(opts: RollupOpts): Promise<BundleResult> {
                       },
                   },
               ]
-            : [];
+            : [packageImportsPlugin()];
         bundle = await rollup({
             input: entry,
             external: (id: string) => isExternalRequest(id),

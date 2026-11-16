@@ -23,7 +23,7 @@ const ENTRIES = {
 } as const;
 
 /**
- * `types` entry-point for each export subpath. With `rollupTypes` on, api-extractor
+ * `types` entry-point for each export subpath. With `bundleTypes` on, api-extractor
  * rolls each entry up into a single declaration whose basename matches the entry
  * key (the same flattened basename Vite uses for the `.js` output), so every entry
  * lands at the top level of `dist/` (e.g. `navigation` → `./navigation.d.ts`),
@@ -116,9 +116,9 @@ export default defineConfig(({ mode }) => {
         },
         plugins: [
             dts({
-                rollupTypes: !isWatch,
+                bundleTypes: !isWatch,
                 tsconfigPath: resolve(__dirname, "tsconfig.json"),
-                outDir,
+                outDirs: outDir,
             }),
             // In watch mode vite-plugin-dts mirrors the src tree (no rollup), so the
             // api-extractor trim pass is skipped; published builds roll up + trim every

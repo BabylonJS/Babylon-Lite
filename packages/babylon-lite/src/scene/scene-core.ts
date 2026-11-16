@@ -19,7 +19,7 @@ import type { EnvironmentRecoverySource } from "../loader-env/environment-recove
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
-import { createRenderTarget } from "../engine/render-target.js";
+import { _createDirectRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/scene-lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
@@ -27,6 +27,14 @@ import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
+import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
+import type { Material } from "../material/material.js";
+import type { SceneChangeState } from "./scene-change.js";
+import type { SceneRenderableCollection } from "./scene-renderable-collection.js";
+import type { SceneLightingExtension } from "../light/lighting-extension.js";
+import type { ParticleSystem } from "../particle/particle-system.js";
+import type { PhysicsWorld } from "../physics/havok.js";
+import type { RenderTarget } from "../engine/render-target.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -88,6 +96,11 @@ export interface RuntimeSceneBuildHooks {
     /** @internal */
     _d(): boolean;
     exclusive<T>(builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T>;
+    /** @internal Completion of the full PBR group rebuild that has not been dispatched yet. PBR meshes moved into
+     *  their group before it is dispatched join it instead of starting an identical rebuild of their own. */
+    _n?: Promise<void>;
+    /** @internal The most recent full PBR group rebuild (never rejects); the next one is dispatched once it settles. */
+    _l?: Promise<void>;
 }
 
 /** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
@@ -105,6 +118,37 @@ export interface SceneMeshGroup extends Array<Mesh> {
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
 
+/** Values accepted by {@link addToScene} and `removeFromScene`. */
+export type SceneEntity = Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer;
+
+/** A committed scene-membership change. */
+export interface SceneChangeEvent {
+    readonly type: "added" | "removed";
+    readonly entity: SceneEntity;
+}
+
+/** Receives committed scene-membership changes. */
+export type SceneChangeListener = (event: SceneChangeEvent) => void;
+
+interface SceneChangeHook {
+    run(scene: SceneContext, mutation: () => void): void;
+    record(scene: SceneContext, entity: SceneEntity, type: SceneChangeEvent["type"]): void;
+    dispose(scene: SceneContext): void;
+}
+
+let _sceneChangeHook: SceneChangeHook | undefined;
+let _sceneDisposeHook: ((scene: SceneContext, cleanup: () => void) => void) | undefined;
+
+/** @internal Install the optional generic scene-change seam. */
+export function _setSceneChangeHook(hook: SceneChangeHook): void {
+    _sceneChangeHook = hook;
+}
+
+/** @internal Install the optional generic scene-disposal seam. */
+export function _setSceneDisposeHook(hook: (scene: SceneContext, cleanup: () => void) => void): void {
+    _sceneDisposeHook = hook;
+}
+
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
     /** @internal */
@@ -120,7 +164,13 @@ export interface SceneContext extends RenderingContext {
     clearColor: GPUColorDict;
     camera: Camera | null;
     lights: LightBase[];
+    /** @internal Optional material-owned lighting contribution, installed by an explicit enabler. */
+    _lighting?: SceneLightingExtension;
     imageProcessing: ImageProcessingConfig;
+    /** @internal Optional final linear scene output consumed by trailing image processing. */
+    _outputTexture?: RenderTarget;
+    /** @internal Optional feature-owned hook around changes to the scene output pipeline. */
+    _outputPipelineChange?: (ready: boolean) => void;
 
     /** All meshes added to the scene (standard + PBR). */
     meshes: Mesh[];
@@ -174,6 +224,17 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Scene whose swapchain output this overlay scene composites onto; set only by `createOverlayScene`. */
+    _overlayBase?: SceneContext;
+    /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
+    _particleSystems?: ParticleSystem[];
+    /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
+    _physicsWorlds?: PhysicsWorld[];
+    /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
+    _sceneChanges?: SceneChangeState;
+    /** @internal Custom-renderable collections (text, depth-hosted sprite layers, billboard systems), keyed by
+     *  family. Each is allocated by its family's first add or subscription; independent of generic membership. */
+    _renderableCollections?: Map<string, SceneRenderableCollection>;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
@@ -213,9 +274,8 @@ export interface SceneContext extends RenderingContext {
     _renderableVersion: number;
     /** @internal Monotonic counter bumped ONLY when a material's renderables are rebuilt/swapped (material
      *  swap drain or `rebuildMaterial`) — NOT on a geometry resize (which bumps `_renderableVersion` alone).
-     *  Lets consumers that cache material-view-derived GPU state (e.g. the CSM shadow tasks' no-color material
-     *  views) cheaply re-record on a geometry-only edit and only fully rebuild when a caster's material UBOs
-     *  were actually destroyed/recreated (which would otherwise leave their cached views dangling). */
+     *  Currently write-only: the CSM shadow tasks, its former reader, follow each caster material's `_csmGen`
+     *  instead, so they requeue only the casters of a rebuilt material. */
     _materialEpoch: number;
     /** True once the initial deferred build (buildScene) has run. Meshes added after
      *  this point use either the per-frame rebuild drain or an isolated async build
@@ -262,11 +322,31 @@ export interface SceneContext extends RenderingContext {
     _flowGraphPointerCleanup?: () => void;
     /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
     _flowGraphPointerRefresh?: () => void;
+    /** @internal Optional scene-owned MeshLoD registry. Populated lazily by the
+     *  MeshLoD feature's `addMeshLoDToScene`; absent (and zero-cost) for every scene
+     *  that never uses MeshLoD. */
+    _meshLoDRegistry?: MeshLoDSceneRegistry;
+    /** @internal Opt-in material rebuild work for scene-owned non-mesh renderables. */
+    _materialRebuild?: (matches: (material: Material) => boolean) => Promise<void>;
 }
 
 /** Options passed to the scene-context factory. */
 export interface SceneContextOptions {
     defaultRenderTask?: boolean;
+}
+
+/** Match the scene camera's floating-origin mode to its engine. A camera can arrive fresh or from an
+ *  engine with the opposite mode: `getViewMatrix` zeroes the view translation only under the flag. The
+ *  view cache resets, and clearing the projection snapshot re-arms `_cameraChangeKey` (as on a fresh
+ *  camera) so its next call advances `_projRev`: the view-projection cache and every change-key
+ *  consumer (scene UBO, text, CSM, TAA, …) rewrite in this frame. */
+function syncCameraFloatingOrigin(scene: SceneContext, fo: boolean | undefined): void {
+    const cam = scene.camera;
+    if (cam && !cam._useFloatingOrigin !== !fo) {
+        cam._useFloatingOrigin = fo;
+        cam._viewVer = -1;
+        cam._projFov = undefined;
+    }
 }
 
 /** Create an empty scene context bound to the given `surface`. The default render task
@@ -307,23 +387,17 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _drawCallsPre: 0,
 
         _update(): void {
-            // When the engine was created with `useFloatingOrigin: true`, mark
-            // the active camera so `getViewMatrix` knows to zero its
-            // translation column (the GPU view × world product is then the
-            // eye-relative result the LWR offset trick produces). For non-LWR
-            // engines `eng.useFloatingOrigin` is false and this is a single
-            // boolean check per frame — the inner branch is dead.
-            if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
-                ctx.camera._useFloatingOrigin = true;
-                ctx.camera._viewVer = -1;
-                ctx.camera._vpVer = -1;
-            }
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
             const encoder = eng._currentEncoder;
             let draws = 0;
+            // Match the active camera's floating-origin mode to this engine before the callbacks (so the
+            // matrices they read are in the frame the engine renders) and again after them (they may
+            // install a camera), before any pre-pass, uniform update or record reads its view.
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             for (const cb of ctx._beforeRender) {
                 cb(d);
             }
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             if (ctx._materialSwapQueue.length) {
                 void processMaterialSwaps(ctx);
             }
@@ -358,9 +432,9 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         // All three reads (format / msaaSamples / scRT) come from the bound `surface`.
         const msaa = surface.msaaSamples > 1;
         const rt = msaa
-            ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
+            ? _createDirectRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
-        const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+        const depth = msaa ? undefined : _createDirectRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
         _appendTask(fg, _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());
@@ -372,10 +446,19 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
     (scene as SceneContext)._beforeRender.unshift(cb);
 }
 
-/** Register a callback to run when `disposeScene` is called. Used to tie
- *  user-owned GPU resources (e.g. a `SpriteRenderer`) to the scene's lifetime. */
-export function onSceneDispose(scene: SceneContext, cb: () => void): void {
-    (scene as SceneContext)._disposables.push(cb);
+/** @internal Whether the generic scene-change seam has an installed subscriber. */
+export function _hasSceneChangeHook(): boolean {
+    return _sceneChangeHook !== undefined;
+}
+
+/** @internal Run one canonical mutation through the installed generic scene-change seam. */
+export function _runSceneChange(scene: SceneContext, mutation: () => void): void {
+    _sceneChangeHook?.run(scene, mutation);
+}
+
+/** @internal Publish one committed membership fact through the installed generic scene-change seam. */
+export function _notifySceneChange(scene: SceneContext, entity: SceneEntity, type: SceneChangeEvent["type"]): void {
+    _sceneChangeHook?.record(scene, entity, type);
 }
 
 /** Get the scene's frame graph. Always non-null — created in `createSceneContext`. */
@@ -408,7 +491,9 @@ export function addDeferredSceneRenderables(
  * to the scene, dispatching on its type. Asset containers are unpacked and each contained
  * entity added recursively. Optional scene-hosted systems such as depth-hosted sprites
  * expose their own opt-in add functions so mesh-only scenes do not pay feature-specific
- * routing bytes here.
+ * routing bytes here. Adding a camera makes it the scene's active camera (`scene.camera`),
+ * replacing any previous one; an asset container's camera is only installed when the scene
+ * has none.
  * @param scene - The owning scene (pillar 4b: entities never reference the scene themselves).
  * @param entity - The entity (or asset container) to add.
  * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
@@ -418,7 +503,11 @@ export function addDeferredSceneRenderables(
  * state is touched; when adding a hierarchy or asset container, entities processed before the
  * offending mesh stay added.
  */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+export function addToScene(scene: SceneContext, entity: SceneEntity): void {
+    if (_sceneChangeHook && scene._sceneChanges && scene._sceneChanges.depth === 0) {
+        _sceneChangeHook.run(scene, () => addToScene(scene, entity));
+        return;
+    }
     const ctx = scene as SceneContext;
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
@@ -447,6 +536,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         // Feature-owned scene wiring runs synchronously before registerScene() builds
         // renderables. Lazy features also own any cleanup registration they require.
         result._sceneSetup?.(ctx, result);
+        _notifySceneChange(ctx, entity, "added");
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
@@ -455,46 +545,62 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         // scene must be left untouched when it does.
         registerMeshScene(ctx, mesh);
         ctx.meshes.push(mesh);
-        const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
-        if (build) {
-            let group = ctx._groups.get(build);
-            if (!group) {
-                group = [] as SceneMeshGroup;
-                ctx._groups.set(build, group);
-                if (!ctx._built) {
-                    ctx._deferredBuilders.push(async () => {
-                        const result = await build(ctx, group!);
-                        ctx._renderables.push(...result.renderables);
-                        group!.o = result.renderables;
-                        if (result.updater) {
-                            ctx._uniformUpdaters.push(result.updater);
-                        }
-                        group!.r = result.rebuildSingle;
-                    });
-                }
-            }
-            group.push(mesh);
-            // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
-            // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-            // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
-            // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
-            // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
-            // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (ctx._built || group.r) {
-                enqueueMaterialSwap(ctx, mesh);
-            }
-        }
+        joinMaterialGroup(ctx, mesh);
         ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
+    } else if ("fov" in entity) {
+        ctx.camera = entity as Camera;
     }
+    _notifySceneChange(ctx, entity, "added");
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
     if (kids?.length) {
         for (const child of kids) {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
-            addToScene(scene, child);
+            addToScene(scene, child as SceneEntity);
         }
+    }
+}
+
+/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the initial
+ *  build, its deferred builder) on first use. */
+function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
+    const build = mesh.material?._buildGroup;
+    if (!build) {
+        return;
+    }
+    let group = ctx._groups.get(build);
+    if (!group) {
+        group = [] as SceneMeshGroup;
+        ctx._groups.set(build, group);
+        if (!ctx._built) {
+            ctx._deferredBuilders.push(async () => {
+                // Every mesh left this group before boot (re-materialed into another family or removed). Builders
+                // require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
+                if (!group![0]) {
+                    ctx._groups.delete(build);
+                    return;
+                }
+                const result = await build(ctx, group!);
+                ctx._renderables.push(...result.renderables);
+                group!.o = result.renderables;
+                if (result.updater) {
+                    ctx._uniformUpdaters.push(result.updater);
+                }
+                group!.r = result.rebuildSingle;
+            });
+        }
+    }
+    group.push(mesh);
+    // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
+    // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
+    // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
+    // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
+    // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
+    // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
+    if (ctx._built || group.r) {
+        enqueueMaterialSwap(ctx, mesh);
     }
 }
 
@@ -518,9 +624,7 @@ export function disposeScene(scene: SceneContext): void {
             ctx._renderables.length = ctx._uniformUpdaters.length = 0;
             return 1;
         });
-        for (const fn of ctx._disposables) {
-            fn();
-        }
+        ctx._disposables.splice(0).forEach((fn) => fn());
         for (const fns of ctx._meshDisposables.values()) {
             for (const fn of fns) {
                 fn();
@@ -551,19 +655,30 @@ export function disposeScene(scene: SceneContext): void {
         ctx.shadowGenerators.length = 0;
         ctx.camera = null;
     };
-    cleanup();
+    _sceneChangeHook?.dispose(ctx);
+    if (_sceneDisposeHook) {
+        _sceneDisposeHook(ctx, cleanup);
+    } else {
+        cleanup();
+    }
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
+    for (const light of scene.lights) {
+        light._validateLighting?.(scene._lighting);
+    }
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
-    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
-    // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
-    // are real runtime changes and must survive so a newly introduced material group can be built below.
-    if (!ctx._built) {
-        ctx._materialSwapQueue.length = 0;
+    // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
+    // material AFTER addToScene), is built by the deferred builders below with its FINAL material. Its queued swap
+    // is redundant and would insert a SECOND renderable (double-draw), so it is dropped. Its group membership was
+    // fixed at addToScene time and may be stale (no group for a material assigned later, or the old family's
+    // group), so when any swap was queued the still-unbuilt groups are refilled from every mesh's current material,
+    // in add order. On re-registration the queued swaps are real runtime changes and must survive so a newly
+    // introduced material group can be built.
+    if (!ctx._built && ctx._materialSwapQueue.splice(0)[0]) {
+        ctx._groups.forEach((group) => (group.length = 0));
+        ctx.meshes.forEach((mesh) => joinMaterialGroup(ctx, mesh));
     }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);
@@ -586,11 +701,18 @@ export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneCon
     _prepareShaderPipelines = prepare;
 }
 
+let _overlaySceneRegistered: ((scene: SceneContext) => void) | undefined;
+/** @internal Install overlay-scene handling that runs after any scene is inserted into its surface. */
+export function _installOverlaySceneRegistration(registered: (scene: SceneContext) => void): void {
+    _overlaySceneRegistered = registered;
+}
+
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to its bound surface's render list in overlay order. The scene is
- * always attached to `scene.surface` (which equals the engine itself in the
- * single-canvas case).
+ * and adds the scene to its bound surface's render list. A scene clears its target unless
+ * it was created with `createOverlayScene`, in which case it composites over its base scene
+ * and is kept immediately after it. The scene is always attached to `scene.surface`
+ * (which equals the engine itself in the single-canvas case).
  */
 export async function registerScene(scene: SceneContext): Promise<void> {
     const ctx = scene;
@@ -607,11 +729,7 @@ export async function registerScene(scene: SceneContext): Promise<void> {
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 /**
@@ -635,11 +753,7 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
@@ -658,5 +772,5 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
  *  The scene is always removed from `scene.surface`. */
 export function unregisterScene(scene: SceneContext): void {
-    unregisterRenderingContext(scene.surface, scene as SceneContext);
+    unregisterRenderingContext(scene.surface, scene);
 }

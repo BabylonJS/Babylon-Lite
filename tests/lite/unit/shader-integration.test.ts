@@ -6,12 +6,12 @@ import { describe, it, expect, vi } from "vitest";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { createPbrTemplate } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
+import * as tangentNormalWgsl from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-tangent-wgsl";
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock, _clusteredSpotLightBlock } from "../../../packages/babylon-lite/src/material/pbr/fragments/clustered-light-wgsl";
 import { createStandardTemplate } from "../../../packages/babylon-lite/src/material/standard/standard-template";
 import { createEmissiveColorFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/emissive-fragment";
-import { createClearcoatFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
-import { PBR_HAS_CLEARCOAT } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
-import { createSheenFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
+import { createClearcoatFragment, pbrExt as clearcoatExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
+import { createSheenFragment, pbrExt as sheenExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
 import { createIblFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
 import { createSkeletonFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/skeleton-fragment";
 import { createMorphFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/morph-fragment";
@@ -28,22 +28,27 @@ import {
 } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
 import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
 import { createStdCsmShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment";
-import { HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { DISABLE_LIGHTING, HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
-import { createStandardGeometrySkeletonVelocity } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-skeleton-velocity";
+import { createGeometryDeformationVelocity } from "../../../packages/babylon-lite/src/material/geometry-deformation-velocity";
+import { getGeometryDeformationVelocity } from "../../../packages/babylon-lite/src/material/geometry-deformation-hooks";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { setStandardBumpTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-bump";
+import { setStandardSpecularTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-specular";
+import { _computeStandardMaterialFeatures } from "../../../packages/babylon-lite/src/material/standard/standard-material-features";
+import { _getStdExtsSorted } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { enableStandardSkeleton, enableStandardUvOffset } from "../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features";
-import { _getStandardGeometrySkeletonVelocityFactory, preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import { preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 
+const PBR_HAS_CLEARCOAT = 1 << 20;
+
 const defaultPbrConfig: PbrTemplateConfig = {
-    _normalMode: "none",
     _hasEmissiveTexture: false,
-    _hasSpecGloss: false,
     _hasDoubleSided: false,
     _hasTonemap: false,
     _hasAlphaBlend: false,
@@ -59,6 +64,17 @@ const defaultPbrConfig: PbrTemplateConfig = {
 // ── PBR Template Integration ────────────────────────────────────
 
 describe("PBR template + fragments integration", () => {
+    it("preserves the clearcoat feature bit behind its fragment", () => {
+        expect(clearcoatExt.detect!({ _clearCoat: { isEnabled: true } })).toEqual({ f: PBR_HAS_CLEARCOAT, f2: 0 });
+        expect(clearcoatExt.detect!({ _clearCoat: { isEnabled: false } })).toEqual({ f: 0, f2: 0 });
+    });
+
+    it("preserves sheen texture and albedo-scaling bit assignments", () => {
+        const sheen = { isEnabled: true, texture: {}, albedoScaling: true };
+        expect(sheenExt.detect!({ _sheen: sheen })).toEqual({ f: (1 << 22) | (1 << 23) | (1 << 30), f2: 0 });
+        expect(sheenExt.detect!({ _sheen: { ...sheen, isEnabled: false } })).toEqual({ f: 0, f2: 0 });
+    });
+
     it("composes minimal PBR (no extensions)", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig });
         const result = composeShader(template, []);
@@ -100,8 +116,8 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("only emits derivative roughness when specular AA is enabled", () => {
-        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: false }), []);
-        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: true }), []);
+        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasSpecularAA: false }), []);
+        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasSpecularAA: true }), []);
 
         expect(disabled._fragmentWGSL).toContain("var AA_factor_x=0.0;");
         expect(disabled._fragmentWGSL).not.toContain("nDfdx_AA=dpdx(N)");
@@ -110,14 +126,14 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + emissive color", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, [createEmissiveColorFragment(false)]);
         expect(result._fragmentWGSL).toContain("material.emissiveColor");
         expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(true);
     });
 
     it("composes PBR emissive-color fallback when the emissive fragment is absent", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, []);
         expect(result._fragmentWGSL).toContain("var emissive:vec3f;");
         expect(result._fragmentWGSL).toContain("directDiffuse+directSpecular+emissive");
@@ -127,7 +143,7 @@ describe("PBR template + fragments integration", () => {
     it("composes PBR + clearcoat", () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
         });
@@ -141,7 +157,7 @@ describe("PBR template + fragments integration", () => {
     it("composes PBR + sheen", () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
         });
@@ -184,7 +200,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + IBL (env)", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasSpecularAA: true, _hasIbl: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasSpecularAA: true, _hasIbl: true });
         const result = composeShader(template, [createIblFragment(true)]);
         expect(result._fragmentWGSL).toContain("environmentHorizonOcclusion");
         expect(result._fragmentWGSL).toContain("iblTexture");
@@ -197,7 +213,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + skeleton (4-bone)", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const result = composeShader(template, [createSkeletonFragment(false)]);
         expect(result._vertexWGSL).toContain("readMatrixFromRawSampler");
         expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
@@ -208,7 +224,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + skeleton (8-bone) with complete vertex buffer layouts", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const result = composeShader(template, [createSkeletonFragment(true)]);
 
         expect(result._vertexWGSL).toContain("joints1");
@@ -228,7 +244,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + morph + skeleton", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasMorph: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasMorph: true });
         const morph = createMorphFragment();
         const skeleton = createSkeletonFragment(false);
         const result = composeShader(template, [morph, skeleton]);
@@ -253,7 +269,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + shadow", async () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const createPbrShadowFragment = await preparePbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }]);
         const result = composeShader(template, [createPbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }])]);
         expect(result._fragmentWGSL).toContain("computeShadowESM_0");
@@ -265,7 +281,7 @@ describe("PBR template + fragments integration", () => {
     it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", async () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
             _hasSpecularAA: true,
@@ -399,7 +415,8 @@ describe("Standard template + fragments integration", () => {
         expect([...data]).toEqual([2, -3, 0, 3]);
     });
 
-    it("composes Standard skeletal deformation into geometry position, normal, and velocity state", () => {
+    it("composes Standard skeletal deformation into geometry position, normal, and velocity state", async () => {
+        await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
         const features = HAS_SKELETON | HAS_SKELETON_8;
         const skeleton = stdSkeletonExt._frag(features, 0)!;
         const result = composeStandardGeometryShader(
@@ -410,7 +427,7 @@ describe("Standard template + fragments integration", () => {
         );
         expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
         expect(result._vertexWGSL).toContain("previousBoneSampler");
-        expect(result._vertexWGSL).toContain("mesh.previousWorld * previousInfluence");
+        expect(result._vertexWGSL).toContain("mesh.previousWorld * vec4<f32>(previousDeformedPosition");
         expect(result._meshUboSpec._offsets.has("previousWorld")).toBe(true);
         expect(result._meshUboSpec._offsets.has("velocityEnabled")).toBe(true);
         expect(result._vertexBufferLayouts.some((layout) => (layout.attributes as readonly GPUVertexAttribute[]).some((attribute) => attribute.format === "uint32x4"))).toBe(true);
@@ -451,39 +468,86 @@ describe("Standard template + fragments integration", () => {
         ]);
     });
 
-    it("double-buffers previous bones for Standard geometry velocity", () => {
-        const textures = [{ destroy: vi.fn() }, { destroy: vi.fn() }] as unknown as [GPUTexture, GPUTexture];
-        const writes: GPUTexture[] = [];
-        let textureIndex = 0;
+    it("keeps a private previous-bone snapshot without advancing current skeleton state", () => {
+        const texture = { destroy: vi.fn(), createView: () => ({}) } as unknown as GPUTexture;
+        const writes: Float32Array[] = [];
         const engine = {
             _device: {
-                createTexture: () => textures[textureIndex++]!,
-                queue: { writeTexture: ({ texture }: GPUImageCopyTexture) => writes.push(texture) },
+                createTexture: () => texture,
+                queue: { writeTexture: (_destination: GPUImageCopyTexture, data: Float32Array) => writes.push(data.slice()) },
             },
         } as unknown as EngineContext;
-        const bindGroups = [{}, {}] as GPUBindGroup[];
-        const state = createStandardGeometrySkeletonVelocity(
-            engine,
-            { boneCount: 2, boneMatrices: new Float32Array(32) } as never,
-            (texture) => bindGroups[textures.indexOf(texture)]!
-        );
-
-        expect(state._bindGroup).toBe(bindGroups[0]);
-        expect(writes).toEqual([textures[0], textures[1]]);
-        expect(state._update()).toBe(bindGroups[0]);
-        expect(writes.at(-1)).toBe(textures[1]);
-        expect(state._update()).toBe(bindGroups[1]);
-        expect(writes.at(-1)).toBe(textures[0]);
+        const skeleton = { boneCount: 2, boneMatrices: new Float32Array(32) };
+        const state = createGeometryDeformationVelocity(engine, { skeleton } as never);
+        state._update(true);
+        skeleton.boneMatrices[12] = 0.4;
+        state._update(false);
+        expect(writes.at(-1)![12]).toBe(0);
+        state._update(false);
+        expect(writes.at(-1)![12]).toBeCloseTo(0.4);
+        expect(skeleton.boneMatrices[12]).toBeCloseTo(0.4);
         state._dispose();
-        expect(textures[0].destroy).toHaveBeenCalledOnce();
-        expect(textures[1].destroy).toHaveBeenCalledOnce();
+        state._dispose();
+        expect(texture.destroy).toHaveBeenCalledOnce();
     });
 
-    it("preloads skeletal geometry velocity only after the Standard skeleton opt-in", async () => {
-        expect(_getStandardGeometrySkeletonVelocityFactory()).toBeNull();
+    it("preloads shared deformation history only for geometry velocity", async () => {
+        const before = getGeometryDeformationVelocity();
+        await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, false);
+        expect(getGeometryDeformationVelocity()).toBe(before);
         enableStandardSkeleton();
         await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
-        expect(_getStandardGeometrySkeletonVelocityFactory()).toBe(createStandardGeometrySkeletonVelocity);
+        expect(getGeometryDeformationVelocity()?.createGeometryDeformationVelocity).toBe(createGeometryDeformationVelocity);
+    });
+
+    it("unlit Standard geometry normals resolve: the unlit fragment declares normalW like the lit one", () => {
+        // A normal attachment reads `normalW`. The unlit (`disableLighting`) template used to drop its
+        // declaration, so any unlit mesh in a GeometryRendererTask with a normal attachment produced invalid
+        // WGSL (unresolved value 'normalW') and the whole frame's command buffer was dropped.
+        const attachments = [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.WORLD_NORMAL];
+        for (const features of [DISABLE_LIGHTING, 0]) {
+            const fragmentWGSL = composeStandardGeometryShader(features, 0, [], attachments)._fragmentWGSL;
+            const declared = fragmentWGSL.indexOf("var normalW = normalize(input.vn);");
+            expect(declared).toBeGreaterThan(-1);
+            expect(fragmentWGSL.indexOf("out.f0 = vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz)")).toBeGreaterThan(declared);
+            expect(fragmentWGSL.indexOf("out.f1 = vec4<f32>(normalW * 0.5 + vec3<f32>(0.5)")).toBeGreaterThan(declared);
+        }
+    });
+
+    it("keeps the Standard shader valid when lighting is toggled on a material with a normal or specular map", () => {
+        // `disableLighting` selects another shader variant, and a live toggle rebuilds the material with its
+        // maps still bound. The map fragments WRITE lit-path locals (`normalW = perturbNormal(...)`,
+        // `specularColor = textureSample(...)`); the unlit template used to drop their declarations, so the
+        // rebuilt WGSL assigned to an undeclared identifier, the pipeline was invalid and the mesh stopped
+        // rendering. Compose exactly what the renderable composes for each state and check every written
+        // local is declared before it is written.
+        const composeFor = (material: ReturnType<typeof createStandardMaterial>): string => {
+            const features = _computeStandardMaterialFeatures(material);
+            const fragments = _getStdExtsSorted()
+                .filter((ext) => features & ext._feature)
+                .map((ext) => ext._frag(features, 0, material));
+            return composeStandardShader(features, 0, fragments, "")._fragmentWGSL;
+        };
+        const expectDeclaredBeforeWritten = (fragmentWGSL: string, local: string): void => {
+            const written = fragmentWGSL.search(new RegExp(`(^|[^A-Za-z0-9_.])${local}\\s*=[^=]`, "m"));
+            const declared = fragmentWGSL.indexOf(`var ${local}`);
+            expect(written, `${local} is written by its map fragment`).toBeGreaterThan(-1);
+            expect(declared, `${local} is declared`).toBeGreaterThan(-1);
+            expect(declared, `${local} is declared before it is written`).toBeLessThan(written);
+        };
+
+        const texture = { texture: {}, sampler: {} } as never;
+        const material = createStandardMaterial();
+        setStandardBumpTexture(material, texture);
+        setStandardSpecularTexture(material, texture);
+
+        for (const disableLighting of [false, true, false]) {
+            material.disableLighting = disableLighting;
+            const fragmentWGSL = composeFor(material);
+            expect(fragmentWGSL.includes("computeLighting(")).toBe(!disableLighting);
+            expectDeclaredBeforeWritten(fragmentWGSL, "normalW");
+            expectDeclaredBeforeWritten(fragmentWGSL, "specularColor");
+        }
     });
 
     it("forward Standard vertex color: RGB is unconditional, alpha only under the VERTEXALPHA opt-in", () => {

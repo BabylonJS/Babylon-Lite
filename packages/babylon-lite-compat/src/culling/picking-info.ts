@@ -1,10 +1,8 @@
-import type { PickingInfo as LitePickingInfo } from "babylon-lite";
+import { getPickedUV, type PickingInfo as LitePickingInfo } from "babylon-lite";
 
 import type { TransformNode } from "../meshes/meshes.js";
-import { Vector3 } from "../math/vector.js";
-import type { Vector2 } from "../math/vector.js";
+import { Vector2, Vector3 } from "../math/vector.js";
 import type { Ray } from "../math/ray.js";
-import { unsupported } from "../error.js";
 
 /** Babylon.js-compatible result of a scene pick. */
 export class PickingInfo {
@@ -26,6 +24,9 @@ export class PickingInfo {
 
     private _normal: Vector3 | null = null;
     private _worldNormal: Vector3 | null = null;
+    private _faceNormal: Vector3 | null = null;
+    private _faceWorldNormal: Vector3 | null = null;
+    private _uv: Vector2 | null = null;
 
     /** @internal Create a compat result from Lite's synchronous CPU-picking result. */
     public static _fromLite(info: LitePickingInfo, pickedMesh: TransformNode | null, ray: Ray): PickingInfo {
@@ -43,17 +44,19 @@ export class PickingInfo {
         result.ray = ray;
         result._normal = info.pickedNormal ? Vector3.FromArray(info.pickedNormal) : null;
         result._worldNormal = info.pickedNormalWorld ? Vector3.FromArray(info.pickedNormalWorld) : null;
+        result._faceNormal = info.pickedFaceNormal ? Vector3.FromArray(info.pickedFaceNormal) : null;
+        result._faceWorldNormal = info.pickedFaceNormalWorld ? Vector3.FromArray(info.pickedFaceNormalWorld) : null;
+        const uv = getPickedUV(info);
+        result._uv = uv ? new Vector2(uv[0], uv[1]) : null;
         return result;
     }
 
-    public getNormal(useWorldCoordinates = false, _useVerticesNormals = true): Vector3 | null {
-        return useWorldCoordinates ? (this._worldNormal?.clone() ?? null) : (this._normal?.clone() ?? null);
+    public getNormal(useWorldCoordinates = false, useVerticesNormals = true): Vector3 | null {
+        const normal = useVerticesNormals ? (useWorldCoordinates ? this._worldNormal : this._normal) : useWorldCoordinates ? this._faceWorldNormal : this._faceNormal;
+        return normal?.clone() ?? null;
     }
 
-    public getTextureCoordinates(_uvSet?: string): Vector2 | null {
-        return unsupported(
-            "PickingInfo.getTextureCoordinates",
-            "Lite's synchronous CPU picker currently exposes AABB intersections only, so barycentric UV coordinates are unavailable."
-        );
+    public getTextureCoordinates(uvSet = "uv"): Vector2 | null {
+        return uvSet === "uv" ? (this._uv?.clone() ?? null) : null;
     }
 }

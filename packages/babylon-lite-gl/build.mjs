@@ -43,7 +43,12 @@ const provenance = azureBuildId || sourceVersion ? { ...(azureBuildId ? { azureB
 
 // Default/local builds fall back to the source manifest version; release builds
 // override it via PACKAGE_VERSION. Mirrors packages/babylon-lite.
-const sourceVersionFallback = JSON.parse(readFileSync(resolve(packageDir, "package.json"), "utf8")).version || "0.1.0";
+const sourceManifest = JSON.parse(readFileSync(resolve(packageDir, "package.json"), "utf8"));
+const sourceVersionFallback = sourceManifest.version || "0.1.0";
+
+// The emitted text modules keep bare `text-shaper` imports, so the published manifest must carry the
+// source runtime dependencies or consumers would not get the shaping runtime installed.
+const runtimeDependencies = sourceManifest.dependencies && Object.keys(sourceManifest.dependencies).length > 0 ? sourceManifest.dependencies : undefined;
 
 // Publish-ready manifest. Mirrors the package's source `publishConfig`, with
 // `exports`/`main`/`types` paths made relative to `dist/` (the publish root).
@@ -67,6 +72,7 @@ const manifest = {
     module: "./index.js",
     types: "./index.d.ts",
     sideEffects: false,
+    ...(runtimeDependencies ? { dependencies: runtimeDependencies } : {}),
     exports: {
         ".": { import: "./index.js", types: "./index.d.ts" },
     },

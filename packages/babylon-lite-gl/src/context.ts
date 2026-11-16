@@ -1,6 +1,8 @@
 import type { GLEffect } from "./effect.js";
 import type { GLTexture } from "./texture.js";
+import type { GLTexture3D } from "./texture-3d.js";
 import type { GLRenderTarget } from "./render-target.js";
+import type { GLPerfCounter } from "./gpu-frame-time.js";
 import { createGLState, resetGLState, resetGLStateCache, type GLState } from "./state.js";
 
 /**
@@ -18,6 +20,22 @@ export interface GLManagedBuffer {
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal */
     _restore: (engine: GLEngineContext) => void;
+}
+
+/**
+ * Per-frame begin / end hooks installed by opt-in modules (currently only
+ * `captureGPUFrameTime`). Invoked by the render loop around its callbacks, or
+ * by manual `beginFrame` / `endFrame` calls. Kept local so the context type
+ * carries no runtime dependency on the tree-shakeable timing module.
+ * @internal
+ */
+export interface GLFrameHooks {
+    /** @internal */
+    _begin: () => void;
+    /** @internal */
+    _end: () => void;
+    /** Releases any GL resources owned by the hooks. @internal */
+    _dispose: () => void;
 }
 
 /** Constructor options forwarded to `canvas.getContext('webgl2', …)`. */
@@ -131,12 +149,12 @@ export interface GLEngineContext {
      */
     _effectCache: Map<string, GLEffect>;
     /**
-     * Live texture registry — populated by `createRawTexture` /
-     * `loadTexture2D` / `createHtmlElementTexture`. Used by the
-     * context-restored protocol to replay uploads.
+     * Live managed 2D/3D texture registry. Set deletion avoids linear searches
+     * and array shifts during eviction; iteration preserves creation order
+     * among survivors for context-restore replay.
      * @internal
      */
-    _textures: GLTexture[];
+    _textures: Set<GLTexture | GLTexture3D>;
     /**
      * Live render-target registry — populated by `createRenderTarget`. Used by
      * the context-restored protocol to rebuild framebuffers + attachments after
@@ -148,7 +166,7 @@ export interface GLEngineContext {
     /**
      * The render target currently bound for drawing (`bindRenderTarget`), or
      * `null` for the default canvas framebuffer. Tracked so that leaving a
-     * mipmapped target (`bindRenderTarget(engine, null)` or switching to
+     * mipmapped target (`restoreDefaultFramebuffer(engine)` or switching to
      * another target) can regenerate its mip chain — mirroring Babylon's
      * auto-mipmap on `unBindFramebuffer`. Reset to `null` on context-lost.
      * @internal
@@ -200,6 +218,12 @@ export interface GLEngineContext {
     /** Optional feature-owned state-cache invalidators. Allocated lazily by the first feature that needs one.
      * @internal */
     _stateCacheInvalidators?: (() => void)[];
+    /** Frame hooks installed while `captureGPUFrameTime(engine, true)` is active.
+     * @internal */
+    _frameHooks?: GLFrameHooks;
+    /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
+     * @internal */
+    _gpuFrameTime?: GLPerfCounter;
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
@@ -236,7 +260,7 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         _state: createGLState(caps.maxTextureUnits),
         _effects: [],
         _effectCache: new Map(),
-        _textures: [],
+        _textures: new Set(),
         _renderTargets: [],
         _currentRenderTarget: null,
         _buffers: [],
@@ -271,11 +295,15 @@ export function disposeGLEngine(engine: GLEngineContext): void {
         engine._rafId = 0;
     }
     engine._loops.length = 0;
+    engine._frameHooks?._dispose();
+    engine._frameHooks = undefined;
     engine.canvas.removeEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
     engine.canvas.removeEventListener("webglcontextrestored", engine._restoredHandler, false);
 
     const gl = engine.gl;
-    // Iterate snapshots — the dispose paths splice into the registries.
+    const textures = Array.from(engine._textures);
+    engine._textures.clear();
+    // Iterate snapshots — dispose paths can mutate the live registries.
     const effects = engine._effects.slice();
     for (const eff of effects) {
         if (!eff._disposed) {
@@ -288,14 +316,12 @@ export function disposeGLEngine(engine: GLEngineContext): void {
     }
     engine._effects.length = 0;
     engine._effectCache.clear();
-    const textures = engine._textures.slice();
     for (const tex of textures) {
-        if (!tex._disposed) {
-            tex._disposed = true;
-            gl.deleteTexture(tex.handle);
-        }
+        // The snapshot contains live textures only. Force-delete every handle,
+        // even if reentrant disposal marks a later texture disposed first.
+        tex._disposed = true;
+        gl.deleteTexture(tex.handle);
     }
-    engine._textures.length = 0;
     // Render targets own their FBO + renderbuffer + color texture; free them via
     // the per-RT closure so context.ts needs no runtime import of render-target.
     const rts = engine._renderTargets.slice();
@@ -525,6 +551,7 @@ function handleContextRestored(engine: GLEngineContext): void {
             if (newHandle !== null) {
                 tex.handle = newHandle;
                 tex._upload(engine);
+                tex._initializeParameters?.(engine);
                 tex.isReady = tex._wasReady;
             }
         }

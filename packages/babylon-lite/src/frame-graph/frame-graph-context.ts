@@ -73,6 +73,22 @@ export function registerFrameGraphContext(ctx: FrameGraphContext): void {
     registerRenderingContext(ctx.surface, ctx);
 }
 
+/** Prepare task-owned async resources, then build and register a standalone frame graph. */
+export async function registerFrameGraphContextAsync(ctx: FrameGraphContext): Promise<void> {
+    const internal = ctx as FrameGraphContextInternal;
+    if (internal._disposed) {
+        return;
+    }
+    // Promise.all treats tasks without a preload hook as already resolved.
+    // eslint-disable-next-line @typescript-eslint/await-thenable
+    await Promise.all(ctx.frameGraph._tasks.map((task) => task._preload?.()));
+    if (internal._disposed) {
+        return;
+    }
+    ctx.frameGraph.build();
+    registerRenderingContext(ctx.surface, ctx);
+}
+
 /** Unregister the standalone frame-graph context from its surface. */
 export function unregisterFrameGraphContext(ctx: FrameGraphContext): void {
     unregisterRenderingContext(ctx.surface, ctx);

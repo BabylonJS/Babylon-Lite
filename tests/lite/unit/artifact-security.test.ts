@@ -167,16 +167,18 @@ describe("BrowserStack pipeline publication gates", () => {
     const uploadTemplate = readFileSync(resolve(repoRoot, "config/templates/upload-test-report.yml"), "utf8");
     const parityConfig = readFileSync(resolve(repoRoot, "config/playwright.parity-cloud.config.ts"), "utf8");
     const perfConfig = readFileSync(resolve(repoRoot, "config/playwright.perf-cloud.config.ts"), "utf8");
+    const integrationConfig = readFileSync(resolve(repoRoot, "config/playwright.integration-cloud.config.ts"), "utf8");
 
     it("explicitly disables tracing in every BrowserStack Playwright config", () => {
         expect(parityConfig).toContain('trace: "off"');
         expect(perfConfig).toContain('trace: "off"');
+        expect(integrationConfig).toContain('trace: "off"');
     });
 
     it("sets ArtifactsSafe only after sanitize and verify commands", () => {
         const safetySteps = [...pipeline.matchAll(/npx tsx scripts\/redact-secrets\.ts sanitize[\s\S]*?##vso\[task\.setvariable variable=ArtifactsSafe\]true/g)];
-        expect(safetySteps).toHaveLength(2);
-        expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(2);
+        expect(safetySteps).toHaveLength(3);
+        expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(3);
         for (const step of safetySteps) {
             expect(step[0]).toContain("redact-secrets.ts verify");
             expect(step[0]).not.toContain("continueOnError");
@@ -184,7 +186,7 @@ describe("BrowserStack pipeline publication gates", () => {
     });
 
     it("gates BrowserStack result publication and allowlists only report directories", () => {
-        for (const suite of ["perf", "parity"]) {
+        for (const suite of ["perf", "parity", "webgpu-integration"]) {
             expect(pipeline).toMatch(
                 new RegExp(
                     `PublishTestResults@2\\s+condition: and\\(always\\(\\), eq\\(variables\\['ArtifactsSafe'\\], 'true'\\)\\)[\\s\\S]*?${suite}-junit\\.xml[\\s\\S]*?publishRunAttachments: false`

@@ -25,7 +25,8 @@
 
 import { TU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
-import type { SurfaceContext } from "./surface.js";
+import type { RenderTargetDescriptor } from "./render-target.js";
+import { _resolveRenderTargetSize } from "./render-target.js";
 
 /** Description of a multi-render-target — what to create, not the GPU objects themselves. */
 export interface RenderTargetMrtDescriptor {
@@ -35,9 +36,10 @@ export interface RenderTargetMrtDescriptor {
     colorFormats: readonly GPUTextureFormat[];
     depthStencilFormat?: GPUTextureFormat;
     sampleCount: number;
-    /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
-     *  `buildRenderTargetMrt`), or explicit pixels. */
-    size: SurfaceContext | { width: number; height: number };
+    /** A `SurfaceContext` for full surface dimensions, `{ surface, scale }` for
+     *  scaled live dimensions, or explicit pixels. Surface-backed sizes are
+     *  re-resolved on every `buildRenderTargetMrt`. */
+    size: RenderTargetDescriptor["size"];
 }
 
 /** Allocated GPU state for an MRT render target. All arrays are length `colorFormats.length`. */
@@ -65,6 +67,7 @@ export interface RenderTargetMrt {
 
 /** Create an MRT render target descriptor (GPU textures allocated by {@link buildRenderTargetMrt}). */
 export function createRenderTargetMrt(descriptor: RenderTargetMrtDescriptor): RenderTargetMrt {
+    _resolveRenderTargetSize(descriptor);
     return {
         _descriptor: descriptor,
         _colorTextures: [],
@@ -83,7 +86,7 @@ export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContext)
     disposeRenderTargetMrt(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc);
+    const { width, height } = _resolveRenderTargetSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -163,13 +166,4 @@ export function getSampledColorView(rt: RenderTargetMrt, i: number): GPUTextureV
  *  Mirrors {@link getSampledColorView}. */
 export function getSampledColorTexture(rt: RenderTargetMrt, i: number): GPUTexture {
     return rt._resolveColorTextures[i] ?? rt._colorTextures[i]!;
-}
-
-function resolveSize(desc: RenderTargetMrtDescriptor): { width: number; height: number } {
-    const size = desc.size;
-    if ("canvas" in size) {
-        const canvas = size.canvas;
-        return { width: canvas.width, height: canvas.height };
-    }
-    return size;
 }

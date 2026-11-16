@@ -2,16 +2,222 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
-    return { ...actual, addToScene: vi.fn() };
+    const cloneNode = (node: { name?: string; children?: unknown[]; material?: unknown; _gpu?: unknown }): unknown => {
+        const clone: { name?: string; children: unknown[]; material?: unknown; _gpu?: unknown; parent: null } = {
+            name: node.name,
+            children: [],
+            material: node.material,
+            _gpu: node._gpu,
+            parent: null,
+        };
+        clone.children = (node.children ?? []).map((child) => {
+            const childClone = cloneNode(child as never) as { parent: unknown };
+            childClone.parent = clone;
+            return childClone;
+        });
+        return clone;
+    };
+    return {
+        ...actual,
+        addToScene: vi.fn(),
+        cloneTransformNode: vi.fn(cloneNode),
+        disposeScene: vi.fn(actual.disposeScene),
+        removeFromScene: vi.fn(),
+        setParent: vi.fn((mesh: { parent: unknown }, parent: unknown) => (mesh.parent = parent)),
+    };
 });
 
-import { addToScene } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer } from "babylon-lite";
+import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
+import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
+import { DirectionalLight } from "../src/lights/lights";
 import { AssetContainer } from "../src/loading/scene-loader";
-import type { Scene } from "../src/scene/scene";
+import { PBRMaterial } from "../src/materials/materials";
+import { Vector3 } from "../src/math/vector";
+import { Observable } from "../src/misc/observable";
+import type { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractScene } from "../src/scene/abstract-scene";
+import { Scene } from "../src/scene/scene";
+
+interface FakeMesh {
+    name: string;
+    children: FakeMesh[];
+    parent: FakeMesh | null;
+    _gpu: object;
+    material: object;
+}
+
+class TestScene extends AbstractScene {
+    // `_disposables` is what `onSceneDispose` appends to, reached when a light publishes a mesh list.
+    public readonly _lite = { _disposables: [] as (() => void)[] };
+    public readonly onDisposeObservable = new Observable<Scene>();
+
+    public _surfaceLoadedCamera(): void {}
+}
+
+function captureThrown(callback: () => void): { threw: boolean; value: unknown } {
+    try {
+        callback();
+        return { threw: false, value: undefined };
+    } catch (value) {
+        return { threw: true, value };
+    }
+}
 
 describe("AssetContainer.addAllToScene", () => {
+    it("clones a hierarchy and gives cloned models independent PBR materials", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const first = container.instantiateModelsToScene((name) => `${name}0`, true, { doNotInstantiate: true });
+        const second = container.instantiateModelsToScene((name) => `${name}1`, true, { doNotInstantiate: true });
+        const firstMesh = first.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const secondMesh = second.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+
+        expect(first.rootNodes[0]!.name).toBe("__root__0");
+        expect(second.rootNodes[0]!.name).toBe("__root__1");
+        expect(firstMesh.material).not.toBe(secondMesh.material);
+        expect(firstMesh.material?._lite).not.toBe(secondMesh.material?._lite);
+    });
+
+    it("uses Babylon.js default cloned-material names without a name function", () => {
+        const material = createPbrMaterial({ name: "Stone" });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+
+        expect((result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh).material?.name).toBe("Clone of Stone");
+    });
+
+    it("preserves loader-owned PBR semantics and loaded culling state when cloning", () => {
+        const material = createPbrMaterial({
+            name: "Masked unlit",
+            doubleSided: true,
+            _alphaCutOff: 0.35,
+            _unlit: true,
+            _unlitColor: [0.2, 0.4, 0.6],
+            _uv2Mask: 32,
+            _transmissive: true,
+        });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const source = container.meshes[1]!;
+        container.addAllToScene(scene);
+        expect(source.material?.backFaceCulling).toBe(false);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const cloned = clone.material!._lite as typeof material;
+
+        expect(cloned).not.toBe(material);
+        expect(cloned.doubleSided).toBe(true);
+        expect(cloned._alphaCutOff).toBe(0.35);
+        expect(cloned._unlit).toBe(true);
+        expect(cloned._unlitColor).toEqual([0.2, 0.4, 0.6]);
+        expect(cloned._uv2Mask).toBe(32);
+        expect(cloned._transmissive).toBe(true);
+    });
+
+    it("clones loaded Standard materials instead of silently sharing them", () => {
+        const material = createStandardMaterial();
+        material.name = "Standard";
+        material.diffuseColor = [0.2, 0.3, 0.4];
+        material.alphaCutOff = 0.45;
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+
+        expect(clone.material?._lite).not.toBe(material);
+        expect(clone.material?._lite).toMatchObject({
+            diffuseColor: [0.2, 0.3, 0.4],
+            alphaCutOff: 0.45,
+            disableLighting: true,
+            backFaceCulling: false,
+        });
+    });
+
+    it("keeps detached source wrappers out of scene.meshes while instantiating clones into the destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const originals = container.meshes;
+        const sourceMaterial = originals[1]!.material;
+        expect(sourceMaterial).toBeInstanceOf(PBRMaterial);
+        if (!(sourceMaterial instanceof PBRMaterial)) {
+            throw new Error("Expected a loaded PBR material wrapper.");
+        }
+        sourceMaterial.roughness = 0.42;
+        expect(sourceMaterial._lite.roughnessFactor).toBe(0.42);
+        expect(scene.meshes).toEqual([]);
+
+        const result = container.instantiateModelsToScene((name) => `${name} clone`, false, { doNotInstantiate: true });
+
+        expect(scene.meshes).toEqual(expect.arrayContaining(result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes)));
+        expect(scene.meshes.some((candidate) => originals.includes(candidate as never))).toBe(false);
+    });
+
+    it("instantiates into the adopted scene instead of the load-time destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+
+        expect(container.meshes[1]!.getScene()).toBe(loadScene);
+        expect(loadScene.meshes).toEqual([]);
+
+        container.addAllToScene(adoptedScene);
+        const result = container.instantiateModelsToScene(undefined, false, { doNotInstantiate: true });
+        const clones = result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes);
+
+        expect(adoptedScene.meshes).toEqual(expect.arrayContaining(clones));
+        expect(loadScene.meshes).toEqual([]);
+    });
+
+    it("keeps loaded rotation bindings after adoption when the load-time scene is disposed", () => {
+        const mesh = Object.assign(createTransformNode("Cube"), { _gpu: {} });
+        const root = createTransformNode("__root__");
+        root.children.push(mesh);
+        mesh.parent = root;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+        const loadedMesh = container.meshes[1]!;
+
+        container.addAllToScene(adoptedScene);
+        loadScene.dispose();
+        loadedMesh.rotation.y = Math.PI / 2;
+
+        expect(loadedMesh._node.rotationQuaternion.y).toBeCloseTo(Math.SQRT1_2, 6);
+        expect(loadedMesh._node.rotationQuaternion.w).toBeCloseTo(Math.SQRT1_2, 6);
+    });
+
     it("registers the canonical loaded wrappers in scene.meshes", () => {
         const mesh = { name: "Cube", children: [], _gpu: {} };
         const root = { name: "__root__", children: [mesh] };
@@ -33,5 +239,177 @@ describe("AssetContainer.addAllToScene", () => {
             [wrappers[1], mesh],
         ]);
         expect(container.meshes).toEqual(wrappers);
+    });
+
+    it("removes adopted skeletons from scene.skeletons when the container is disposed", () => {
+        const skeleton = { bones: [], _byName: new Map(), _overrides: new Map(), _worldOverrides: new Map(), _bake: vi.fn() };
+        const lite = { entities: [], skeletons: [skeleton] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite);
+        const scene = new Scene(new NullEngine());
+
+        container.addAllToScene(scene);
+        expect(scene.skeletons).toHaveLength(1);
+
+        container.dispose();
+        expect(scene.skeletons).toEqual([]);
+    });
+
+    it("detaches reparented USD meshes and retires their canonical wrappers", () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [mesh as unknown as LiteMesh]);
+        const removeFromSceneMock = vi.mocked(removeFromScene);
+        const testScene = new TestScene();
+        const scene = testScene as unknown as Scene;
+
+        container.addAllToScene(scene);
+        const wrappers = container.meshes;
+        const disposed = wrappers.map(() => vi.fn(() => undefined));
+        wrappers.forEach((wrapper, index) => wrapper.onDisposeObservable.add(disposed[index]!));
+        expect(testScene.meshes).toEqual(wrappers);
+        expect(testScene.getMeshByName("Cube")).toBe(wrappers[1]);
+        expect(testScene.getMeshById("Cube")).toBe(wrappers[1]);
+
+        root.children.length = 0;
+        mesh.parent = null;
+        container.dispose();
+
+        expect(setParent).toHaveBeenCalledWith(mesh, null);
+        expect(removeFromScene).toHaveBeenCalledWith(scene._lite, mesh);
+        expect(removeFromSceneMock.mock.invocationCallOrder.at(-1)).toBeLessThan(disposeUsd.mock.invocationCallOrder[0]!);
+        expect(testScene.meshes).toEqual([]);
+        expect(testScene.getMeshByName("Cube")).toBeNull();
+        expect(testScene.getMeshById("Cube")).toBeNull();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+        expect(disposed.every((observer) => observer.mock.calls.length === 1)).toBe(true);
+    });
+
+    it("retires canonical wrappers when an asset container was never added to a scene", () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [mesh as unknown as LiteMesh]);
+        const wrappers = container.meshes;
+        const disposed = wrappers.map(() => vi.fn(() => undefined));
+        wrappers.forEach((wrapper, index) => wrapper.onDisposeObservable.add(disposed[index]!));
+
+        container.dispose();
+
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+        expect(disposed.every((observer) => observer.mock.calls.length === 1)).toBe(true);
+        expect(container.meshes).toEqual(wrappers);
+    });
+
+    it("prunes container-retired meshes out of a light's filter lists", async () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+        const testScene = new TestScene();
+        const scene = testScene as unknown as Scene;
+        container.addAllToScene(scene);
+        const light = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const [cube] = container.meshes;
+
+        light.includedOnlyMeshes = [cube!];
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        expect(light._lite.includedOnlyMeshes && [...light._lite.includedOnlyMeshes]).toEqual([cube!._lite]);
+
+        // Container teardown retires each wrapper through `_disposeWrapperOnly`, which skips
+        // `_disposeSelf`, so the prune has to hang off the retirement hook to run here at all.
+        container.dispose();
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        // An inclusion still naming the dead mesh would leave every surviving mesh unlit by this light.
+        expect(light.includedOnlyMeshes).toEqual([]);
+        expect(light._lite.includedOnlyMeshes).toBeUndefined();
+    });
+
+    it("finishes wrapper and USD teardown before rethrowing the first disposal observer error", () => {
+        const firstMesh: FakeMesh = { name: "First", children: [], parent: null, _gpu: {}, material: {} };
+        const secondMesh: FakeMesh = { name: "Second", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [firstMesh, secondMesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [firstMesh as unknown as LiteMesh, secondMesh as unknown as LiteMesh]);
+        const testScene = new TestScene();
+        const scene = testScene as unknown as Scene;
+
+        container.addAllToScene(scene);
+        const wrappers = container.meshes;
+        const laterWrapperObserver = vi.fn();
+        wrappers[0]!.onDisposeObservable.add(() => {
+            throw new Error("first observer failed");
+        });
+        wrappers[1]!.onDisposeObservable.add(() => {
+            throw new Error("second observer failed");
+        });
+        wrappers[2]!.onDisposeObservable.add(laterWrapperObserver);
+
+        expect(() => container.dispose()).toThrow("first observer failed");
+
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+        expect(wrappers.every((wrapper) => !wrapper.onDisposeObservable.hasObservers())).toBe(true);
+        expect(laterWrapperObserver).toHaveBeenCalledOnce();
+        expect(testScene.meshes).toEqual([]);
+        expect(testScene.getMeshByName("First")).toBeNull();
+        expect(testScene.getMeshById("Second")).toBeNull();
+    });
+
+    it.each([null, undefined])("preserves a first nullish disposal error of %s", (firstError) => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [mesh as unknown as LiteMesh]);
+        const wrappers = container.meshes;
+        wrappers[0]!.onDisposeObservable.add(() => {
+            throw firstError;
+        });
+        wrappers[1]!.onDisposeObservable.add(() => {
+            throw new Error("later observer failed");
+        });
+
+        const thrown = captureThrown(() => container.dispose());
+
+        expect(thrown).toEqual({ threw: true, value: firstError });
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+    });
+
+    it("finishes all adopted-container and native teardown before rethrowing a scene observer error", () => {
+        const scene = new Scene(new NullEngine());
+        const firstDisposeUsd = vi.fn();
+        const secondDisposeUsd = vi.fn();
+        const first = new AssetContainer({ entities: [{ name: "FirstRoot", children: [] }] } as unknown as LiteAssetContainer, firstDisposeUsd);
+        const second = new AssetContainer({ entities: [{ name: "SecondRoot", children: [] }] } as unknown as LiteAssetContainer, secondDisposeUsd);
+        first.addAllToScene(scene);
+        second.addAllToScene(scene);
+        first.meshes[0]!.onDisposeObservable.add(() => {
+            throw null;
+        });
+
+        const thrown = captureThrown(() => scene.dispose());
+
+        expect(thrown).toEqual({ threw: true, value: null });
+        expect(firstDisposeUsd).toHaveBeenCalledOnce();
+        expect(secondDisposeUsd).toHaveBeenCalledOnce();
+        expect(disposeScene).toHaveBeenCalledWith(scene._lite);
+    });
+
+    it("does not create wrappers after disposing an unread asset container", () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+
+        container.dispose();
+
+        expect(container.meshes).toEqual([]);
     });
 });

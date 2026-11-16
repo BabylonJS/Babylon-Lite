@@ -1,40 +1,62 @@
-/** KHR_animation_pointer — animated baseColorFactor white-fallback handling.
+/** KHR_animation_pointer — animated baseColorFactor slots and runtime targets.
  *
  *  Dynamic-imported by the animation-pointer feature ONLY when a channel targets a
  *  material's pbrMetallicRoughness/baseColorFactor, so scenes that animate just node
  *  visibility / TRS / lights / UV transforms (e.g. scene34) never pay for it. */
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { _writeBaseColorFactor } from "./animation-pointer.js";
+import type { BaseColorPointerMaterial, ResolvedPointer } from "./animation-pointer.js";
 
-// Raw glTF material defs (json.materials[i] objects) whose baseColorFactor is animated.
+// Runtime copies keyed by the raw glTF definition whose baseColorFactor is animated.
 // Lazy-init (not a module-level allocation) so this module stays tree-shakable per GUIDANCE.
-let _animBaseColorDefs: WeakSet<object> | null = null;
+let _animBaseColorDefs: WeakMap<object, BaseColorPointerMaterial[]> | null = null;
 
-/** Record every material def targeted by a baseColorFactor pointer so the white-fallback
- *  below can recognise it during material assembly. */
+/** Record each animated material definition before default and variant assembly start. */
 export function collectBaseColorDefs(json: any): void {
     for (const anim of json.animations ?? []) {
         for (const ch of anim.channels ?? []) {
             const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
             const m = ptr && /^\/materials\/(\d+)\/pbrMetallicRoughness\/baseColorFactor$/.exec(ptr);
             const def = m && json.materials?.[+m[1]!];
-            if (def) {
-                (_animBaseColorDefs ??= new WeakSet<object>()).add(def);
+            if (def && !_animBaseColorDefs?.has(def)) {
+                (_animBaseColorDefs ??= new WeakMap()).set(def, []);
             }
         }
     }
 }
 
-/** For an UNTEXTURED material whose baseColorFactor is animated, the loader would bake the
- *  (initial) factor into the 1×1 base-colour fallback AND multiply the animated factor in
- *  the shader — doubling colour and alpha. Bake a WHITE fallback instead and route the
- *  factor through the (animatable) baseColorFactor uniform. */
-export function whiteFallback(mat: GltfMaterialData): Partial<PbrMaterialProps> | null {
-    if (mat._rawMatDef && _animBaseColorDefs?.has(mat._rawMatDef) && !mat._baseColorImage) {
-        const f = mat._baseColorFactor;
-        const real: [number, number, number, number] = [f[0]!, f[1]!, f[2]!, f[3]!];
-        mat._baseColorFactor = [1, 1, 1, 1];
-        return { baseColorFactor: real };
+/** Seed every animated slot and register its built copy. Untextured materials need a
+ *  white fallback so their RGB factor is applied only by the animated uniform. */
+export function prepareMaterial(mat: GltfMaterialData): Partial<PbrMaterialProps> | null {
+    const targets = _animBaseColorDefs?.get(mat._rawMatDef);
+    if (!targets) {
+        return null;
     }
-    return null;
+    mat._onMaterialCreated = (material) => {
+        targets.push(material);
+    };
+    const f = mat._baseColorFactor;
+    if (!mat._baseColorImage) {
+        mat._baseColorFactor = [1, 1, 1, 1];
+    }
+    return { baseColorFactor: [f[0]!, f[1]!, f[2]!, 1], ...(mat._alphaMode === "BLEND" || mat._alphaMode === "MASK" ? { alpha: f[3] } : undefined) };
+}
+
+export function resolveBaseColorPointer(ptr: string, json: any): ResolvedPointer | null {
+    const match = /^\/materials\/(\d+)\/pbrMetallicRoughness\/baseColorFactor$/.exec(ptr);
+    const def = match && json.materials?.[+match[1]!];
+    const targets = _animBaseColorDefs?.get(def);
+    if (!targets) {
+        return null;
+    }
+    // Variant-only targets can register after channels parse; retain the live group.
+    return {
+        arity: 4,
+        writer: (out, off) => {
+            for (const material of targets) {
+                _writeBaseColorFactor(material, out, off);
+            }
+        },
+    };
 }

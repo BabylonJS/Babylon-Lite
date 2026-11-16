@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     subjectCamera.farPlane = 10;
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene);
 
     // Camera gizmo.
     const cameraGizmo = createCameraGizmo(engine, utilityLayer);

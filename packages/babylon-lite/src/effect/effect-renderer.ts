@@ -4,11 +4,12 @@ import { registerRenderingContext, unregisterRenderingContext } from "../engine/
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "../frame-graph/task.js";
+import type { NormalizedViewport } from "../camera/camera.js";
 import { wgsl } from "../shader/wgsl.js";
 
 const DEFAULT_VERTEX_WGSL = wgsl`struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
@@ -82,6 +83,10 @@ export interface EffectRenderTaskConfig {
 /** A frame-graph task that renders an `EffectWrapper` as a fullscreen pass into an offscreen `RenderTarget`. */
 export interface EffectRenderTask extends Task {
     readonly name: string;
+    /** Optional draw region, normalized to the target (origin bottom-left, like a camera viewport). When set, the
+     *  fullscreen pass only rasterizes this rectangle (a scissor; the target is still cleared whole when `clear` is on);
+     *  an empty rectangle draws nothing. `null`/absent draws the whole target. Plain data: update it any frame. */
+    scissor?: NormalizedViewport | null;
     /** @internal */
     readonly _config: EffectRenderTaskConfig;
     /** @internal */
@@ -251,6 +256,18 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
             task._bindGroup = getEffectBindGroup(effect);
             applyColorAttachmentState(task._colorAttachment, rt, undefined, task._config.clear !== false, task._config.clearColor!);
             const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+            const scissor = task.scissor;
+            if (scissor) {
+                const x0 = Math.max(0, Math.floor(scissor.x * rt._width));
+                const x1 = Math.min(rt._width, Math.ceil((scissor.x + scissor.width) * rt._width));
+                const y0 = Math.max(0, Math.floor((1 - scissor.y - scissor.height) * rt._height));
+                const y1 = Math.min(rt._height, Math.ceil((1 - scissor.y) * rt._height));
+                if (scissor.width <= 0 || scissor.height <= 0 || x1 <= x0 || y1 <= y0) {
+                    pass.end();
+                    return 0;
+                }
+                pass.setScissorRect(x0, y0, x1 - x0, y1 - y0);
+            }
             pass.setPipeline(pipeline);
             if (task._bindGroup) {
                 pass.setBindGroup(0, task._bindGroup);
@@ -275,6 +292,7 @@ export function disposeEffectWrapper(wrapper: EffectWrapper): void {
     for (const slot of internal._uniforms) {
         slot.buffer.destroy();
     }
+
     internal._uniforms.length = 0;
     internal._textures.length = 0;
     internal._pipelines?.clear();
@@ -284,6 +302,18 @@ export function disposeEffectWrapper(wrapper: EffectWrapper): void {
     internal._pipelineLayout = null;
     internal._bindGroup = null;
     internal._bindGroupDirty = true;
+}
+
+/** @internal Record a standalone fullscreen processor without changing the engine's active encoder. */
+export function recordEffectToTexture(wrapper: EffectWrapper, encoder: GPUCommandEncoder, view: GPUTextureView, format: GPUTextureFormat): void {
+    const effect = wrapper as EffectWrapperInternal;
+    const pipeline = getEffectPipeline(effect, { _colorFormat: format, _sampleCount: 1 });
+    const group = getEffectBindGroup(effect);
+    const pass = encoder.beginRenderPass({ colorAttachments: [{ view, loadOp: "clear", storeOp: "store" }] });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, group);
+    pass.draw(3);
+    pass.end();
 }
 
 /**
@@ -426,16 +456,17 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
 }
 
 function ensureRtCanvasSize(rt: RenderTarget): void {
-    const size = rt._descriptor.size;
-    if (!("canvas" in size)) {
+    const descriptor = rt._descriptor;
+    const targetSize = descriptor.size;
+    const surface = "canvas" in targetSize ? targetSize : "surface" in targetSize ? targetSize.surface : null;
+    if (!surface) {
         return;
     }
-    // Surface-sized RT: rebuild when the surface's canvas backing-store has resized.
-    const canvas = size.canvas;
-    if (rt._width === canvas.width && rt._height === canvas.height) {
+    const size = _resolveRenderTargetSize(descriptor);
+    if (rt._width === size.width && rt._height === size.height) {
         return;
     }
-    buildRenderTarget(rt, size.engine);
+    buildRenderTarget(rt, surface.engine);
 }
 
 function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {

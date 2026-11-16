@@ -3,6 +3,8 @@ import type { EngineContext } from "./engine.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
+import { uploadMeshToGPU } from "../mesh/mesh.js";
+import { setMeshDrawRangeSource } from "../mesh/mesh-draw-range-state.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -87,9 +89,8 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     // Snapshot the rebuild thunks before the renderable list is truncated below. Discovering them
-    // here — rather than recording descriptors through a capture seam — keeps the loader paths that
-    // build renderables free of any recovery cost, and this whole module is only ever fetched on
-    // the recovery path.
+    // here keeps dispatch independent of each renderable's builder. Background capture creates
+    // these thunks only when enabled; this module is fetched only on the recovery path.
     const rebuilds = scene._renderables.filter((r) => !!r._rebuild).map((r) => r._rebuild!);
 
     scene._renderables.length = scene._uniformUpdaters.length = 0;
@@ -104,6 +105,9 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             return;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        if (result._w !== undefined) {
+            meshes._w = result._w;
+        }
         meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
@@ -128,7 +132,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
     const rebuilt: Renderable[] = [];
     for (const rebuild of rebuilds) {
-        rebuilt.push(await rebuild());
+        const renderable = await rebuild();
+        if (renderable) {
+            rebuilt.push(renderable);
+        }
     }
     return rebuilt;
 }
@@ -144,7 +151,7 @@ async function runRecoveryStep<T>(description: string, action: () => Promise<T>)
 
 function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void {
     for (const task of scene._frameGraph._tasks) {
-        if (!("_sceneUBO" in task && "_sceneBG" in task && "_opaqueBindings" in task)) {
+        if (!("_sceneUBO" in task && "_targetSignature" in task && "_opaqueBindings" in task)) {
             continue;
         }
         const rt = task as unknown as RecoverableRenderTask;
@@ -197,6 +204,17 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
+    const old = mesh._gpu;
+    const source = old._drawRangeSource;
+    if (source) {
+        const gpu = uploadMeshToGPU(engine, source.positions, source.normals, source.indices, source.uvs, source.uvs2, source.tangents, source.colors);
+        setMeshDrawRangeSource(gpu, { ...source });
+        gpu._firstIndex = old._firstIndex;
+        gpu._baseVertex = old._baseVertex;
+        gpu._vertexCapacity = source.positions.length / 3;
+        gpu._indexCapacity = source.indices.length;
+        return gpu;
+    }
     const positions = mesh._cpuPositions!;
     const normals = mesh._cpuNormals!;
     const uvs = mesh._cpuUvs;
@@ -212,7 +230,7 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     return {
         positionBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
         normalBuffer: createMappedBuffer(engine, normals, BU.VERTEX),
-        tangentBuffer: mesh._cpuTangents ? createMappedBuffer(engine, mesh._cpuTangents, BU.VERTEX) : null,
+        tangentBuffer: mesh._cpuTangents?.length ? createMappedBuffer(engine, mesh._cpuTangents, BU.VERTEX) : null,
         uvBuffer,
         uv2Buffer: mesh._cpuUv2s ? createMappedBuffer(engine, mesh._cpuUv2s, BU.VERTEX) : null,
         colorBuffer: mesh._cpuColors ? createMappedBuffer(engine, mesh._cpuColors, BU.VERTEX) : null,

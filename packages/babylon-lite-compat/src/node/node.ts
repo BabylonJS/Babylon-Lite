@@ -11,11 +11,137 @@
  * a unique id, an owning scene, a parent link, and enabled/disposed flags.
  */
 
+import { setAccessibilityTag, type AccessibilityTag } from "babylon-lite";
+
 import type { Scene } from "../scene/scene.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 import type { AbstractMesh } from "../meshes/meshes.js";
 import { Vector3 } from "../math/vector.js";
 import { Observable } from "../misc/observable.js";
+import { unsupported } from "../error.js";
+
+type AccessibilityRole =
+    | "toolbar"
+    | "tooltip"
+    | "feed"
+    | "math"
+    | "presentation"
+    | "none"
+    | "note"
+    | "application"
+    | "article"
+    | "cell"
+    | "columnheader"
+    | "definition"
+    | "directory"
+    | "document"
+    | "figure"
+    | "group"
+    | "heading"
+    | "img"
+    | "list"
+    | "listitem"
+    | "meter"
+    | "row"
+    | "rowgroup"
+    | "rowheader"
+    | "separator"
+    | "table"
+    | "term"
+    | "scrollbar"
+    | "searchbox"
+    | "slider"
+    | "spinbutton"
+    | "switch"
+    | "tab"
+    | "tabpanel"
+    | "treeitem"
+    | "combobox"
+    | "menu"
+    | "menubar"
+    | "tablist"
+    | "tree"
+    | "treegrid"
+    | "banner"
+    | "complementary"
+    | "contentinfo"
+    | "form"
+    | "main"
+    | "navigation"
+    | "region"
+    | "search"
+    | "alert"
+    | "log"
+    | "marquee"
+    | "status"
+    | "timer"
+    | "alertdialog"
+    | "dialog";
+
+type AccessibilityAria =
+    | "aria-autocomplete"
+    | "aria-checked"
+    | "aria-disabled"
+    | "aria-errormessage"
+    | "aria-expanded"
+    | "aria-haspopup"
+    | "aria-hidden"
+    | "aria-invalid"
+    | "aria-label"
+    | "aria-level"
+    | "aria-modal"
+    | "aria-multiline"
+    | "aria-multiselectable"
+    | "aria-orientation"
+    | "aria-placeholder"
+    | "aria-pressed"
+    | "aria-readonly"
+    | "aria-required"
+    | "aria-selected"
+    | "aria-sort"
+    | "aria-valuemax"
+    | "aria-valuemin"
+    | "aria-valuenow"
+    | "aria-valuetext"
+    | "aria-busy"
+    | "aria-live"
+    | "aria-relevant"
+    | "aria-atomic"
+    | "aria-dropeffect"
+    | "aria-grabbed"
+    | "aria-activedescendant"
+    | "aria-colcount"
+    | "aria-colindex"
+    | "aria-colspan"
+    | "aria-controls"
+    | "aria-describedby"
+    | "aria-description"
+    | "aria-details"
+    | "aria-flowto"
+    | "aria-labelledby"
+    | "aria-owns"
+    | "aria-posinset"
+    | "aria-rowcount"
+    | "aria-rowindex"
+    | "aria-rowspan"
+    | "aria-setsize";
+
+export interface IAccessibilityTag {
+    description?: string;
+    eventHandler?: { [K in keyof HTMLElementEventMap]: (event?: Event) => void };
+    role?: AccessibilityRole;
+    aria?: { [K in AccessibilityAria]: any };
+}
+
+function toLiteAriaValue(value: unknown): string | number | boolean | null | undefined {
+    if (value === null || value === undefined || typeof value === "string" || typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+    return String(value);
+}
 
 let _uniqueIdCounter = 0;
 
@@ -28,6 +154,7 @@ export abstract class Node {
     /** Free-form user data slot (Babylon.js `Node.metadata`). */
     public metadata: unknown = null;
     public readonly onDisposeObservable = new Observable<Node>();
+    public onAccessibilityTagChangedObservable = new Observable<IAccessibilityTag | null>();
 
     /** @internal Owning compat scene, when constructed against one. */
     protected _scene: Scene | undefined;
@@ -41,6 +168,10 @@ export abstract class Node {
     protected _parentEnabled = true;
     /** @internal */
     protected _disposed = false;
+    /** @internal Babylon.js preserves the assigned tag object rather than returning Lite's immutable snapshot. */
+    protected _accessibilityTag: IAccessibilityTag | null = null;
+    /** @internal Monotonic guard preventing a re-entrant observer assignment from being overwritten in Lite. */
+    private _accessibilityTagAssignment = 0;
 
     protected constructor(name: string, scene?: Scene) {
         this.name = name;
@@ -62,6 +193,51 @@ export abstract class Node {
     /** The engine backing this node's scene, if any. */
     public getEngine(): WebGPUEngine | undefined {
         return this._scene?.getEngine();
+    }
+
+    public get accessibilityTag(): IAccessibilityTag | null {
+        return this._accessibilityTag;
+    }
+    public set accessibilityTag(value: IAccessibilityTag | null) {
+        if (value?.eventHandler && Object.keys(value.eventHandler).length) {
+            unsupported(
+                "Node.accessibilityTag.eventHandler",
+                "Lite's HTML-twin renderer does not expose an event-listener registration and disposal seam; adding one requires changing its existing DOM lifecycle."
+            );
+        }
+        const assignment = ++this._accessibilityTagAssignment;
+        this._accessibilityTag = value;
+        this.onAccessibilityTagChangedObservable.notifyObservers(value);
+        if (assignment === this._accessibilityTagAssignment) {
+            this._syncAccessibilityTag();
+        }
+    }
+
+    /** @internal Resolve the plain Lite scene object owned by the concrete wrapper. */
+    protected _accessibilitySource(): object | null {
+        const wrapper = this as unknown as { _node?: object; _lite?: object };
+        return wrapper._node ?? wrapper._lite ?? null;
+    }
+
+    /** @internal Forward the current tag when a deferred wrapper acquires or changes its Lite source. */
+    protected _syncAccessibilityTag(previousSource?: object | null): void {
+        const source = this._accessibilitySource();
+        if (previousSource && previousSource !== source) {
+            setAccessibilityTag(previousSource, null);
+        }
+        if (source) {
+            setAccessibilityTag(source, this._accessibilityTag ? this._toLiteAccessibilityTag(this._accessibilityTag) : null);
+        }
+    }
+
+    /** @internal Translate the Babylon.js tag into Lite's metadata-only shape. */
+    private _toLiteAccessibilityTag(value: IAccessibilityTag): AccessibilityTag {
+        const aria = value.aria ? Object.fromEntries(Object.entries(value.aria).map(([key, entry]) => [key, toLiteAriaValue(entry)])) : undefined;
+        return {
+            description: value.description,
+            role: value.role,
+            aria: aria as AccessibilityTag["aria"],
+        };
     }
 
     public get parent(): Node | null {
@@ -203,8 +379,26 @@ export abstract class Node {
         // Base nodes own no external resources.
     }
 
+    /** @internal Drop scene-side references that hold this node by identity. */
+    protected _retireFromScene(): void {
+        // Base nodes are held by nothing but their parent.
+    }
+
     /** @internal Dispose this compat wrapper tree in post-order. */
     public _disposeWrapperTree(doNotRecurse = false): void {
+        this._disposeWrapperTreeInternal(doNotRecurse, true);
+    }
+
+    /**
+     * @internal Retire a loader-owned wrapper without disposing its Lite node.
+     * Asset-container teardown removes the native nodes as one ownership unit.
+     */
+    public _disposeWrapperOnly(): void {
+        this._disposeWrapperTreeInternal(true, false);
+    }
+
+    /** @internal Shared wrapper lifecycle for ordinary and container-owned disposal. */
+    private _disposeWrapperTreeInternal(doNotRecurse: boolean, disposeSelf: boolean): void {
         if (this._disposed) {
             return;
         }
@@ -214,17 +408,46 @@ export abstract class Node {
             }
         } else {
             for (const child of [...this._children]) {
-                child._disposeWrapperTree();
+                child._disposeWrapperTreeInternal(false, disposeSelf);
             }
         }
-        this._disposeSelf(doNotRecurse);
+        // Runs even for wrapper-only retirement: an asset container tears its native nodes down right
+        // after, so the node is gone either way and anything holding it by identity has to let go.
+        // `_disposeSelf` stays for the native teardown that container ownership does itself.
+        this._retireFromScene();
+        if (disposeSelf) {
+            this._disposeSelf(doNotRecurse);
+        }
         this._disposed = true;
-        this.onDisposeObservable.notifyObservers(this);
-        this.onDisposeObservable.clear();
-        // Detach from the parent's child registry, then drop this node from its
-        // scene's camera / light / mesh registries.
-        this._linkParent(null);
-        this._scene?._unregisterNode(this);
+        let hasError = false;
+        let firstError: unknown;
+        try {
+            this.onDisposeObservable.notifyObservers(this);
+        } catch (error) {
+            hasError = true;
+            firstError = error;
+        } finally {
+            this.onDisposeObservable.clear();
+        }
+        try {
+            this._linkParent(null);
+        } catch (error) {
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
+        }
+        try {
+            this._scene?._unregisterNode(this);
+        } catch (error) {
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
+        }
+        if (hasError) {
+            throw firstError;
+        }
     }
 
     /** @internal Hook for subclasses to wire the parent link into the Lite scene graph. */

@@ -1,7 +1,7 @@
 // Scene 280: Node Particle Editor - Update Flow Map.
 
 import {
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     animateParticleSystem,
     attachControl,
     buildNodeParticleSetWithFlowMaps,
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
     const billboard = createParticleBillboard(system);
     syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+    addBillboardSystemToScene(scene, billboard);
 
     await registerScene(scene);
     await startEngine(engine);

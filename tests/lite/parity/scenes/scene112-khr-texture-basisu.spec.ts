@@ -6,7 +6,7 @@
  */
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(112);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene112-khr-texture-basisu");
@@ -15,11 +15,8 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test("Scene 112 — KHR_texture_basisu Flight Helmet matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
 
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 112, timeout: 180_000, settleMs: 2_000 });
-
     await page.goto("/scene112.html");
-    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 180_000 });
+    await waitForCanvasReady(page, { timeout: 150_000, label: "Lite scene 112" });
     await page.waitForTimeout(500);
 
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");

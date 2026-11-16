@@ -6,28 +6,107 @@
  * wrappers do the same by calling `addToScene` when a scene is supplied. The
  * underlying Lite light is exposed as `_lite` for advanced interop.
  *
- * Colour properties (`diffuse`, `specular`, `groundColor`) are write-through on
- * assignment: `light.diffuse = new Color3(...)` propagates immediately. In-place
- * mutation of a returned colour (`light.diffuse.r = x`) does not propagate; assign
- * a new colour instead. Direction/position are backed by Lite's observable vectors
- * and propagate on `.x/.y/.z` writes.
+ * As in Babylon.js, the getters hand out the light's own live objects, so both assignment
+ * (`light.diffuse = new Color3(...)`) and in-place edits (`light.diffuse.copyFrom(c)`,
+ * `light.direction.set(x, y, z)`, `light.position.y = 2`) reach the Lite light. Direction and
+ * position are proxies over Lite's observable vectors; colours are proxies over the Lite colour
+ * tuples, and every colour write bumps the light version so it reaches the lights UBO.
+ *
+ * `excludedMeshes` / `includedOnlyMeshes` are the same kind of live arrays, published to
+ * `LightBase.excludedMeshes` / `includedOnlyMeshes` as sets of Lite meshes.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, removeFromScene } from "babylon-lite";
+import {
+    addToScene,
+    createHemisphericLight,
+    createDirectionalLight,
+    createPointLight,
+    createRectAreaLight,
+    createSpotLight,
+    enableRectAreaLights,
+    onSceneDispose,
+    rebuildSceneRenderables,
+    removeFromScene,
+} from "babylon-lite";
 import type {
+    Mesh as LiteMesh,
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
     PointLight as LitePointLight,
+    RectAreaLight as LiteRectAreaLight,
     SpotLight as LiteSpotLight,
     LightBase,
+    SceneNode,
 } from "babylon-lite";
 
-import { Color3 } from "../math/color.js";
-import { Vector3 } from "../math/vector.js";
+import type { AbstractMesh } from "../meshes/meshes.js";
+import { liteBackedColor3 } from "../math/color.js";
+import type { Color3 } from "../math/color.js";
+import { liteBackedVector3 } from "../math/vector.js";
+import type { Vector3 } from "../math/vector.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+import type { BaseTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
+
+interface RectAreaLightReconcileState {
+    revision: number;
+    scheduled: boolean;
+    mutations: Array<() => void>;
+}
+
+let rectAreaLightReconcileStates: WeakMap<Scene, RectAreaLightReconcileState> | null = null;
+
+function requestRectAreaLightReconcile(scene: Scene, mutation?: () => void): void {
+    const states = (rectAreaLightReconcileStates ??= new WeakMap());
+    let state = states.get(scene);
+    if (!state) {
+        state = { revision: 0, scheduled: false, mutations: [] };
+        states.set(scene, state);
+    }
+    if (mutation) {
+        state.mutations.push(mutation);
+    }
+    state.revision++;
+    if (state.scheduled) {
+        return;
+    }
+    state.scheduled = true;
+    const engine = scene.getEngine();
+    const schedule = (): void => {
+        engine._registerLateWork(async () => {
+            engine._pauseForSceneMutation();
+            try {
+                let reconciledRevision = 0;
+                while (reconciledRevision !== state.revision) {
+                    const requestedRevision = state.revision;
+                    const mutations = state.mutations.splice(0);
+                    for (const apply of mutations) {
+                        apply();
+                    }
+                    try {
+                        await enableRectAreaLights(scene._lite);
+                        await rebuildSceneRenderables(scene._lite);
+                        reconciledRevision = requestedRevision;
+                    } catch (error) {
+                        if (requestedRevision === state.revision) {
+                            throw error;
+                        }
+                    }
+                }
+            } finally {
+                state.scheduled = false;
+                await engine._resumeAfterSceneMutation();
+            }
+        });
+    };
+    if (engine._lite?._currentEncoder) {
+        queueMicrotask(schedule);
+    } else {
+        schedule();
+    }
+}
 
 /** Babylon.js `Light` — base class for all lights (derives from `Node`). */
 export abstract class Light extends Node {
@@ -43,9 +122,17 @@ export abstract class Light extends Node {
      */
     public _clusteredContainer: object | null = null;
 
-    protected constructor(name: string, scene?: Scene) {
+    /**
+     * @internal The compat shadow generator logically owned by this light,
+     * including before its deferred Lite generator is built.
+     */
+    public _shadowGenerator: object | null = null;
+
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
         super(name, scene);
-        scene?._registerLight(this);
+        if (!dontAddToScene) {
+            scene?._registerLight(this);
+        }
     }
 
     public override getClassName(): string {
@@ -82,9 +169,26 @@ export abstract class Light extends Node {
      * scalar `intensity` writes. Since these wrappers mutate `intensity` directly
      * (both `intensity` and `setEnabled`), this makes those writes reach the GPU.
      */
-    private _bumpLiteVersion(): void {
+    protected _bumpLiteVersion(): void {
         this._liteVersionBump ??= ensureLightVersionBump(this._lite);
         this._liteVersionBump();
+    }
+
+    /**
+     * @internal Babylon.js hands out the light's own `Color3`, so `light.diffuse.copyFrom(c)` or
+     * `light.specular.set(0, 0, 0)` edits the light. Return a live proxy over the Lite tuple rather than a
+     * copy (whose edits were silently dropped); a colour write cannot notify Lite, so it bumps the version.
+     */
+    protected _liveColor(tuple: Tuple3): Color3 {
+        return liteBackedColor3(tuple, () => this._bumpLiteVersion());
+    }
+
+    /** @internal Assign a colour and publish it (a tuple write cannot notify Lite by itself). */
+    protected _writeColor(tuple: Tuple3, value: Color3): void {
+        tuple[0] = value.r;
+        tuple[1] = value.g;
+        tuple[2] = value.b;
+        this._bumpLiteVersion();
     }
 
     /**
@@ -115,6 +219,171 @@ export abstract class Light extends Node {
         }
     }
 
+    private _excludedMeshes: AbstractMesh[] = this._subscribeMeshList([]);
+    private _includedOnlyMeshes: AbstractMesh[] = this._subscribeMeshList([]);
+    private _meshListSyncScheduled = false;
+    private _meshListSceneRelease: (() => void) | null = null;
+
+    /**
+     * Meshes this light does not light. Babylon.js hands out the light's own array, and
+     * `push` / `splice` on it are observed (those are the two methods Babylon.js hooks), so both
+     * `light.excludedMeshes = [...]` and `light.excludedMeshes.push(mesh)` reach the Lite light.
+     */
+    public get excludedMeshes(): AbstractMesh[] {
+        this._watchSceneForMeshListRelease();
+        return this._excludedMeshes;
+    }
+    public set excludedMeshes(value: AbstractMesh[]) {
+        const previous = this._excludedMeshes;
+        this._excludedMeshes = this._subscribeMeshList(value);
+        this._unsubscribeMeshList(previous);
+        this._scheduleMeshListSync();
+    }
+
+    /** Meshes this light lights exclusively. Live in the same way as {@link excludedMeshes}. */
+    public get includedOnlyMeshes(): AbstractMesh[] {
+        this._watchSceneForMeshListRelease();
+        return this._includedOnlyMeshes;
+    }
+    public set includedOnlyMeshes(value: AbstractMesh[]) {
+        const previous = this._includedOnlyMeshes;
+        this._includedOnlyMeshes = this._subscribeMeshList(value);
+        this._unsubscribeMeshList(previous);
+        this._scheduleMeshListSync();
+    }
+
+    /**
+     * @internal Observe the two array methods Babylon.js hooks (`Lights/light.ts`
+     * `_hookArrayForExcluded`). In-place writes through any other method — `pop`, `shift`, an index
+     * assignment — do not publish in Babylon.js either, so matching the hook set is parity.
+     */
+    private _subscribeMeshList(array: AbstractMesh[]): AbstractMesh[] {
+        const registry = (meshListSubscribers ??= new WeakMap<AbstractMesh[], Set<Light>>());
+        let lights = registry.get(array);
+        if (!lights) {
+            lights = new Set<Light>();
+            registry.set(array, lights);
+            const subscribers = lights;
+            const push = array.push.bind(array);
+            const splice = array.splice.bind(array);
+            const notify = (): void => {
+                for (const light of subscribers) {
+                    light._scheduleMeshListSync();
+                }
+            };
+            // Non-enumerable, like the prototype methods they shadow: an own enumerable "push" would
+            // surface in `for...in` over the list and in deep-equality checks against a plain array.
+            defineHook(array, "push", (...items: AbstractMesh[]): number => {
+                const length = push(...items);
+                notify();
+                return length;
+            });
+            defineHook(array, "splice", (...args: SpliceArgs): AbstractMesh[] => {
+                const removed = splice(...(args as Parameters<typeof splice>));
+                notify();
+                return removed;
+            });
+        }
+        lights.add(this);
+        return array;
+    }
+
+    /** @internal Stop observing an array this light no longer holds, leaving other lights on it. */
+    private _unsubscribeMeshList(array: AbstractMesh[]): void {
+        // The same array can back both of this light's lists; keep it while either one holds it.
+        if (array === this._excludedMeshes || array === this._includedOnlyMeshes) {
+            return;
+        }
+        meshListSubscribers?.get(array)?.delete(this);
+    }
+
+    /** @internal Release this light from its lists when its scene is torn down. */
+    private _watchSceneForMeshListRelease(): void {
+        const scene = this._scene;
+        if (!scene) {
+            return;
+        }
+        // A disposal callback registered on an already-disposed scene never runs, so there is nothing
+        // left to wait for and the light has to come off its lists now.
+        if (scene._lite._z) {
+            this._releaseMeshLists();
+            return;
+        }
+        this._meshListSceneRelease ??= onSceneDispose(scene._lite, () => {
+            this._meshListSceneRelease = null;
+            this._releaseMeshLists();
+        });
+    }
+
+    /** @internal Splice a disposed mesh out of both of this light's lists. */
+    public _pruneDisposedMesh(mesh: AbstractMesh): void {
+        this._spliceMeshOut(this._excludedMeshes, mesh);
+        // One array can back both lists; the first splice already notified every subscriber.
+        if (this._includedOnlyMeshes !== this._excludedMeshes) {
+            this._spliceMeshOut(this._includedOnlyMeshes, mesh);
+        }
+    }
+
+    private _spliceMeshOut(list: AbstractMesh[], mesh: AbstractMesh): void {
+        const index = list.indexOf(mesh);
+        if (index !== -1) {
+            list.splice(index, 1);
+        }
+    }
+
+    /** @internal Drop this light from both of its lists' subscriber sets. */
+    private _releaseMeshLists(): void {
+        meshListSubscribers?.get(this._excludedMeshes)?.delete(this);
+        meshListSubscribers?.get(this._includedOnlyMeshes)?.delete(this);
+    }
+
+    /**
+     * @internal Coalesce the sync to the end of the tick: a list built up one `push` at a time,
+     * as a loader callback or a room-by-room walk does, would otherwise rebuild the scene's
+     * renderables once per mesh.
+     */
+    private _scheduleMeshListSync(): void {
+        // Registered here, not from the queued sync below: the two happen in different ticks, and a scene
+        // disposed in the same tick as the edit would drain its disposables before a watcher queued behind
+        // it existed, leaving this light on an application-owned array for good.
+        this._watchSceneForMeshListRelease();
+        if (this._meshListSyncScheduled) {
+            return;
+        }
+        this._meshListSyncScheduled = true;
+        queueMicrotask(() => {
+            this._meshListSyncScheduled = false;
+            this._syncMeshLists();
+        });
+    }
+
+    /**
+     * @internal Publish both lists to the Lite light and rebake the per-mesh light selection.
+     *
+     * Published as sets of Lite meshes, not of ids: an id cannot identify a mesh on its own, since
+     * loading one asset twice yields distinct meshes carrying the same asset-local id. Empty lists
+     * publish `undefined` to keep the "no lists" fast path in `lightAffectsMesh` allocation-free.
+     */
+    private _syncMeshLists(): void {
+        this._lite.excludedMeshes = liteMeshSet(this._excludedMeshes);
+        this._lite.includedOnlyMeshes = liteMeshSet(this._includedOnlyMeshes);
+
+        const scene = this._scene;
+        if (!scene) {
+            return;
+        }
+        // A light held by a clustered container is out of the per-mesh light path entirely
+        // (the container calls `removeFromScene`), so nothing would read the sets back.
+        // Babylon.js skips its resync for the same reason.
+        if (!scene._hasStarted || scene._lite._z || this._clusteredContainer) {
+            return;
+        }
+        // The selection is baked into each renderable at build time (the shader's light-count
+        // permutation and the mesh UBO's light indices) and the per-frame updater only revisits it
+        // when the light COUNT changes. A list edit after start therefore needs the rebuild.
+        requestSceneRebuild(scene);
+    }
+
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
     public set shadowEnabled(enabled: boolean) {
         if (!enabled) {
@@ -124,8 +393,28 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
+        this._meshListSceneRelease?.();
+        this._meshListSceneRelease = null;
+        this._releaseMeshLists();
+        const scene = this._scene;
+        if (scene) {
+            const needsRectAreaReconcile =
+                scene._hasStarted &&
+                (this._lite.lightType === "rectArea" ||
+                    scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null));
+            if (needsRectAreaReconcile) {
+                // Keep ancestor removal from recursively bypassing the queued light-slot reconciliation.
+                const parent = this._lite.parent as SceneNode | null;
+                if (parent) {
+                    const index = parent.children.indexOf(this._lite);
+                    if (index !== -1) {
+                        parent.children.splice(index, 1);
+                    }
+                }
+                requestRectAreaLightReconcile(scene, () => removeFromScene(scene._lite, this._lite));
+            } else {
+                removeFromScene(scene._lite, this._lite);
+            }
         } else {
             this._lite.shadowGenerator = undefined;
         }
@@ -165,18 +454,73 @@ function ensureLightVersionBump(lite: LightBase): () => void {
     return bump;
 }
 
-function readColor(tuple: Tuple3): Color3 {
-    return new Color3(tuple[0], tuple[1], tuple[2]);
+/** @internal The arguments `Array.prototype.splice` accepts, including the no-argument call. */
+type SpliceArgs = [] | [start: number] | [start: number, deleteCount?: number, ...items: AbstractMesh[]];
+
+/** @internal Lights currently observing each hooked mesh list. Allocated on the first hooked list. */
+let meshListSubscribers: WeakMap<AbstractMesh[], Set<Light>> | undefined;
+
+/** @internal Install a mesh-list method override that behaves like the prototype method it shadows. */
+function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unknown): void {
+    Object.defineProperty(array, method, { value, enumerable: false, configurable: true, writable: true });
 }
 
-function writeColor(tuple: Tuple3, value: Color3): void {
-    tuple[0] = value.r;
-    tuple[1] = value.g;
-    tuple[2] = value.b;
+/** @internal The Lite meshes behind one list, or `undefined` when the list is empty. */
+function liteMeshSet(meshes: readonly AbstractMesh[]): Set<LiteMesh> | undefined {
+    if (meshes.length === 0) {
+        return undefined;
+    }
+    const lite = new Set<LiteMesh>();
+    for (const mesh of meshes) {
+        lite.add(mesh._lite);
+    }
+    return lite;
 }
 
-function readVector(vec: { x: number; y: number; z: number }): Vector3 {
-    return new Vector3(vec.x, vec.y, vec.z);
+/** @internal Lite scenes whose renderables a published list change has invalidated this tick. */
+let pendingSceneRebuilds: Set<Parameters<typeof rebuildSceneRenderables>[0]> | undefined;
+let sceneRebuildScheduled = false;
+
+/** @internal Scenes already holding a rebuild for when the initial build finishes. */
+let pendingStartupRebuilds: WeakSet<Scene> | undefined;
+
+/**
+ * @internal Request one rebuild per scene per tick.
+ */
+function requestSceneRebuild(scene: Scene): void {
+    const liteScene = scene._lite;
+    // `_hasStarted` flips when deferred adds are flushed, several awaits before `registerScene`
+    // sets `_built`, and a rebuild is a documented no-op until then. Requesting one inside that
+    // window would drop the invalidation: a group that already baked its light indices keeps them,
+    // since the per-frame updater only revisits the selection when the light count or the mesh's
+    // world matrix changes. Hold it until startup can rebuild every group, already-built included.
+    if (!liteScene._built) {
+        const held = (pendingStartupRebuilds ??= new WeakSet<Scene>());
+        if (held.has(scene)) {
+            return;
+        }
+        held.add(scene);
+        scene.getEngine()._registerLateWork(async () => {
+            held.delete(scene);
+            await rebuildSceneRenderables(liteScene);
+        });
+        return;
+    }
+    (pendingSceneRebuilds ??= new Set()).add(liteScene);
+    if (sceneRebuildScheduled) {
+        return;
+    }
+    sceneRebuildScheduled = true;
+    queueMicrotask(() => {
+        sceneRebuildScheduled = false;
+        const scenes = [...(pendingSceneRebuilds ?? [])];
+        pendingSceneRebuilds = undefined;
+        for (const scene of scenes) {
+            void rebuildSceneRenderables(scene).catch((error: unknown) => {
+                console.error(error);
+            });
+        }
+    });
 }
 
 export class HemisphericLight extends Light {
@@ -196,31 +540,31 @@ export class HemisphericLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuseColor);
+        return this._liveColor(this._lite.diffuseColor);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuseColor, value);
+        this._writeColor(this._lite.diffuseColor, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specularColor);
+        return this._liveColor(this._lite.specularColor);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specularColor, value);
+        this._writeColor(this._lite.specularColor, value);
     }
 
     public get groundColor(): Color3 {
-        return readColor(this._lite.groundColor);
+        return this._liveColor(this._lite.groundColor);
     }
     public set groundColor(value: Color3) {
-        writeColor(this._lite.groundColor, value);
+        this._writeColor(this._lite.groundColor, value);
     }
 }
 
@@ -241,31 +585,31 @@ export class DirectionalLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
     }
 }
 
@@ -293,24 +637,24 @@ export class PointLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
     }
 }
 
@@ -352,30 +696,150 @@ export class SpotLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
+    }
+}
+
+/** Babylon.js `AreaLight` hierarchy node shared by rectangular area lights. */
+export abstract class AreaLight extends Light {
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+    }
+
+    public abstract get position(): Vector3;
+    public abstract set position(value: Vector3);
+}
+
+/** Babylon.js `RectAreaLight` over Lite's native LTC-backed rectangular emitter. */
+export class RectAreaLight extends AreaLight {
+    /** @internal Underlying Babylon Lite rectangular area light. */
+    public readonly _lite: LiteRectAreaLight;
+    /** @internal Caller-visible texture wrapper assigned through `emissionTexture`. */
+    private _emissionTexture: BaseTexture | null = null;
+
+    public constructor(name: string, position: Vector3, width: number, height: number, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+        this._lite = createRectAreaLight(position.asArray(), width, height);
+        this._lite.name = name;
+        if (scene && !dontAddToScene) {
+            if (scene._hasStarted) {
+                requestRectAreaLightReconcile(scene, () => addToScene(scene._lite, this._lite));
+            } else {
+                addToScene(scene._lite, this._lite);
+            }
+        }
+    }
+
+    public override getClassName(): string {
+        return "RectAreaLight";
+    }
+
+    public getTypeID(): number {
+        return 4;
+    }
+
+    public override get position(): Vector3 {
+        return liteBackedVector3(this._lite.position);
+    }
+    public override set position(value: Vector3) {
+        this._lite.position.set(value.x, value.y, value.z);
+    }
+
+    public get width(): number {
+        return this._lite.width;
+    }
+    public set width(value: number) {
+        this._lite.width = value;
+    }
+
+    public get height(): number {
+        return this._lite.height;
+    }
+    public set height(value: number) {
+        this._lite.height = value;
+    }
+
+    public get diffuse(): Color3 {
+        return this._liveColor(this._lite.diffuse);
+    }
+    public set diffuse(value: Color3) {
+        this._writeColor(this._lite.diffuse, value);
+    }
+
+    public get specular(): Color3 {
+        return this._liveColor(this._lite.specular);
+    }
+    public set specular(value: Color3) {
+        this._writeColor(this._lite.specular, value);
+    }
+
+    public get emissionTexture(): BaseTexture | null {
+        return this._emissionTexture;
+    }
+    public set emissionTexture(value: BaseTexture | null) {
+        this._emissionTexture = value;
+        const apply = (): void => {
+            if (this._emissionTexture === value) {
+                const texture = value?._lite ?? null;
+                if (this._lite.emissionTexture !== texture) {
+                    const scene = this._scene;
+                    if (scene?._hasStarted) {
+                        requestRectAreaLightReconcile(scene, () => {
+                            if (this._emissionTexture === value) {
+                                this._lite.emissionTexture = texture;
+                            }
+                        });
+                    } else {
+                        this._lite.emissionTexture = texture;
+                    }
+                }
+            }
+        };
+        if (value) {
+            value._onReady(apply);
+        } else {
+            apply();
+        }
+    }
+
+    /** @internal Preserve Babylon.js local-transform parenting on the Lite light node. */
+    protected override _applyParent(parent: Node | null): void {
+        const source = parent as unknown as { _node?: SceneNode; _lite?: SceneNode } | null;
+        const next = source?._node ?? source?._lite ?? null;
+        const previous = this._lite.parent as SceneNode | null;
+        if (previous && previous !== next) {
+            const index = previous.children.indexOf(this._lite);
+            if (index !== -1) {
+                previous.children.splice(index, 1);
+            }
+        }
+        this._lite.parent = next;
+        if (next && !next.children.includes(this._lite)) {
+            next.children.push(this._lite);
+        }
     }
 }

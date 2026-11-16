@@ -37,7 +37,7 @@ async function main() {
 
     material.baseColorTexture = createSolidTexture2D(engine, 0.2, 0.8, 0.2);
     setPbrGammaAlbedo(material);
-    rebuildMaterial(scene, material);
+    void rebuildMaterial(scene, material);
 
     for (let i = 0; i < 60; i++) {
         await new Promise((resolve) => requestAnimationFrame(resolve));

@@ -1,7 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer } from "./empty-uniform-buffer.js";
 
-/** Create a UNIFORM + COPY_DST buffer and write initial data. Size is aligned to 16 bytes. */
+/** Create a raw UNIFORM + COPY_DST buffer and write initial data. Size is aligned to 16 bytes. */
 export function createUniformBuffer(engine: EngineContext, data: ArrayBufferView, label?: string): GPUBuffer {
     const device = engine._device;
     const buffer = createEmptyUniformBuffer(engine, data.byteLength, label);

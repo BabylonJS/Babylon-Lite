@@ -187,6 +187,9 @@ describe("createRenderTargetTexture", () => {
         expect(() => createRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine })).toThrow(
             /descriptor\.size must be fixed.*createSurfaceRenderTargetTexture/
         );
+        expect(() => createRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale: 0.5 } })).toThrow(
+            /descriptor\.size must be fixed.*createSurfaceRenderTargetTexture/
+        );
         expect(engine._device.createTexture).not.toHaveBeenCalled();
     });
 

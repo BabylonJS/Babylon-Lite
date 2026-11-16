@@ -1,10 +1,13 @@
 import type { Mesh } from "../mesh/mesh.js";
 import { createCylinder, createDisc, createMeshFromData, updateMeshPositions } from "../mesh/mesh-factories.js";
-import { addToScene, type SceneContext } from "../scene/scene-core.js";
+import { _hasSceneChangeHook, _runSceneChange, addToScene, type SceneContext } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
-import type { Vec3 } from "../math/types.js";
+import type { Mat4Storage, Quat, Vec3 } from "../math/types.js";
+import { _quatFromRotationBasis } from "../math/create-quat-from-rotation-mat4.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
-import type { PhysicsBody, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsWorld, PhysicsConstraint } from "./havok.js";
 import { getPhysicsBodyDebugGeometry } from "./havok.js";
 import { createPhysicsDebugLineMaterial } from "./physics-debug-line-material.js";
 
@@ -24,6 +27,10 @@ export interface PhysicsViewer {
     readonly _meshes: Mesh[];
     /** @internal */
     readonly _constraintMeshes: Mesh[];
+    /** @internal */
+    readonly _constraintKeys: PhysicsConstraintDebug[];
+    /** @internal */
+    readonly _constraintGroups: Mesh[][];
     /** @internal */
     readonly _constraintLines: ConstraintLine[];
     /** @internal */
@@ -92,6 +99,8 @@ export function createPhysicsViewer(scene: SceneContext, world: PhysicsWorld, op
         _bodies: [],
         _meshes: [],
         _constraintMeshes: [],
+        _constraintKeys: [],
+        _constraintGroups: [],
         _constraintLines: [],
         _constraintDisks: [],
         _constraintArrowheads: [],
@@ -104,8 +113,40 @@ export function createPhysicsViewer(scene: SceneContext, world: PhysicsWorld, op
     return viewer;
 }
 
+/**
+ * Cached viewer data for a constraint. Repeated calls return the identical object.
+ * Creation options are immutable; omitted pivots default to body-local zero.
+ * No native calls are made, including after constraint release.
+ */
+export function getPhysicsConstraintDebug(constraint: PhysicsConstraint): PhysicsConstraintDebug {
+    return (constraint._debug ??= {
+        bodyA: constraint.bodyA,
+        bodyB: constraint.bodyB,
+        type: constraint.type,
+        pivotA: constraint.options.pivotA ?? { x: 0, y: 0, z: 0 },
+        pivotB: constraint.options.pivotB ?? { x: 0, y: 0, z: 0 },
+        axisA: constraint.options.axisA,
+        axisB: constraint.options.axisB,
+        perpAxisA: constraint.options.perpAxisA,
+        perpAxisB: constraint.options.perpAxisB,
+    });
+}
+
 /** Shows a simplified Physics V2 constraint overlay: local axes (with arrowheads) plus angular-limit disks. */
 export function showPhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): Mesh[] {
+    if (viewer._constraintKeys.includes(constraint)) {
+        return [];
+    }
+    let meshes: Mesh[] = [];
+    // Defer scene-change listeners until the key and full mesh group are registered.
+    batchSceneChanges(viewer.scene, () => {
+        meshes = addConstraintMeshes(viewer, constraint);
+    });
+    return meshes;
+}
+
+function addConstraintMeshes(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): Mesh[] {
+    const meshStart = viewer._constraintMeshes.length;
     const axisLen = 0.4;
     const diskRadius = 0.6;
     const axisA = constraint.axisA ?? { x: 1, y: 0, z: 0 };
@@ -146,8 +187,50 @@ export function showPhysicsConstraint(viewer: PhysicsViewer, constraint: Physics
         viewer._constraintMeshes.push(mesh);
         addToScene(viewer.scene, mesh);
     }
+    viewer._constraintKeys.push(constraint);
+    viewer._constraintGroups.push(viewer._constraintMeshes.slice(meshStart));
     registerViewerUpdate(viewer);
     return meshes;
+}
+
+/**
+ * Hide a previously shown constraint by its stable debug object, returning whether it was shown.
+ * Makes no native calls; safe after constraint release, body removal, or world disposal.
+ */
+export function hidePhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): boolean {
+    const index = viewer._constraintKeys.indexOf(constraint);
+    if (index < 0) {
+        return false;
+    }
+    const group = viewer._constraintGroups[index]!;
+    // Commit all bookkeeping before removing meshes so reentrant listeners see a consistent viewer.
+    viewer._constraintKeys.splice(index, 1);
+    viewer._constraintGroups.splice(index, 1);
+    for (const mesh of group) {
+        viewer._constraintMeshes.splice(viewer._constraintMeshes.indexOf(mesh), 1);
+    }
+    for (const entries of [viewer._constraintLines, viewer._constraintDisks, viewer._constraintArrowheads]) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+            if (group.includes(entries[i]!.mesh)) {
+                entries.splice(i, 1);
+            }
+        }
+    }
+    unregisterViewerUpdateIfEmpty(viewer);
+    batchSceneChanges(viewer.scene, () => {
+        for (const mesh of group) {
+            removeFromScene(viewer.scene, mesh);
+        }
+    });
+    return true;
+}
+
+function batchSceneChanges(scene: SceneContext, mutation: () => void): void {
+    if (_hasSceneChangeHook()) {
+        _runSceneChange(scene, mutation);
+    } else {
+        mutation();
+    }
 }
 
 /** Shows a Havok Physics V2 body as a wireframe debug mesh. */
@@ -194,16 +277,20 @@ export function hidePhysicsBody(viewer: PhysicsViewer, body: PhysicsBody): boole
 
 /** Disposes all physics debug meshes and unregisters the viewer update hook. */
 export function disposePhysicsViewer(viewer: PhysicsViewer): void {
-    while (viewer._bodies.length > 0) {
-        hidePhysicsBody(viewer, viewer._bodies[0]!);
-    }
-    while (viewer._constraintMeshes.length > 0) {
-        removeFromScene(viewer.scene, viewer._constraintMeshes.pop()!);
-    }
+    // Commit all bookkeeping before removing meshes so reentrant listeners see an empty viewer.
+    const meshes = viewer._meshes.splice(0).concat(viewer._constraintMeshes.splice(0));
+    viewer._bodies.length = 0;
     viewer._constraintLines.length = 0;
     viewer._constraintDisks.length = 0;
     viewer._constraintArrowheads.length = 0;
+    viewer._constraintKeys.length = 0;
+    viewer._constraintGroups.length = 0;
     unregisterViewerUpdate(viewer);
+    batchSceneChanges(viewer.scene, () => {
+        for (const mesh of meshes) {
+            removeFromScene(viewer.scene, mesh);
+        }
+    });
 }
 
 function registerViewerUpdate(viewer: PhysicsViewer): void {
@@ -331,9 +418,50 @@ function updateConstraintLine(viewer: PhysicsViewer, line: ConstraintLine): void
     updateMeshPositions(viewer.scene.surface.engine, line.mesh, line.positions);
 }
 
+let rigidScratch: Float64Array | null = null;
+let rigidQuat: Quat | null = null;
+
+/** World pose of the simulated rigid frame that Havok constraint pivots/axes are expressed in.
+ *  Ordinary bodies use the node position/quaternion with unit scale (as written to Havok);
+ *  thin bodies use instance 0 (carrier × instance matrix) with scale stripped. JS-only, no native calls. */
+function rigidMatrix(body: PhysicsBody): Float64Array {
+    const m = (rigidScratch ??= new Float64Array(16));
+    const node = body.node as Mesh;
+    const thin = body._world._thin?.count(body) !== undefined ? node.thinInstances : null;
+    if (!thin || thin.count === 0) {
+        const p = node.position;
+        const q = node.rotationQuaternion;
+        composeMat4IntoBuffer(m, 0, p.x, p.y, p.z, q.x, q.y, q.z, q.w, 1, 1, 1);
+        return m;
+    }
+    multiplyMat4IntoBuffer(m, 0, node.worldMatrix as unknown as Mat4Storage, 0, thin.matrices, 0);
+    for (let c = 0; c < 12; c += 4) {
+        const len = Math.hypot(m[c]!, m[c + 1]!, m[c + 2]!);
+        if (len > 0) {
+            m[c]! /= len;
+            m[c + 1]! /= len;
+            m[c + 2]! /= len;
+        }
+    }
+    const det = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) - m[4]! * (m[1]! * m[10]! - m[2]! * m[9]!) + m[8]! * (m[1]! * m[6]! - m[2]! * m[5]!);
+    if (det < 0) {
+        // Mirrored carriers are represented by a negated Y scale, matching thinInstanceTransform.
+        m[4] = -m[4]!;
+        m[5] = -m[5]!;
+        m[6] = -m[6]!;
+    }
+    // A nonuniform carrier × rotated instance leaves a sheared basis; recover the same normalized
+    // quaternion thinInstanceTransform hands to Havok and recompose with unit scale.
+    const q = _quatFromRotationBasis(m[0]!, m[4]!, m[8]!, m[1]!, m[5]!, m[9]!, m[2]!, m[6]!, m[10]!, (rigidQuat ??= { x: 0, y: 0, z: 0, w: 1 }));
+    const inv = 1 / Math.hypot(q.x, q.y, q.z, q.w);
+    composeMat4IntoBuffer(m, 0, m[12]!, m[13]!, m[14]!, q.x * inv, q.y * inv, q.z * inv, q.w * inv, 1, 1, 1);
+    return m;
+}
+
 function updateConstraintDisk(disk: ConstraintDisk): void {
-    const p = localToWorld(disk.endpoint.body.node.worldMatrix, disk.endpoint.pivot);
-    const axis = normalize(transformDirection(disk.endpoint.body.node.worldMatrix, disk.axis));
+    const m = rigidMatrix(disk.endpoint.body);
+    const p = localToWorld(m, disk.endpoint.pivot);
+    const axis = normalize(transformDirection(m, disk.axis));
     disk.mesh.position.set(p.x, p.y, p.z);
     const q = quatFromZTo(axis);
     disk.mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
@@ -341,7 +469,7 @@ function updateConstraintDisk(disk: ConstraintDisk): void {
 
 function updateConstraintArrowhead(arrowhead: ConstraintArrowhead): void {
     const tip = endpointWorld(arrowhead.endpoint);
-    const axis = arrowhead.endpoint.axis ? normalize(transformDirection(arrowhead.endpoint.body.node.worldMatrix, arrowhead.endpoint.axis)) : { x: 0, y: 1, z: 0 };
+    const axis = arrowhead.endpoint.axis ? normalize(transformDirection(rigidMatrix(arrowhead.endpoint.body), arrowhead.endpoint.axis)) : { x: 0, y: 1, z: 0 };
     arrowhead.mesh.position.set(tip.x, tip.y, tip.z);
     const q = quatFromYTo(axis);
     arrowhead.mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
@@ -362,7 +490,7 @@ function endpointWorld(endpoint: ConstraintEndpoint): Vec3 {
               z: endpoint.pivot.z + endpoint.axis.z * (endpoint.axisLength ?? 1),
           }
         : endpoint.pivot;
-    return localToWorld(endpoint.body.node.worldMatrix, pivot);
+    return localToWorld(rigidMatrix(endpoint.body), pivot);
 }
 
 function localToWorld(m: ArrayLike<number>, p: Vec3): Vec3 {

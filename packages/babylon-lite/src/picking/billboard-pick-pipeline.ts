@@ -27,6 +27,7 @@ import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 import { getViewMatrix } from "../camera/camera.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Result of a successful {@link pickBillboardSprite} hit (re-exported from the public picker). */
 export interface BillboardPickInfo {
@@ -95,13 +96,15 @@ return B(r, -a);
     }
 }
 
-function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
+/** @internal Exported for tests. */
+export function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
     const cutoutBindings = isCutout
         ? wgsl`@group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;`
         : "";
     const uvVarying = isCutout ? wgsl`,\n@location(1) uv: vec2f` : "";
-    const uvAssign = isCutout ? wgsl`out.uv = mix(in.a, in.b, q);` : "";
+    // A right-handed engine mirrors billboard textures horizontally (see `_mirrorBillboardU`); the cutout follows.
+    const uvAssign = isCutout ? (_rightHanded ? wgsl`out.uv = mix(in.a, in.b, vec2f(1.0 - q.x, q.y));` : wgsl`out.uv = mix(in.a, in.b, q);`) : "";
     const cutoutDiscard = isCutout
         ? wgsl`let s = textureSample(atlasTex, atlasSamp, in.uv);
 if (s.a < bb.cutoff) {
@@ -198,7 +201,7 @@ function getGroup1Bgl(engine: EngineContext, cache: BillboardPickCache, isCutout
 
 function getPickPipeline(engine: EngineContext, system: BillboardSpriteSystem, detailed: boolean): GPURenderPipeline {
     const cache = getCache(engine);
-    const orientation = system._orientation;
+    const orientation = system.orientation;
     const isCutout = system._depthMode === "cutout";
     const key = `${orientation}|${isCutout ? 1 : 0}|${detailed ? "detailed" : "basic"}`;
     const cached = cache.pipelines.get(key);
@@ -337,7 +340,7 @@ export function drawBillboardForPicking(
 
     // Per-pick UBO: camera basis + axis + baseId + alpha cutoff (cutout only).
     const cutoff = system._depthMode === "cutout" ? system.alphaCutoff : 0;
-    packBillboardPickUbo(view, baseId, cutoff, system._axis, res.uboF32, res.uboU32);
+    packBillboardPickUbo(view, baseId, cutoff, system.axis, res.uboF32, res.uboU32);
     device.queue.writeBuffer(res.ubo, 0, res.uboScratch, 0, BILLBOARD_PICK_UBO_BYTES);
 
     pass.setPipeline(getPickPipeline(engine, system, detailed));

@@ -25,15 +25,16 @@ const MORPH_FLOATS_PER_VERTEX = 6;
  *  @param targets      - Array of `{positions, normals}` deltas per target
  *  @param vertexCount  - Number of vertices in the base mesh
  *  @param morphWeights - Initial morph weights (one per target, may be null)
+ *  @param names        - Optional index-aligned diagnostic names; count need not match targets
  */
 export function createMorphTargets(
     engine: EngineContext,
     targets: { positions: Float32Array; normals: Float32Array | null }[],
     vertexCount: number,
-    morphWeights: number[] | null
+    morphWeights: number[] | null,
+    names?: readonly string[]
 ): MorphTargetData {
     const targetCount = targets.length;
-
     // Deltas storage buffer: 6 floats per (target, vertex) — position xyz then normal xyz.
     const deltaData = new F32(targetCount * vertexCount * MORPH_FLOATS_PER_VERTEX);
     for (let t = 0; t < targetCount; t++) {
@@ -68,7 +69,7 @@ export function createMorphTargets(
     const weights = new F32(targetCount);
     weights.set(headerWeights);
 
-    return { deltasBuffer, count: targetCount, weightsBuffer, targets, weights };
+    return { deltasBuffer, count: targetCount, weightsBuffer, targets, weights, ...(names ? { names } : {}) };
 }
 
 /** Update morph target weights on CPU and GPU.

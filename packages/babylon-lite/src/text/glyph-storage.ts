@@ -4,8 +4,8 @@
  *    - `GlyphStorage` is the opaque public handle. Holds one or more curve-sets keyed by
  *      `CurveSetId` (typically a font family name). Each curve-set owns its glyph
  *      outlines plus the `SharedAtlas` packed from them.
- *    - `SharedAtlas` is the CPU staging: two `rgba32float`-shaped `Float32Array`s holding
- *      quadratic curve control points and per-band curve-index lists, both append-only.
+ *    - `SharedAtlas` stages float32 curve control points and uint32 band headers/
+ *      curve-reference lists in append-only RGBA and RG arrays, respectively.
  *    - Atlas packing (`packAppendGlyph`) and spatial-band partitioning (`buildGlyphBands`)
  *      live here as internal helpers — they implement the storage's invariants and are
  *      not callable from outside the module.
@@ -113,8 +113,8 @@ export type SharedAtlas = {
     _curveTexData: Float32Array;
     /** @internal Number of curve texels actually used. */
     _curveTexelsUsed: number;
-    /** @internal Pooled band texel staging (rgba32float, width 4096). */
-    _bandTexData: Float32Array;
+    /** @internal Pooled band texel staging (rg32uint, two components, width 4096). */
+    _bandTexData: Uint32Array;
     /** @internal Number of band texels actually used. */
     _bandTexelsUsed: number;
     /** @internal Per-glyph atlas slot lookup. Slots are append-only and never moved. */
@@ -221,14 +221,14 @@ export function disposeGlyphStorage(storage: GlyphStorage): void {
 
 // ─── Internal: SharedAtlas construction + glyph packing ───────────────────
 
-const ROW_FLOATS = TEX_WIDTH * 4;
+const ROW_COMPONENTS = TEX_WIDTH * 4;
 
 /** @internal Create an empty `SharedAtlas`. */
 export function createSharedAtlas(): SharedAtlas {
     return {
-        _curveTexData: new Float32Array(ROW_FLOATS),
+        _curveTexData: new Float32Array(ROW_COMPONENTS),
         _curveTexelsUsed: 0,
-        _bandTexData: new Float32Array(ROW_FLOATS),
+        _bandTexData: new Uint32Array(TEX_WIDTH * 2),
         _bandTexelsUsed: 0,
         _glyphSlots: new Map(),
         _metaData: new Float32Array(GLYPH_METADATA_FLOATS * 16),
@@ -246,20 +246,21 @@ function makeCurveSet(curves: Map<number, GlyphCurves>): GlyphStorageCurveSet {
     return { _curves: curves, _atlas: atlas };
 }
 
-/** Grow a texel-staging array to hold at least `neededTexels` texels (4 floats each),
+/** Grow a texel-staging array to hold at least `neededTexels` texels,
  *  rounded up to a whole 4096-texel row. Returns the same array when already large enough. */
-function ensureTexelCapacity(current: Float32Array, neededTexels: number): Float32Array {
-    const neededFloats = neededTexels * 4;
-    if (current.length >= neededFloats) {
+function ensureTexelCapacity<T extends Float32Array | Uint32Array>(current: T, neededTexels: number, ArrayType: new (length: number) => T, componentsPerTexel: 2 | 4 = 4): T {
+    const neededComponents = neededTexels * componentsPerTexel;
+    const rowComponents = TEX_WIDTH * componentsPerTexel;
+    if (current.length >= neededComponents) {
         return current;
     }
-    let newFloats = Math.max(current.length * 2, ROW_FLOATS);
-    while (newFloats < neededFloats) {
-        newFloats *= 2;
+    let newLength = Math.max(current.length * 2, rowComponents);
+    while (newLength < neededComponents) {
+        newLength *= 2;
     }
     // Round up to a whole row to keep texel math aligned.
-    newFloats = Math.ceil(newFloats / ROW_FLOATS) * ROW_FLOATS;
-    const grown = new Float32Array(newFloats);
+    newLength = Math.ceil(newLength / rowComponents) * rowComponents;
+    const grown = new ArrayType(newLength);
     grown.set(current);
     return grown;
 }
@@ -283,7 +284,7 @@ export function packAppendGlyph(atlas: SharedAtlas, glyph: GlyphCurves): AtlasSl
         curveTexel += 2;
     }
     const curveTexelsEnd = curveTexel;
-    atlas._curveTexData = ensureTexelCapacity(atlas._curveTexData, curveTexelsEnd);
+    atlas._curveTexData = ensureTexelCapacity(atlas._curveTexData, curveTexelsEnd, Float32Array);
 
     const curveData = atlas._curveTexData;
     for (let i = 0; i < curves.length; i++) {
@@ -319,13 +320,13 @@ export function packAppendGlyph(atlas: SharedAtlas, glyph: GlyphCurves): AtlasSl
         curveListOffset += allBands[i]!._curveIndices.length;
     }
     const bandTexelsEnd = bandStart + curveListOffset;
-    atlas._bandTexData = ensureTexelCapacity(atlas._bandTexData, bandTexelsEnd);
+    atlas._bandTexData = ensureTexelCapacity(atlas._bandTexData, bandTexelsEnd, Uint32Array, 2);
 
     const bandData = atlas._bandTexData;
     // Headers.
     for (let i = 0; i < allBands.length; i++) {
         const tl = bandStart + i;
-        const di = tl * 4;
+        const di = tl * 2;
         bandData[di] = allBands[i]!._curveIndices.length;
         bandData[di + 1] = bandOffsets[i]!;
     }
@@ -339,7 +340,7 @@ export function packAppendGlyph(atlas: SharedAtlas, glyph: GlyphCurves): AtlasSl
             const cTexX = curveTexelAbs % TEX_WIDTH;
             const cTexY = (curveTexelAbs / TEX_WIDTH) | 0;
             const tl = listStart + j;
-            const di = tl * 4;
+            const di = tl * 2;
             bandData[di] = cTexX;
             bandData[di + 1] = cTexY;
         }

@@ -246,6 +246,14 @@ function createPickDiscardBindGroup(engine: EngineContext, layout: GPUBindGroupL
  *  concurrent calls on the same picker so their shared 1×1 staging buffers never race. */
 async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
+    // Release contributors whose source left the scene (e.g. a removed billboard). Picks are serialized and each
+    // awaits its readback, so no submitted pick still uses them.
+    picker._contributors?.forEach((contributor, source) => {
+        if (!scene._pickSources.includes(source)) {
+            contributor.dispose?.();
+            picker._contributors!.delete(source);
+        }
+    });
     const pickFilter = options?.filter ?? null;
     const pickDiscard = options?.discard ?? null;
     const ignored = options?.ignore;
@@ -292,7 +300,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
                 needsDeformation ||= !!(mesh.morphTargets || mesh.skeleton);
-                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
+                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?.position || !!mesh.material?._attributeFormats;
             }
         }
     }
@@ -381,6 +389,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const tempBuffers: GPUBuffer[] = [];
     const detailedPositions = detailed ? new Map<Mesh, Float32Array>() : null;
     const detailedNormals = detailed ? new Map<Mesh, Float32Array>() : null;
+    // Active-range changes replace these CPU views. Validate both draw paths after readback
+    // rather than combine an old GPU primitive with the new active indices/UVs.
+    const detailedGeometry = detailed
+        ? new Map(candidates.map(({ mesh }) => [mesh, [mesh._cpuPositions, mesh._cpuNormals, mesh._cpuIndices, mesh._cpuUvs, mesh._cpuUv2s] as const]))
+        : null;
     // Capture deformation poses now, while the draw is still being recorded. The depth readback below
     // resolves a frame or two later, by which point the animation tick has advanced `boneMatrices` and
     // morph weights in place — deriving the hit triangle's face normal from those live mirrors would
@@ -427,7 +440,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 deformProjection!.bindDeformPickingProjection(engine, pass, set.regularPipeline, mesh, 1, !!discardBG);
             }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
             meshRanges.push({
                 base: nextId++,
                 count: 1,
@@ -535,6 +548,18 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             debug.tracePick(debugLabel!, debugInput!, pickRay, pickId, depth, false, true);
         }
         return createEmptyPickingInfo();
+    }
+    if (hitMesh && detailedGeometry) {
+        const geometry = detailedGeometry.get(hitMesh)!;
+        if (
+            geometry[0] !== hitMesh._cpuPositions ||
+            geometry[1] !== hitMesh._cpuNormals ||
+            geometry[2] !== hitMesh._cpuIndices ||
+            geometry[3] !== hitMesh._cpuUvs ||
+            geometry[4] !== hitMesh._cpuUv2s
+        ) {
+            return createEmptyPickingInfo();
+        }
     }
 
     const info = createEmptyPickingInfo();

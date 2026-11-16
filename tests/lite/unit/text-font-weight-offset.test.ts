@@ -676,8 +676,8 @@ describe("font-weight-offset group-key collision regression", () => {
 });
 
 describe("text pipeline cache key", () => {
-    it("is fixed arity: six fields, all always present", () => {
-        expect(_textPipelineKey("bgra8unorm", 1, null, false, false, "-").split(":")).toEqual(["bgra8unorm", "1", "-", "r", "-", "-"]);
+    it("is fixed arity: seven fields, all always present", () => {
+        expect(_textPipelineKey("bgra8unorm", 1, null, false, false, "-").split(":")).toEqual(["bgra8unorm", "1", "-", "-", "r", "-", "-"]);
     });
 
     it("cannot alias a base alpha-to-coverage pipeline with a variant whose id is 'a'", () => {

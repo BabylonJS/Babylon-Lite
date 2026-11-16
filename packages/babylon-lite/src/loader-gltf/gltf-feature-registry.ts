@@ -20,6 +20,7 @@ import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { anyPrimitive, needsOrmComposite } from "./gltf-parser.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Dynamic `import()` of a feature's `GltfFeature` module. */
 type Loader = () => Promise<{ default: GltfFeature }>;
@@ -65,7 +66,10 @@ const _features: [Trigger, Loader][] = [
     // into a GaussianSplattingMesh with its own pipeline, so they never reach the PBR pipeline that
     // reads the primitive state — loading the feature for them fetches a chunk nothing then reads.
     // A GS asset that ALSO carries a genuinely exotic primitive, or a mirrored node, still triggers.
-    [(j) => hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== undefined && p.mode !== 4 && !p.extensions?.[GS]), () => import("./gltf-feature-primitive.js")],
+    //
+    // A right-handed engine always loads it: without the RH→LH root flip every ordinary glTF mesh has a
+    // positive world determinant, i.e. is "mirrored" relative to the left-handed authoring rule.
+    [(j) => _rightHanded || hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== undefined && p.mode !== 4 && !p.extensions?.[GS]), () => import("./gltf-feature-primitive.js")],
     // Per-asset features
     [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],

@@ -26,19 +26,24 @@ return mat4x4f(m0, m1, m2, m3);
  *  shader — the render path and the picker's regular/detailed variants use `mesh.world`, while the
  *  picker's thin-instance variant uses the per-instance `world`. */
 export function makeSkinningCode(has8Bones: boolean, worldExpr = "mesh.world"): WgslSource {
-    let code = wgsl`var influence: mat4x4<f32> = readMatrixFromRawSampler(boneSampler, f32(joints[0])) * weights[0];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints[1])) * weights[1];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints[2])) * weights[2];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints[3])) * weights[3];`;
+    return wgsl`${makeBoneInfluenceCode(has8Bones)}
+finalWorld = ${worldExpr} * influence;`;
+}
+
+/** @internal Shared current/previous bone blend, preserving influence order. */
+export function makeBoneInfluenceCode(has8Bones: boolean, sampler = "boneSampler", variable = "influence"): WgslSource {
+    let code = wgsl`var ${variable}: mat4x4<f32> = readMatrixFromRawSampler(${sampler}, f32(joints[0])) * weights[0];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints[1])) * weights[1];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints[2])) * weights[2];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints[3])) * weights[3];`;
     if (has8Bones) {
         code = wgsl`${code}
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[0])) * weights1[0];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[1])) * weights1[1];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[2])) * weights1[2];
-influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[3])) * weights1[3];`;
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints1[0])) * weights1[0];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints1[1])) * weights1[1];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints1[2])) * weights1[2];
+${variable} = ${variable} + readMatrixFromRawSampler(${sampler}, f32(joints1[3])) * weights1[3];`;
     }
-    return wgsl`${code}
-finalWorld = ${worldExpr} * influence;`;
+    return code;
 }
 
 /** Create the shared skeletal skinning shader fragment. */

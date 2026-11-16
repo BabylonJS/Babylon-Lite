@@ -1,8 +1,8 @@
 /**
- * Shared temporal owner for the screen-space contact-shadow and global-illumination
+ * Shared temporal owner for the screen-space contact-shadow, ambient-occlusion, and global-illumination
  * effects (see `docs/lite/architecture/52-screen-space-effects.md`).
  *
- * Owns the two internal passes that run after either producer:
+ * Owns the two internal passes that run after each producer:
  *   1. Resolve: reconstruct the current world position, reproject through the previous
  *      view-projection, reject off-screen/depth-mismatched history, clamp accepted
  *      history to the current 3x3 neighborhood, and blend the current estimate.
@@ -11,7 +11,7 @@
  *
  * The module exports pure functions for the reset matrix, the accumulation ramp, and the
  * rotating phase index so they can be unit tested without a GPU device. All GPU state
- * lives behind `createScreenSpaceTemporalOwner`, which is only invoked by the two public
+ * lives behind `createScreenSpaceTemporalOwner`, which is only invoked by the public
  * task factories — importing this module in isolation allocates nothing at module scope.
  */
 
@@ -22,7 +22,7 @@ import { getBilinearSampler } from "../resource/samplers.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { screenSpaceRaymarchWGSL } from "./screen-space-raymarch-wgsl.js";
@@ -122,11 +122,7 @@ export function resolveScreenSpaceSourceSize(source: RenderTarget): { width: num
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    const size = source._descriptor.size;
-    if ("canvas" in size) {
-        return { width: size.canvas.width, height: size.canvas.height };
-    }
-    return size;
+    return _resolveRenderTargetSize(source._descriptor);
 }
 
 /** Throw when `target` is the same object as `source`: sampling and rendering the same

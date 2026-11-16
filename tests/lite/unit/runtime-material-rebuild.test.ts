@@ -1,16 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
+import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
+import type { NodeMaterial } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { buildNodeMeshRenderables } from "../../../packages/babylon-lite/src/material/node/node-renderable";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext, type SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
-import { B as startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
+import { B as startRuntimeMeshBuild, C as materializeRuntimeMeshes } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+
+const composed = vi.hoisted(() => ({ value: false }));
+vi.mock("../../../packages/babylon-lite/src/material/pbr/pbr-built-variant.js", () => ({ _pbrRebuildsComposed: () => composed.value }));
 
 function createScene(engine: EngineContext): SceneContext {
     return {
@@ -34,6 +41,72 @@ function createScene(engine: EngineContext): SceneContext {
 
 function renderable(mesh: Mesh): Renderable {
     return { mesh, order: 100, isTransparent: false } as Renderable;
+}
+
+function createNodeRebuildFixture() {
+    const buffers: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }> = [];
+    const engine = {
+        format: "bgra8unorm",
+        _retirements: [],
+        _device: {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+                const buffer = { label: descriptor.label, size: descriptor.size, destroy: vi.fn() } as unknown as GPUBuffer & {
+                    label?: string;
+                    destroy: ReturnType<typeof vi.fn>;
+                };
+                buffers.push(buffer);
+                return buffer;
+            }),
+            createBindGroup: vi.fn(() => ({}) as GPUBindGroup),
+            queue: { writeBuffer: vi.fn() },
+        },
+    } as unknown as EngineContext;
+    const scene = createScene(engine);
+    const builder = Object.assign(vi.fn(), { _materialFamily: "node" }) as unknown as MeshGroupBuilder;
+    const material = {
+        _buildGroup: builder,
+        _compile: {
+            _meshBGL: {},
+            _nodeUboBinding: 1,
+            _nodeUboSpec: { _totalBytes: 16, _offsets: new Map(), _structBody: "" },
+            _meshUboFloats: 20,
+            _usesMeshAttributeFlags: false,
+            _textureBindings: [],
+            _envBindings: null,
+            _shadowBindings: [],
+            _esmShadowParamsBinding: null,
+            _pipelineForMesh: () => ({}),
+        },
+        _renderFeatures: null,
+        _vertexAttrNames: ["position"],
+        _needsAlphaBlending: false,
+        _uboDirty: false,
+        _uniformValues: new Map(),
+    } as unknown as NodeMaterial;
+    const meshes = Array.from({ length: 2 }, () => {
+        return {
+            material,
+            visible: true,
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            worldMatrixVersion: 1,
+            receiveShadows: false,
+            _gpu: {
+                _vbKey: "shared",
+                _baseVertex: 0,
+                indexCount: 3,
+                indexBuffer: {} as GPUBuffer,
+                indexFormat: "uint16",
+                positionBuffer: { size: 12 } as GPUBuffer,
+                vertexBuffers: new Map([["position", {} as GPUBuffer]]),
+            },
+        } as unknown as Mesh;
+    });
+    const built = buildNodeMeshRenderables(scene, meshes);
+    scene.meshes.push(...meshes);
+    scene._renderables.push(...built.renderables);
+    const group = Object.assign(meshes, { r: built.rebuildSingle, o: built.renderables });
+    scene._groups.set(builder, group);
+    return { buffers, engine, group, material, meshes, scene };
 }
 
 describe("runtime material rebuild ownership", () => {
@@ -221,7 +294,7 @@ describe("runtime material rebuild ownership", () => {
         const pending = processMaterialSwaps(scene) as Promise<void>;
         await started;
 
-        rebuildMaterial(scene, standardMaterial);
+        void rebuildMaterial(scene, standardMaterial);
         expect(oldDispose).not.toHaveBeenCalled();
 
         finishBuild();
@@ -231,7 +304,7 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).toHaveBeenCalledOnce();
     });
 
-    it("reports an asynchronous material rebuild failure", async () => {
+    it("returns and reports an asynchronous material rebuild failure", async () => {
         const failure = new Error("async material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -251,9 +324,85 @@ describe("runtime material rebuild ownership", () => {
         const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
         scene.meshes.push(mesh);
 
-        rebuildMaterial(scene, material);
+        const result = rebuildMaterial(scene, material);
 
-        await vi.waitFor(() => expect(report).toHaveBeenCalledWith(failure));
+        await expect(result).rejects.toBe(failure);
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(log).toHaveBeenCalledWith(failure);
+        log.mockRestore();
+    });
+
+    it("awaits mesh completion before rebuilding the optional frame graph", async () => {
+        const events: string[] = [];
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => (finish = resolve));
+        const scene = createScene({} as EngineContext);
+        scene._built = true;
+        scene._frameGraph.build = vi.fn(() => events.push("frame graph"));
+        scene._runtimeBuilds = {
+            w: true,
+            queue: () => gate,
+            _e: () => events.push("mesh"),
+            _x: vi.fn(),
+        } as unknown as RuntimeSceneBuildHooks;
+        const builder = (() => Promise.resolve({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        scene.meshes.push(mesh);
+
+        const completion = rebuildMaterial(scene, material, { rebuildFrameGraph: true });
+        expect(completion).toBeInstanceOf(Promise);
+        const resolved = completion!.then(() => events.push("resolved"));
+
+        expect(events).toEqual([]);
+        expect(scene._frameGraph.build).not.toHaveBeenCalled();
+        finish();
+        await resolved;
+
+        expect(events).toEqual(["mesh", "frame graph", "resolved"]);
+    });
+
+    it("rebuilds a source material and its MaterialView through the returned completion", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const rebuild = vi.fn((_target: SceneContext, target: Mesh) => renderable(target));
+        const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        const source = { _buildGroup: builder } as Material;
+        const view = createMaterialView(source, { features: 1 });
+        const sourceMesh = { material: source } as unknown as Mesh;
+        const viewMesh = { material: view } as unknown as Mesh;
+        scene.meshes.push(sourceMesh, viewMesh);
+        scene._groups.set(builder, Object.assign([sourceMesh, viewMesh], { r: rebuild }));
+
+        await rebuildMaterial(scene, view);
+
+        expect(rebuild).toHaveBeenCalledTimes(2);
+        expect(rebuild).toHaveBeenNthCalledWith(1, scene, sourceMesh);
+        expect(rebuild).toHaveBeenNthCalledWith(2, scene, viewMesh);
+    });
+
+    it("rejects and reports returned rebuild failures", async () => {
+        const failure = new Error("material rebuild failed");
+        const report = vi.fn();
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const scene = createScene({} as EngineContext);
+        scene._built = true;
+        scene._runtimeBuilds = {
+            w: true,
+            queue: () => Promise.resolve(),
+            _e: () => {
+                throw failure;
+            },
+            _x: report,
+        } as unknown as RuntimeSceneBuildHooks;
+        const builder = (() => Promise.resolve({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        scene.meshes.push(mesh);
+
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+        expect(report).toHaveBeenCalledWith(failure);
         expect(log).toHaveBeenCalledWith(failure);
         log.mockRestore();
     });
@@ -263,9 +412,103 @@ describe("runtime material rebuild ownership", () => {
         const builder = (async () => ({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
         const material = { _buildGroup: builder, _renderFeatures: { features: 0, features2: 0 } } as Material & { _renderFeatures?: unknown };
 
-        rebuildMaterial(scene, material);
+        void rebuildMaterial(scene, material);
 
         expect(material._renderFeatures).toBeUndefined();
+    });
+
+    it("retires synchronous Standard rebuild resources after the in-flight frame", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const oldDispose = vi.fn();
+        const newDispose = vi.fn();
+        const material = {} as Material;
+        const mesh = { material } as Mesh;
+        const previous = renderable(mesh);
+        const rebuilt = { ...renderable(mesh), order: 50 };
+        const rebuild = vi.fn((target: SceneContext, targetMesh: Mesh): Renderable => {
+            target._meshDisposables.set(targetMesh, [newDispose]);
+            return rebuilt;
+        });
+        const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        Object.assign(material, { _buildGroup: builder });
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, Object.assign([mesh], { r: rebuild }));
+        scene._renderables.push(previous);
+        scene._meshDisposables.set(mesh, [oldDispose]);
+
+        void rebuildMaterial(scene, material);
+
+        expect(oldDispose).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+        expect(scene._meshDisposables.get(mesh)).toEqual([newDispose]);
+        expect(scene._renderables).toEqual([rebuilt]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDispose).toHaveBeenCalledOnce();
+    });
+
+    it("detaches rebuilt ShaderMaterial packets from their merged renderable before GPU retirement", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const material = {} as Material;
+        const meshA = { material } as Mesh;
+        const meshB = { material } as Mesh;
+        type Packet = { _disposed?: boolean; _owner?: Packet[] };
+        const packetA: Packet = {};
+        const packetB: Packet = {};
+        const owner = [packetA, packetB];
+        packetA._owner = owner;
+        packetB._owner = owner;
+        const oldDisposeA = Object.assign(vi.fn(), { p: packetA });
+        const oldDisposeB = Object.assign(vi.fn(), { p: packetB });
+        const rebuiltA = renderable(meshA);
+        const rebuiltB = renderable(meshB);
+        const rebuild = vi.fn((_target: SceneContext, mesh: Mesh) => (mesh === meshA ? rebuiltA : rebuiltB));
+        const builder = Object.assign(vi.fn(), { _materialFamily: "shader", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        Object.assign(material, { _buildGroup: builder });
+        scene.meshes.push(meshA, meshB);
+        scene._groups.set(builder, Object.assign([meshA, meshB], { r: rebuild }));
+        const merged = { order: 100, isTransparent: false } as Renderable;
+        scene._renderables.push(merged);
+        scene._meshDisposables.set(meshA, [oldDisposeA]);
+        scene._meshDisposables.set(meshB, [oldDisposeB]);
+
+        void rebuildMaterial(scene, material);
+
+        expect(packetA._disposed).toBe(true);
+        expect(packetB._disposed).toBe(true);
+        expect(packetA._owner).toBeUndefined();
+        expect(packetB._owner).toBeUndefined();
+        expect(owner).toEqual([]);
+        expect(oldDisposeA).not.toHaveBeenCalled();
+        expect(oldDisposeB).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(2);
+        expect(scene._renderables).toEqual([merged, rebuiltA, rebuiltB]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDisposeA).toHaveBeenCalledOnce();
+        expect(oldDisposeB).toHaveBeenCalledOnce();
+    });
+
+    it("removes an emptied Node packet group before binding synchronous material rebuild outputs", () => {
+        const { buffers, engine, group, material, scene } = createNodeRebuildFixture();
+        const oldBuffers = buffers.slice();
+
+        void rebuildMaterial(scene, material);
+
+        expect(scene._renderables).toHaveLength(2);
+        expect(group.o).toEqual([]);
+        expect(() => {
+            for (const output of scene._renderables) {
+                output.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+            }
+        }).not.toThrow();
+        expect(oldBuffers.every((buffer) => !buffer.destroy.mock.calls.length)).toBe(true);
+
+        disposeGpuResourceRetirements(engine);
+
+        expect(oldBuffers.every((buffer) => buffer.destroy.mock.calls.length === 1)).toBe(true);
+        expect(buffers.slice(oldBuffers.length).every((buffer) => !buffer.destroy.mock.calls.length)).toBe(true);
+        expect(scene._renderables).toHaveLength(2);
     });
 
     it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
@@ -430,7 +673,7 @@ describe("runtime material rebuild ownership", () => {
         }
     });
 
-    it.each(["resolve", "reject"] as const)("updates a PBR gamma widening hook only when a rebuild will %s", async (outcome) => {
+    it.each(["resolve", "reject"] as const)("installs a PBR build's widening hook only when its rebuild will %s", async (outcome) => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         scene._built = true;
         const failure = new Error("PBR rebuild failed");
@@ -438,7 +681,7 @@ describe("runtime material rebuild ownership", () => {
             if (outcome === "reject") {
                 throw failure;
             }
-            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: true };
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _w: null };
         }) as MeshGroupBuilder;
         builder._materialFamily = "pbr";
         const material = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
@@ -469,7 +712,7 @@ describe("runtime material rebuild ownership", () => {
         const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
             const capturedGamma = meshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo);
             await gate;
-            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: capturedGamma };
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _w: capturedGamma ? null : widen };
         }) as MeshGroupBuilder;
         builder._materialFamily = "pbr";
         const material = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };
@@ -494,9 +737,26 @@ describe("runtime material rebuild ownership", () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);
         scene._built = true;
-        const packet = { _disposed: false, _owner: [] as unknown[] };
-        packet._owner.push(packet);
-        const oldDispose = Object.assign(vi.fn(), { p: packet });
+        const onOwnerEmpty = vi.fn();
+        const sibling = { _disposed: false };
+        const owner: unknown[] = [];
+        const packet: { _disposed: boolean; _owner?: unknown[]; _onOwnerEmpty?: () => void } = { _disposed: false, _owner: owner, _onOwnerEmpty: onOwnerEmpty };
+        owner.push(packet, sibling);
+        const oldDispose = Object.assign(
+            vi.fn(() => {
+                packet._disposed = true;
+                if (packet._owner) {
+                    const index = packet._owner.indexOf(packet);
+                    if (index >= 0) {
+                        packet._owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+            }),
+            { p: packet }
+        );
         const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
             const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
             for (const mesh of meshes) {
@@ -518,8 +778,14 @@ describe("runtime material rebuild ownership", () => {
 
         expect(packet._disposed).toBe(true);
         expect(packet._owner).toBeUndefined();
+        expect(owner).toEqual([sibling]);
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
         expect(oldDispose).not.toHaveBeenCalled();
         expect(engine._retirements).toHaveLength(1);
+
+        disposeGpuResourceRetirements(engine);
+        expect(oldDispose).toHaveBeenCalledOnce();
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
     });
 
     it("keeps a removed disposer packet reachable while an async runtime build is active", async () => {
@@ -558,5 +824,334 @@ describe("runtime material rebuild ownership", () => {
 
         expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toBeUndefined();
         expect(engine._retirements).toHaveLength(1);
+    });
+});
+
+describe("shared PBR group rebuild", () => {
+    function createPbrFixture(options: { gated?: boolean; failure?: Error } = {}) {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        const builds: Mesh[][] = [];
+        const outputs: Renderable[][] = [];
+        let startBuild!: () => void;
+        let finishBuild!: () => void;
+        const started = new Promise<void>((resolve) => (startBuild = resolve));
+        const finished = new Promise<void>((resolve) => (finishBuild = resolve));
+        let failure = options.failure;
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            builds.push([...meshes]);
+            startBuild();
+            if (options.gated) {
+                await finished;
+            }
+            if (failure) {
+                throw failure;
+            }
+            const renderables = meshes.map(renderable);
+            outputs.push(renderables);
+            return { renderables, rebuildSingle: (_target: SceneContext, mesh: Mesh) => renderable(mesh) };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "pbr";
+        const createMaterial = (): Material => ({ _buildGroup: builder }) as Material;
+        const createMeshes = (material: Material, count: number): Mesh[] => Array.from({ length: count }, () => ({ _gpu: {}, material, children: [] }) as unknown as Mesh);
+        // The meshes the built group's own closure rebuilt one by one.
+        const singles: Mesh[] = [];
+        const addBuiltGroup = (meshes: Mesh[]): SceneMeshGroup => {
+            const output = meshes.map(renderable);
+            scene.meshes.push(...meshes);
+            scene._renderables.push(...output);
+            const group = Object.assign([...meshes], { r: (_target: SceneContext, mesh: Mesh) => (singles.push(mesh), renderable(mesh)), o: output }) as SceneMeshGroup;
+            scene._groups.set(builder, group);
+            return group;
+        };
+        const recover = (): void => {
+            failure = undefined;
+        };
+        return { scene, builder, builds, outputs, singles, started, finish: () => finishBuild(), recover, createMaterial, createMeshes, addBuiltGroup };
+    }
+
+    // `_pbrRebuildsComposed` (its own tests run the real PBR build) answers whether the group already composed the variants.
+    beforeEach(() => {
+        composed.value = false;
+    });
+
+    // The first PBR material rebuild only starts importing the check (see the cold-start case below).
+    beforeAll(async () => {
+        const { scene, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        addBuiltGroup(createMeshes(material, 1));
+        await rebuildMaterial(scene, material);
+        await vi.dynamicImportSettled();
+    });
+
+    it("rebuilds the group on the first PBR material rebuild, and decides with the check once it is loaded", async () => {
+        vi.resetModules();
+        const { rebuildMaterial: coldRebuildMaterial } = await import("../../../packages/babylon-lite/src/material/material-rebuild");
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+        composed.value = true;
+
+        await coldRebuildMaterial(scene, material);
+        expect(builds).toEqual([meshes]);
+        expect(singles).toEqual([]);
+
+        // Loaded now: the meshes are rebuilt on their own, without another group build or frame-graph build.
+        await vi.dynamicImportSettled();
+        const frameGraphBuilds = vi.mocked(scene._frameGraph.build).mock.calls.length;
+        await coldRebuildMaterial(scene, material);
+        expect(builds).toHaveLength(1);
+        expect(scene._frameGraph.build).toHaveBeenCalledTimes(frameGraphBuilds);
+    });
+
+    it("rebuilds only a PBR material's meshes, through the group closure, when the group already composed their variants", async () => {
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const changed = createMaterial();
+        const rebuilt = createMeshes(changed, 2);
+        const kept = createMeshes(createMaterial(), 1);
+        const group = addBuiltGroup([...rebuilt, ...kept]);
+        const before = [...scene._renderables];
+        composed.value = true;
+
+        await rebuildMaterial(scene, changed);
+
+        // No group build and no frame-graph build: the material's meshes are rebuilt like material assignments.
+        expect(builds).toHaveLength(0);
+        expect(scene._frameGraph.build).not.toHaveBeenCalled();
+        expect(singles).toEqual(rebuilt);
+        expect(scene._renderables.filter((entry) => before.includes(entry))).toEqual([before[2]]);
+        expect(scene._renderables).toHaveLength(3);
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(expect.arrayContaining([...rebuilt, ...kept]));
+        // The group's tracked output follows, so a later group rebuild drops the new renderables, not the old ones.
+        expect(group.o).toHaveLength(3);
+        expect(group.o!.every((entry) => scene._renderables.includes(entry))).toBe(true);
+    });
+
+    it("rebuilds the whole PBR group when it did not compose their variants", async () => {
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+
+        await rebuildMaterial(scene, material);
+
+        expect(builds).toEqual([meshes]);
+        expect(singles).toEqual([]);
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(meshes);
+    });
+
+    it("leaves meshes queued for other reasons to the next frame's drain", async () => {
+        const { scene, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const changed = createMaterial();
+        const [rebuilt, queued] = createMeshes(changed, 1).concat(createMeshes(createMaterial(), 1));
+        addBuiltGroup([rebuilt!, queued!]);
+        scene._materialSwapQueue.push(queued!);
+        composed.value = true;
+
+        await rebuildMaterial(scene, changed);
+
+        expect(singles).toEqual([rebuilt]);
+        expect(scene._materialSwapQueue).toEqual([queued]);
+    });
+
+    it("rebuilds the frame graph once afterwards when asked, also on the per-mesh path", async () => {
+        const { scene, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        addBuiltGroup(createMeshes(material, 2));
+        composed.value = true;
+
+        await rebuildMaterial(scene, material, { rebuildFrameGraph: true });
+
+        expect(scene._frameGraph.build).toHaveBeenCalledOnce();
+    });
+
+    it("reports a mesh rebuild that throws on the per-mesh path and rebuilds the group instead", async () => {
+        const { scene, builds, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const [mesh] = createMeshes(material, 1);
+        const group = addBuiltGroup([mesh!]);
+        const failure = new Error("rebuildSingle failed");
+        group.r = () => {
+            throw failure;
+        };
+        composed.value = true;
+        const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+
+        // Reported once, and the mesh is rebuilt with the group instead of staying queued for every frame drain to rethrow.
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(scene._materialSwapQueue).toEqual([]);
+        await vi.waitFor(() => expect(builds).toEqual([[mesh]]));
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual([mesh]);
+        report.mockRestore();
+    });
+
+    it("builds one PBR group for every mesh of one swap drain", async () => {
+        const { scene, builds, outputs, createMaterial, createMeshes } = createPbrFixture();
+        const meshes = createMeshes(createMaterial(), 3);
+        // The first PBR meshes of a built scene: addToScene creates the group and enqueues each mesh for the drain.
+        meshes.forEach((mesh) => addToScene(scene, mesh));
+
+        await processMaterialSwaps(scene);
+
+        expect(builds).toHaveLength(1);
+        expect(builds[0]).toEqual(meshes);
+        expect(scene._frameGraph.build).toHaveBeenCalledOnce();
+        expect(scene._renderables).toEqual(outputs[0]);
+    });
+
+    it("rebuilds a PBR material shared by several meshes with one group build", async () => {
+        const { scene, builds, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 3);
+        addBuiltGroup(meshes);
+
+        await rebuildMaterial(scene, material);
+
+        expect(builds).toHaveLength(1);
+        expect(builds[0]).toEqual(meshes);
+        expect(scene._frameGraph.build).toHaveBeenCalledOnce();
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(meshes);
+    });
+
+    it("folds PBR rebuild requests made while a rebuild runs into one follow-up", async () => {
+        const { scene, builds, started, finish, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture({ gated: true });
+        const first = createMaterial();
+        const shared = createMaterial();
+        const meshes = [...createMeshes(first, 1), ...createMeshes(shared, 3)];
+        addBuiltGroup(meshes);
+
+        const running = rebuildMaterial(scene, first);
+        await started;
+        const followUp = rebuildMaterial(scene, shared);
+        // Another request from a later task, while the first rebuild is still running.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        const lateFollowUp = rebuildMaterial(scene, first);
+        finish();
+        await Promise.all([running, followUp, lateFollowUp]);
+
+        expect(builds).toHaveLength(2);
+        expect(builds[1]).toEqual(meshes);
+        expect(scene._frameGraph.build).toHaveBeenCalledTimes(2);
+    });
+
+    it("resolves a request that joins a pending PBR rebuild only after that rebuild commits", async () => {
+        const { scene, builds, outputs, started, finish, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture({ gated: true });
+        const first = createMaterial();
+        const shared = createMaterial();
+        const [mesh] = createMeshes(first, 1) as [Mesh];
+        addBuiltGroup([mesh, ...createMeshes(shared, 2)]);
+
+        const running = rebuildMaterial(scene, first);
+        await started;
+        // Creates the follow-up while the first rebuild runs; the request below only joins it.
+        const followUp = rebuildMaterial(scene, shared);
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        let joined = false;
+        const join = (rebuildMaterial(scene, first) as Promise<void>).then(() => {
+            joined = true;
+            return scene._renderables.filter((entry) => entry.mesh === mesh);
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(joined).toBe(false);
+
+        finish();
+        const committed = await join;
+
+        expect(builds).toHaveLength(2);
+        expect(committed).toEqual([outputs[1]![builds[1]!.indexOf(mesh)]]);
+        await Promise.all([running, followUp]);
+    });
+
+    it("gives a mesh moved after a PBR rebuild started its own follow-up", async () => {
+        const { scene, builds, started, finish, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture({ gated: true });
+        const material = createMaterial();
+        const [mesh, late] = createMeshes(material, 2) as [Mesh, Mesh];
+        addBuiltGroup([mesh]);
+
+        const running = rebuildMaterial(scene, material);
+        await started;
+        scene.meshes.push(late);
+        const followUp = materializeRuntimeMeshes(scene, [late]);
+        finish();
+        await Promise.all([running, followUp]);
+
+        expect(builds).toEqual([[mesh], [mesh, late]]);
+    });
+
+    it("reports a failed shared PBR rebuild and keeps the previous renderables drawing", async () => {
+        const failure = new Error("PBR group rebuild failed");
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const { scene, builds, recover, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture({ failure });
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+        const previous = [...scene._renderables];
+
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+        expect(log).toHaveBeenCalledWith(failure);
+        // Make-before-break: the previous renderables keep drawing.
+        expect(scene._renderables).toHaveLength(previous.length);
+        previous.forEach((entry) => expect(scene._renderables).toContain(entry));
+        // Rethrown from the next frame's before-render hook, then cleared.
+        expect(() => scene._beforeRender.forEach((callback) => callback(0))).toThrow(failure);
+        expect(() => scene._beforeRender.forEach((callback) => callback(0))).not.toThrow();
+
+        // A failed rebuild must not leave a stale pending slot behind: the next request rebuilds again.
+        const failedBuilds = builds.length;
+        recover();
+        await rebuildMaterial(scene, material);
+
+        expect(builds.length).toBeGreaterThan(failedBuilds);
+        expect(builds[builds.length - 1]).toEqual(meshes);
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(meshes);
+        expect(scene._renderables).not.toContain(previous[0]);
+        log.mockRestore();
+    });
+
+    it("skips a pending shared PBR rebuild once the scene is disposed", async () => {
+        const { scene, builder, builds, started, finish, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture({ gated: true });
+        const material = createMaterial();
+        const [mesh] = createMeshes(material, 1) as [Mesh];
+        addBuiltGroup([mesh]);
+
+        const running = rebuildMaterial(scene, material);
+        await started;
+        const followUp = startRuntimeMeshBuild(scene, builder, mesh);
+        scene._z = true;
+        finish();
+
+        await expect(Promise.all([running, followUp])).resolves.toEqual([undefined, undefined]);
+        expect(builds).toHaveLength(1);
+    });
+
+    it("releases the pending PBR rebuild when the scene-rebuild chunk fails to load", async () => {
+        const failure = new Error("scene-rebuild chunk failed");
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const { scene, builds, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+        vi.doMock("../../../packages/babylon-lite/src/scene/scene-rebuild", () => {
+            throw failure;
+        });
+        vi.resetModules();
+
+        try {
+            await expect(rebuildMaterial(scene, material)).rejects.toMatchObject({ cause: failure });
+        } finally {
+            vi.doUnmock("../../../packages/babylon-lite/src/scene/scene-rebuild");
+            vi.resetModules();
+        }
+        expect(builds).toHaveLength(0);
+        expect(() => scene._beforeRender.forEach((callback) => callback(0))).toThrow();
+
+        // Otherwise every later request would join the dead rebuild and nothing would rebuild again.
+        await rebuildMaterial(scene, material);
+
+        expect(builds).toEqual([meshes]);
+        log.mockRestore();
     });
 });

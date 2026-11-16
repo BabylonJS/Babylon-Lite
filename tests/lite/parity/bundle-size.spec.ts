@@ -169,6 +169,15 @@ for (const scene of SCENES) {
         const loadedFiles = jsPayloads.map((p) => p.file);
         const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, loadedFiles);
 
+        // MeshLoD is fully opt-in and tree-shaken away: no non-MeshLoD scene may fetch
+        // any /mesh-lod/ runtime module or the PBR MeshLoD renderable/compose chunks
+        // at runtime (REQ-INT-8, T-22). Emitted-but-never-fetched chunks are fine —
+        // this gates on runtime fetches only.
+        const meshLoDModules = runtimeModules.filter((id) => /\/mesh-lod\//.test(id) || /\/pbr-mesh-lod-/.test(id));
+        expect(meshLoDModules, `${scene.name} must not fetch MeshLoD modules at runtime; found: ${meshLoDModules.join(", ")}`).toEqual([]);
+        const meshLoDChunks = loadedFiles.filter((f) => /mesh-lod/.test(f));
+        expect(meshLoDChunks, `${scene.name} must not fetch MeshLoD chunks at runtime; found: ${meshLoDChunks.join(", ")}`).toEqual([]);
+
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
         // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code, the depth-hosted
@@ -323,8 +332,9 @@ for (const scene of SCENES) {
 
         // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
         // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
-        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
-        const ORTHO_SCENE_IDS = new Set([187, 268]);
+        // scene. Guard both directions — no other scene may pull the module in, and the
+        // explicitly orthographic scenes must.
+        const ORTHO_SCENE_IDS = new Set([187, 268, 311, 312, 330]);
         if (ORTHO_SCENE_IDS.has(scene.id)) {
             expect(
                 runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
@@ -339,8 +349,9 @@ for (const scene of SCENES) {
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
         // 262/263/264/276/277/280/281/283/284/302/305 are NPE billboard scenes; 300/301/303 use Sprite2D.
+        // 337/338 are the right-handed twins of the billboard scenes 54 and 94.
         const SPRITE_USING_IDS = new Set([
-            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303, 305,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303, 305, 337, 338,
         ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));

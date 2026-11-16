@@ -96,7 +96,7 @@ export function getTextPipelineCache(engine: EngineContext): TextPipelineDeviceC
         entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "uint" } },
             { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
             { binding: 4, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
         ],
@@ -125,7 +125,7 @@ export function getTextPipelineCache(engine: EngineContext): TextPipelineDeviceC
     return cache;
 }
 
-/** @internal Fixed-arity pipeline cache key: six `:`-separated fields, every one always
+/** @internal Fixed-arity pipeline cache key: seven `:`-separated fields, every one always
  *  present. There is no optional field and no delimiter alias, so a base alpha-to-coverage
  *  pipeline (`…:a:-`) can never produce the same string as a variant whose id is `"a"`
  *  (`…:-:a`). Exported for the collision regression test. */
@@ -135,9 +135,24 @@ export function _textPipelineKey(
     depthStencilFormat: GPUTextureFormat | null,
     depthWrite: boolean,
     alphaToCoverage: boolean,
-    variantId: string
+    variantId: string,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): string {
-    return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r") + ":" + (alphaToCoverage ? "a" : "-") + ":" + variantId;
+    return (
+        format +
+        ":" +
+        sampleCount +
+        ":" +
+        (depthStencilFormat ?? "-") +
+        ":" +
+        (depthStencilFormat ? depthCompare : "-") +
+        ":" +
+        (depthWrite ? "w" : "r") +
+        ":" +
+        (alphaToCoverage ? "a" : "-") +
+        ":" +
+        variantId
+    );
 }
 
 function buildPipeline(
@@ -148,9 +163,10 @@ function buildPipeline(
     depthStencilFormat: GPUTextureFormat | null,
     depthWrite: boolean,
     alphaToCoverage: boolean,
-    variant: TextPipelineVariant | null
+    variant: TextPipelineVariant | null,
+    depthCompare: GPUCompareFunction
 ): GPURenderPipeline {
-    const key = _textPipelineKey(format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, variant ? variant._id : "-");
+    const key = _textPipelineKey(format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, variant ? variant._id : "-", depthCompare);
     let pipeline = cache._pipelines.get(key);
     if (pipeline) {
         return pipeline;
@@ -190,8 +206,8 @@ function buildPipeline(
                     ...(alphaToCoverage
                         ? {}
                         : {
-                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs
-                              // `vColor * coverage`, so RGB is already coverage-weighted.
+                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs RGB
+                              // premultiplied by `vColor.a * coverage`.
                               blend: {
                                   color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
                                   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
@@ -206,7 +222,7 @@ function buildPipeline(
     if (depthStencilFormat) {
         descriptor.depthStencil = {
             format: depthStencilFormat,
-            depthCompare: "greater-equal",
+            depthCompare,
             depthWriteEnabled: depthWrite,
         };
     }
@@ -221,17 +237,18 @@ export function getOrCreateTextPipeline(
     sampleCount: 1 | 4,
     depthStencilFormat: GPUTextureFormat | null,
     depthWrite: boolean,
-    owner?: object
+    owner?: object,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): TextPipelineSet {
     const cache = getTextPipelineCache(engine);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = depthWrite && sampleCount > 1 && !!owner && !!alphaToCoverageResolver?.(owner);
     const device = engine._device;
-    const pipeline = buildPipeline(device, cache, format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, null);
+    const pipeline = buildPipeline(device, cache, format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, null, depthCompare);
     // Resolved here — at bind/update time — so the draw loop never builds a cache key.
     let variantPipeline = pipeline;
     if (_textVariantResolver) {
-        variantPipeline = buildPipeline(device, cache, format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, _textVariantResolver(device));
+        variantPipeline = buildPipeline(device, cache, format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, _textVariantResolver(device), depthCompare);
     }
     return { _pipeline: pipeline, _variantPipeline: variantPipeline, _cache: cache };
 }

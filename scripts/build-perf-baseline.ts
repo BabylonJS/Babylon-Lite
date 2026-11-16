@@ -128,7 +128,7 @@ try {
 // without adding it here fails the perf job with "Cannot find module './<helper>'"
 // — and only the perf job, because every other consumer builds from a full
 // checkout where the file simply exists.
-for (const scriptName of ["bundle-scenes-core.ts", "bundle-ceiling-headroom.ts", "bundle-size-accounting.ts", "wgsl-minify-plugin.ts"]) {
+for (const scriptName of ["bundle-scenes-core.ts", "bundle-ceiling-headroom.ts", "bundle-size-accounting.ts", "wgsl-minify-plugin.ts", "fetch-flight-helmet.ts"]) {
     cpSync(resolve(ROOT, "scripts", scriptName), resolve(WORKTREE_DIR, "scripts", scriptName));
 }
 

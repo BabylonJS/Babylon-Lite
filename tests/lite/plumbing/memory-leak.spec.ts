@@ -10,11 +10,15 @@
  *   or: LEAK_SCENES=1,2 npx playwright test --config playwright.perf.config.ts memory-leak
  *
  * How it works:
- *   1. Opens leak-test.html?scene=N (a harness that exposes window.__leakTest)
+ *   1. Opens /lite/leak-test.html?scene=N through Vite's HTML transform so
+ *      the harness's bare babylon-lite import resolves (exposes window.__leakTest)
  *   2. For each cycle: calls __leakTest.runCycle() then forces GC via CDP
  *   3. Reads JSHeapUsedSize after each cycle
  *   4. Asserts heap growth from cycle 2→N is within tolerance
  *      (cycle 1→2 is excluded as JIT/cache warmup)
+ *
+ * Each cycle has its own deadline; the overall budget includes all cycles plus
+ * setup/cleanup. Failure still releases the browser context before a retry.
  */
 import { test, expect, acquireReferencePage } from "../parity/parity-fixtures";
 import type { CDPSession } from "@playwright/test";
@@ -22,6 +26,7 @@ import type { CDPSession } from "@playwright/test";
 // ── Configuration ──────────────────────────────────────────────────
 
 const CYCLES = 5;
+const CYCLE_TIMEOUT_MS = 60_000;
 const SETTLE_MS = 200;
 // Max allowed heap growth per cycle after warmup (bytes)
 const MAX_GROWTH_PER_CYCLE = 128 * 1024; // 128 KB
@@ -40,6 +45,18 @@ const ALL_SCENES: SceneDef[] = [
 const SELECTED = process.env.LEAK_SCENES ? process.env.LEAK_SCENES.split(",").map((s) => parseInt(s.trim(), 10)) : null;
 
 const SCENES = SELECTED ? ALL_SCENES.filter((s) => SELECTED.includes(s.num)) : ALL_SCENES;
+
+if (SCENES.some((scene) => scene.num === 1)) {
+    test("Scene 1 leak harness resolves its engine import", async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+
+        await page.goto("/lite/leak-test.html?scene=1", { waitUntil: "domcontentloaded" });
+        await expect(page.locator("#renderCanvas")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+        expect(pageErrors).toEqual([]);
+        expect(await page.evaluate(() => (window as any).__leakTest?.ready)).toBe(true);
+    });
+}
 
 // ── CDP helpers ────────────────────────────────────────────────────
 
@@ -60,40 +77,44 @@ async function getJSHeapUsed(cdp: CDPSession): Promise<number> {
 // ── Tests ──────────────────────────────────────────────────────────
 
 test.describe("Memory Leak Detection", () => {
+    test.describe.configure({ timeout: (CYCLES + 1) * CYCLE_TIMEOUT_MS });
     for (const scene of SCENES) {
         test(`${scene.label} — no leak across ${CYCLES} cycles`, async ({ browser }) => {
             const { page, release } = await acquireReferencePage(browser, { width: 800, height: 600 });
-            const cdp = await page.context().newCDPSession(page);
-            await cdp.send("Performance.enable");
-            await cdp.send("HeapProfiler.enable");
-
-            await page.goto(`/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
-
-            // Wait for harness to be ready
-            await page.waitForFunction(() => (window as any).__leakTest?.ready === true, { timeout: 15_000 });
-
             const heapSizes: number[] = [];
+            try {
+                const cdp = await page.context().newCDPSession(page);
+                await cdp.send("Performance.enable");
+                await cdp.send("HeapProfiler.enable");
 
-            for (let i = 0; i < CYCLES; i++) {
-                // Run one create → render → dispose cycle
-                const error = await page.evaluate(async () => {
-                    await (window as any).__leakTest.runCycle();
-                    return (window as any).__leakTest.error;
-                });
+                await page.goto(`/lite/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
+                await page.waitForFunction(() => (window as any).__leakTest?.ready === true, null, { timeout: 15_000 });
 
-                if (error) {
-                    throw new Error(`Cycle ${i + 1} failed: ${error}`);
+                for (let i = 0; i < CYCLES; i++) {
+                    await test.step(
+                        `Cycle ${i + 1}: create, render, dispose and collect`,
+                        async () => {
+                            const error = await page.evaluate(async () => {
+                                await (window as any).__leakTest.runCycle();
+                                return (window as any).__leakTest.error;
+                            });
+
+                            if (error) {
+                                throw new Error(`Cycle ${i + 1} failed: ${error}`);
+                            }
+
+                            await forceGC(cdp);
+                            heapSizes.push(await getJSHeapUsed(cdp));
+                        },
+                        { timeout: CYCLE_TIMEOUT_MS }
+                    );
                 }
 
-                // Force GC and measure heap
-                await forceGC(cdp);
-                const heap = await getJSHeapUsed(cdp);
-                heapSizes.push(heap);
+                await cdp.send("HeapProfiler.disable");
+                await cdp.send("Performance.disable");
+            } finally {
+                await release();
             }
-
-            await cdp.send("HeapProfiler.disable");
-            await cdp.send("Performance.disable");
-            await release();
 
             // Report
             const heapKB = heapSizes.map((h) => (h / 1024).toFixed(0));

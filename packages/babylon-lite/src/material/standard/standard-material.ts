@@ -9,6 +9,7 @@ import type { CubeTexture } from "../../texture/cube-texture.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
+import type { ParallaxOcclusionProps } from "../parallax/parallax-occlusion.js";
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ export interface StandardMaterialProps extends Material {
     alpha: number;
     specularColor: [number, number, number];
     specularPower: number;
+    /** LTC roughness for rectangular area lights. Default 0; punctual lighting still uses specularPower. */
+    roughness?: number;
     emissiveColor: [number, number, number];
     ambientColor: [number, number, number];
     /** Optional diffuse texture. Null = solid color only. */
@@ -37,6 +40,8 @@ export interface StandardMaterialProps extends Material {
     /** @internal Optional bump/normal-map texture (cotangent-frame, no tangent attribute
      *  needed). Set via {@link setStandardBumpTexture}, which registers the extension. */
     _bumpTexture?: Texture2D | null;
+    /** @internal Set via {@link setStandardParallaxOcclusion}; independent height-map UV displacement. */
+    _parallaxOcclusion?: ParallaxOcclusionProps;
     /** Bump perturbation strength. Default 1.0 (maps to 1/level in BJS). */
     bumpLevel: number;
     /** @internal Optional specular texture (replaces specularColor; alpha modulates
@@ -109,6 +114,10 @@ export interface StandardSceneShaderContext {
     readonly _features: number;
     /** @internal */
     readonly _fragments: readonly ShaderFragment[];
+    /** @internal Opaque material feature contribution from a scene extension. */
+    readonly _materialFeatures?: number;
+    /** @internal Material-owned replacement for the default lighting function. */
+    readonly _lightingFunction?: string;
 }
 
 export { collectStdBoundTextures } from "./collect-std-bound-textures.js";

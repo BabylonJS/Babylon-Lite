@@ -14,6 +14,7 @@ import {
 } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE62_NME_JSON, SCENE62_TEXTURE_URL } from "../shared/scene62-nme.js";
+import { createBlockLoader } from "../shared/scene62-block-loader.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
     const diffuse = await loadTexture2D(engine, SCENE62_TEXTURE_URL);
     const material = await parseNodeMaterialFromSnippet(engine, "", {
         json: SCENE62_NME_JSON,
+        blockLoader: createBlockLoader(),
         textures: { diffuse },
     });
 

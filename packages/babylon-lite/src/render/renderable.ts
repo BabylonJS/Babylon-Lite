@@ -19,6 +19,8 @@ export interface DrawUpdateContext {
     readonly targetHeight: number;
     /** @internal Active pass camera. Null for camera-less passes. */
     readonly _camera?: Camera | null;
+    /** @internal Actual viewport-adjusted aspect used by the pass's scene UBO. */
+    _projectionAspect?: number;
 }
 
 /** @internal Feature-owned work collected during binding updates and flushed before the render pass. */
@@ -79,26 +81,33 @@ export interface Renderable {
     _worldCenter?: [number, number, number];
     /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
+    /** @internal Generation of the forward state this renderable was built for — the request its build made of
+     *  the PBR context: the context object itself, the mesh feature bits (receive-shadows included), the light
+     *  mode, the single-light type, and the material's render-feature object (replaced whenever
+     *  `rebuildMaterial` invalidates it). Lets a pass that derives its own renderable from the forward context
+     *  (the PBR geometry renderer) tell a current forward build from retained make-before-break output.
+     *  Stamped by the PBR group builder. */
+    _gen?: readonly [unknown, number, number, string, unknown];
     /** @internal Owner-provided sink for cached resources that outlive individual bind() generations. */
     _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
-     *  Stamped by whichever builder created the renderable, closing over the arguments it was
-     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  Background thunks are stamped only by enabled recovery capture, closing over the builder
+     *  and its arguments. Recovery restores renderables by traversing `scene._renderables` and calling
      *  this, so it never needs to know what kind of renderable it is holding — the same way
      *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
      *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
      *  loaders that build renderables, and keeps those loaders free of recovery-specific code.
      *
-     *  Only for renderables that no retained structure owns — currently the loader-built
-     *  backgrounds, which their loaders push here and then discard the values they were built
-     *  from. Renderables produced by a material group builder must NOT set this: recovery already
+     *  Only for renderables that no retained material group owns, such as loader-built
+     *  backgrounds and scene-hosted MeshLoD batches. A removed batch may return null.
+     *  Renderables produced by a material group builder must NOT set this: recovery already
      *  rebuilds them by re-running the build through `scene._groups`, which one call at a time
      *  also restores that group's `rebuildSingle` closure, its `o` output list, and its uniform
      *  updater — none of which a `Renderable`-returning thunk can express, and a group can emit
      *  several renderables or merge its meshes into one. Setting both would rebuild them twice
      *  and leave duplicates in `scene._renderables`. */
-    _rebuild?: () => Renderable | Promise<Renderable>;
+    _rebuild?: () => Renderable | null | Promise<Renderable | null>;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
@@ -136,8 +145,9 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
-    /** @internal True when this build result captured gamma-albedo PBR support. */
-    _G?: boolean;
+    /** @internal Widening predicate of this build's rebuild closure: truthy for a mesh it cannot compose
+     *  (installed as the group's `_w` once committed). Omitted by builders whose closure handles every mesh. */
+    _w?: ((mesh: Mesh) => unknown) | null;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The scene stores it on its material group as `r`;

@@ -72,6 +72,7 @@ export class ShadowGenerator {
     public constructor(mapSize: number, light: Light) {
         this._mapSize = mapSize;
         this._light = light;
+        light._shadowGenerator = this;
         const scene = light.getScene();
         if (scene) {
             scene._registerShadowGenerator(this);
@@ -160,10 +161,26 @@ export class ShadowGenerator {
             return;
         }
         this._casterSyncDirty = false;
-        setShadowTaskCasterMeshes(
-            this._liteGen,
-            this._casters.map((caster) => caster._lite as LiteMesh)
-        );
+        setShadowTaskCasterMeshes(this._liteGen, this._liteCasterMeshes());
+    }
+
+    /**
+     * The Lite meshes handed to the native shadow task: every requested caster that carries GPU geometry.
+     * The compat loader wraps a model's complete hierarchy as `Mesh`es, so `addShadowCaster(root, true)`
+     * legitimately collects transform-only roots and intermediate nodes into `renderList`, exactly as
+     * Babylon.js does. Those nodes must not reach the native state: the render task cannot build a
+     * renderable for a mesh without `_gpu` (it would throw inside the frame, every frame), and directional
+     * fitting would substitute default bounds for it, distorting the shadow volume.
+     */
+    private _liteCasterMeshes(): LiteMesh[] {
+        const meshes: LiteMesh[] = [];
+        for (const caster of this._casters) {
+            const lite = caster._lite as LiteMesh;
+            if ((lite as { _gpu?: unknown })._gpu) {
+                meshes.push(lite);
+            }
+        }
+        return meshes;
     }
 
     /** Babylon.js `getShadowMap()` — returns a minimal render-list holder for parity. */
@@ -185,6 +202,7 @@ export class ShadowGenerator {
 
     public dispose(): void {
         this._disposeBeforeRenderFlush?.();
+        this._light.getScene()?._unregisterShadowGenerator(this);
         for (const { caster, observer } of this._casterDisposeObservers.values()) {
             caster.onDisposeObservable.remove(observer);
         }
@@ -193,6 +211,9 @@ export class ShadowGenerator {
         this._casterSyncDirty = false;
         this._liteGen = undefined;
         this._light._lite.shadowGenerator = undefined;
+        if (this._light._shadowGenerator === this) {
+            this._light._shadowGenerator = null;
+        }
     }
 
     /**
@@ -252,8 +273,7 @@ export class ShadowGenerator {
         (liteLight as { shadowGenerator?: unknown }).shadowGenerator = liteGen;
         this._liteGen = liteGen;
         this._casterSyncDirty = false;
-        const casterMeshes = this._casters.map((m) => m._lite as LiteMesh);
-        setShadowTaskCasterMeshes(liteGen, casterMeshes);
+        setShadowTaskCasterMeshes(liteGen, this._liteCasterMeshes());
     }
 }
 

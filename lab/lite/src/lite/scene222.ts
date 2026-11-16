@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene);
 
     const positionGizmo = createPositionGizmo(engine, utilityLayer);
     attachPositionGizmoToNode(positionGizmo, cube1.cube);

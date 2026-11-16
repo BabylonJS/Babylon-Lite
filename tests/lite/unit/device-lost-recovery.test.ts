@@ -16,6 +16,15 @@ import { acquireTexture, releaseTexture, _isTextureReleased } from "../../../pac
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
+import { createTexture2DFromPixels } from "../../../packages/babylon-lite/src/texture/pixels-texture.js";
+import { updateTextureRegion } from "../../../packages/babylon-lite/src/texture/texture-region.js";
+import { createStorageBuffer, type StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { buildGroundRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-ground.js";
+import { buildSolidSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-solid-skybox.js";
+import { buildHdrSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import { buildDdsSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-dds-skybox.js";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 
 function context(kind: string): RenderingContext {
     return {
@@ -34,8 +43,103 @@ function context(kind: string): RenderingContext {
 function engineWith(...contexts: RenderingContext[]): EngineContext {
     return {
         surfaces: [{ _renderingContexts: contexts } as unknown as SurfaceContext],
+        device: {},
     } as unknown as EngineContext;
 }
+
+describe("device-lost background capture opt-in", () => {
+    function backgroundEngine(): EngineContext {
+        return {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createBuffer: (descriptor: GPUBufferDescriptor) => ({
+                    getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                    unmap: vi.fn(),
+                }),
+                createTexture: () => ({ createView: () => ({}) }),
+                createSampler: () => ({}),
+                createBindGroupLayout: () => ({}),
+                createBindGroup: () => ({}),
+                queue: { writeTexture: vi.fn(), writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+    }
+
+    const backgrounds = ["ground", "solid", "hdr", "dds"] as const;
+    async function buildBackground(kind: (typeof backgrounds)[number], engine: EngineContext) {
+        const origin: [number, number, number] = [1, 2, 3];
+        const color: [number, number, number] = [0.2, 0.3, 0.4];
+        const scene = {
+            surface: { engine },
+            clearColor: { r: 0, g: 0, b: 0, a: 1 },
+            imageProcessing: { exposure: 0.8, contrast: 1.2 },
+        } as unknown as SceneContext;
+        const env = { specularCubeView: {}, cubeSampler: {} } as EnvironmentTextures;
+        switch (kind) {
+            case "ground":
+                return buildGroundRenderable(engine, 10, origin, color, undefined, undefined, false);
+            case "solid":
+                return buildSolidSkyboxRenderable(scene, env, 10, origin, color);
+            case "hdr":
+                return buildHdrSkyboxRenderable(scene, env, 10, origin, color);
+            case "dds":
+                return buildDdsSkyboxRenderable(scene, 10, origin, color, "background.dds", false);
+        }
+    }
+
+    async function withBackgroundFetch(run: () => Promise<void>): Promise<void> {
+        const dds = new ArrayBuffer(128 + 6 * 8);
+        const header = new Int32Array(dds, 0, 32);
+        header[4] = header[3] = header[7] = 1;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => ({ arrayBuffer: async () => dds }))
+        );
+        try {
+            await run();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    }
+
+    it.each(backgrounds)("does not allocate a %s rebuild closure without recovery", async (kind) => {
+        await withBackgroundFetch(async () => {
+            expect(await buildBackground(kind, backgroundEngine())).not.toHaveProperty("_rebuild");
+        });
+    });
+
+    it.each(backgrounds)("does not capture %s for sprite-only recovery", async (kind) => {
+        await withBackgroundFetch(async () => {
+            const engine = backgroundEngine();
+            const recovery = enableDeviceLostSpriteRecovery(engine);
+            try {
+                expect(await buildBackground(kind, engine)).not.toHaveProperty("_rebuild");
+            } finally {
+                recovery.disable();
+            }
+        });
+    });
+
+    it.each(backgrounds)("captures %s only while Scene recovery is enabled and supports repeated rebuilds", async (kind) => {
+        await withBackgroundFetch(async () => {
+            const engine = backgroundEngine();
+            const recovery = enableDeviceLostSceneRecovery(engine);
+            try {
+                const renderable = await buildBackground(kind, engine);
+                expect(renderable._rebuild).toBeTypeOf("function");
+                const rebuilt = await renderable._rebuild!();
+                expect(rebuilt).not.toBe(renderable);
+                expect(rebuilt?._rebuild).toBeTypeOf("function");
+                expect(await rebuilt!._rebuild!()).not.toBe(rebuilt);
+                recovery.disable();
+                expect(await buildBackground(kind, engine)).not.toHaveProperty("_rebuild");
+            } finally {
+                recovery.disable();
+            }
+        });
+    });
+});
 
 describe("device-lost recovery context dispatch", () => {
     it("captures texture-compression-unaligned and requests it from the replacement device", async () => {
@@ -242,20 +346,22 @@ describe("device-lost recovery context dispatch", () => {
 
     it("preserves non-default glTF sampler settings through recovery", async () => {
         const samplerDescriptors: GPUSamplerDescriptor[] = [];
-        const device = {
-            features: new Set<GPUFeatureName>(),
-            lost: new Promise<GPUDeviceLostInfo>(() => undefined),
-            createTexture: vi.fn(() => ({
-                createView: vi.fn(() => ({})),
-            })),
-            createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
-                samplerDescriptors.push(descriptor);
-                return {};
-            }),
-            queue: {
-                writeTexture: vi.fn(),
-            },
-        } as unknown as GPUDevice;
+        const makeDevice = (): GPUDevice =>
+            ({
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createTexture: vi.fn(() => ({
+                    createView: vi.fn(() => ({})),
+                })),
+                createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
+                    samplerDescriptors.push(descriptor);
+                    return {};
+                }),
+                queue: {
+                    writeTexture: vi.fn(),
+                },
+            }) as unknown as GPUDevice;
+        const device = makeDevice();
         const engine = { _device: device } as unknown as EngineContext;
         const defaultSampler = {} as GPUSampler;
         const bitmap = {} as ImageBitmap;
@@ -293,11 +399,11 @@ describe("device-lost recovery context dispatch", () => {
             },
             defaultSampler
         );
-        const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture);
+        const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture, undefined);
 
         samplerDescriptors.length = 0;
         engine._device = { ...device };
-        await rebuildTexture2D(engine, textures.baseColorTexture);
+        await rebuildTexture2D(engine, textures.baseColorTexture!);
 
         expect(samplerDescriptors).toContainEqual({
             addressModeU: "clamp-to-edge",
@@ -391,7 +497,21 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         return {
             features: new Set<GPUFeatureName>(),
             lost: new Promise<GPUDeviceLostInfo>(() => undefined),
-            createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
+            createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
+                const size = descriptor.size as GPUExtent3DDict;
+                return {
+                    format: descriptor.format,
+                    usage: descriptor.usage,
+                    dimension: descriptor.dimension ?? "2d",
+                    width: size.width,
+                    height: size.height ?? 1,
+                    depthOrArrayLayers: size.depthOrArrayLayers ?? 1,
+                    sampleCount: descriptor.sampleCount ?? 1,
+                    mipLevelCount: descriptor.mipLevelCount ?? 1,
+                    createView: vi.fn((viewDescriptor?: GPUTextureViewDescriptor) => ({ viewDescriptor })),
+                    destroy: vi.fn(),
+                };
+            }),
             createSampler: vi.fn(() => ({})),
             queue: { writeTexture: vi.fn(), copyExternalImageToTexture: vi.fn() },
         } as unknown as GPUDevice;
@@ -400,12 +520,52 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
     function trackingEngine(): EngineContext {
         return {
             _device: device(),
+            device: {},
             surfaces: [],
             _animFrameId: 0,
             _renderFn: null,
             _retirements: null,
         } as unknown as EngineContext;
     }
+
+    it.each(["before", "during"] as const)("restores CPU-backed storage registered %s the replacement-device request", async (timing) => {
+        const engine = trackingEngine();
+        const createBuffer = (descriptor: GPUBufferDescriptor): GPUBuffer => {
+            const bytes = new ArrayBuffer(Number(descriptor.size));
+            return { getMappedRange: () => bytes, unmap: vi.fn(), destroy: vi.fn() } as unknown as GPUBuffer;
+        };
+        const limits = { maxBufferSize: 1024, maxStorageBufferBindingSize: 1024, maxStorageBuffersPerShaderStage: 8 };
+        Object.assign(engine._device, { limits, createBuffer: vi.fn(createBuffer) });
+        const replacement = device();
+        Object.assign(replacement, { limits, createBuffer: vi.fn(createBuffer) });
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        let storage: StorageBuffer | undefined;
+        const addStorage = (): void => {
+            storage = createStorageBuffer(engine, new Uint32Array([7, 11]), "cpu-storage");
+        };
+        if (timing === "before") {
+            addStorage();
+        }
+        const requestDevice = vi.fn(async () => {
+            if (timing === "during") {
+                addStorage();
+            }
+            return replacement;
+        });
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice })) } });
+        try {
+            await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, []);
+            expect(replacement.createBuffer).toHaveBeenCalledOnce();
+            expect(Array.from(new Uint32Array(storage!._buffer!.getMappedRange()))).toEqual([7, 11]);
+            expect(requestDevice).toHaveBeenCalledWith({
+                requiredFeatures: [],
+                requiredLimits: timing === "before" ? limits : {},
+            });
+        } finally {
+            vi.unstubAllGlobals();
+            recovery.disable();
+        }
+    });
 
     /** Stands in for a texture from `createTexture2DFromPixels`, which takes an ownership reference
      *  on what it returns — recovery reads that reference to tell a live texture from a released
@@ -489,6 +649,59 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         expect(Array.from(upload![1] as Uint8Array)).toEqual([1, 1, 1, 1, 9, 9, 9, 9]);
         vi.unstubAllGlobals();
         recovery.disable();
+    });
+
+    it.each(["byte", "word", "data-view"] as const)("recovers strided regional pixel updates from a %s view", async (kind) => {
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const atlas = createTexture2DFromPixels(engine, new Uint8Array(48).fill(1), 4, 3);
+        const lost = atlas.texture;
+        const bytes = new Uint8Array(64).fill(255);
+        bytes.set([7, 8, 9, 10], 8);
+        bytes.set([11, 12, 13, 14], 20);
+        const data = kind === "byte" ? new Uint8Array(bytes.buffer, 6, 24) : kind === "word" ? new Uint16Array(bytes.buffer, 6, 12) : new DataView(bytes.buffer, 6, 24);
+        const region = { x: 2, y: 1, width: 1, height: 2, dataOffset: 2, bytesPerRow: 12 };
+        const expected = new Uint8Array(48).fill(1);
+        expected.set([7, 8, 9, 10], 24);
+        expected.set([11, 12, 13, 14], 40);
+
+        try {
+            updateTextureRegion(engine, atlas, data, region);
+            expect(atlas._recoverySource).toMatchObject({ kind: "pixels", data: expected });
+            expect(() => updateTextureRegion(engine, atlas, new DataView(bytes.buffer, 6, 8), region)).toThrow(/cannot hold/);
+            expect(engine._device.queue.writeTexture).toHaveBeenCalledTimes(2);
+            expect(atlas._recoverySource).toMatchObject({ kind: "pixels", data: expected });
+            bytes.fill(99);
+            region.x = 0;
+            region.dataOffset = 0;
+
+            const replacement = device();
+            vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+            await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+            expect(atlas.texture).not.toBe(lost);
+            expect(replacement.queue.writeTexture).toHaveBeenCalledTimes(1);
+            const upload = vi.mocked(replacement.queue.writeTexture).mock.calls[0];
+            expect(upload![1]).toEqual(expected);
+            expect(upload![2]).toEqual({ bytesPerRow: 16, rowsPerImage: 3 });
+        } finally {
+            vi.unstubAllGlobals();
+            recovery.disable();
+            releaseTexture(atlas);
+        }
+    });
+
+    it("does not capture regional uploads when recovery is disabled", () => {
+        const engine = trackingEngine();
+        const texture = createTexture2DFromPixels(engine, new Uint8Array(16), 2, 2);
+        try {
+            updateTextureRegion(engine, texture, new DataView(new ArrayBuffer(8), 2, 4), { x: 1, y: 1, width: 1, height: 1, bytesPerRow: 4 });
+            expect(engine._dlr).toBeUndefined();
+            expect(texture._recoverySource).toBeUndefined();
+            expect(engine._device.queue.writeTexture).toHaveBeenCalledTimes(2);
+        } finally {
+            releaseTexture(texture);
+        }
     });
 
     it("rebuilds each texture once per device even when a handler walks it again", async () => {

@@ -43,7 +43,7 @@ export function getMeshGeometry(mesh: Mesh): {
         indices: indices.slice(),
         ...(uvs ? { uvs: uvs.slice() } : {}),
         ...(uvs2 ? { uvs2: uvs2.slice() } : {}),
-        ...(tangents ? { tangents: tangents.slice() } : {}),
+        ...(tangents?.length ? { tangents: tangents.slice() } : {}),
         ...(colors ? { colors: colors.slice() } : {}),
     };
 }

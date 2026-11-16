@@ -45,9 +45,9 @@ function makeMockHknp() {
     };
 }
 
-/** Minimal scene exposing only what `createHavokWorld` touches: the `_beforeRender` list. */
+/** Minimal scene exposing stepping and discovery cleanup lists. */
 function makeScene(): SceneContext {
-    return { _beforeRender: [] } as unknown as SceneContext;
+    return { _beforeRender: [], _disposables: [] } as unknown as SceneContext;
 }
 
 /** Invoke every registered before-render callback, as the render loop would each frame. */

@@ -313,8 +313,13 @@ const ext: GltfFeature = {
             // both maps but never registers the reflectance ext, so nothing samples them.
             data.specularTexture || data.specularColorTexture ? import("../material/pbr/set-metallic-reflectance.js") : undefined,
         ]);
+        // The core applies baseColorFactor only beside a core base color image, which this extension
+        // stripped, so the factor's RGB travels with the supplied texture (as metallic/roughness do
+        // below). Its alpha is forwarded as 1: BLEND/MASK already carry the factor alpha as the
+        // material `alpha` the shader multiplies in, and OPAQUE ignores alpha.
+        const f = mat._baseColorFactor;
         const out: Partial<PbrMaterialProps> = {
-            ...(baseColorTexture ? { baseColorTexture } : undefined),
+            ...(baseColorTexture ? { baseColorTexture, ...(f[0] !== 1 || f[1] !== 1 || f[2] !== 1 ? { baseColorFactor: [f[0], f[1], f[2], 1] } : undefined) } : undefined),
             ...(ormTexture
                 ? {
                       ormTexture,

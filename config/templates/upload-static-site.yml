@@ -22,9 +22,8 @@ parameters:
       type: string
     - name: siteName
       type: string
-    # When false, upload the site but skip the PR comment. Used by non-PR
-    # pipelines (e.g. the npm-publish versioned playground) where there is no
-    # System.PullRequest context to comment on.
+    # When false, upload the site but skip the PR comment, for non-PR pipelines
+    # where there is no System.PullRequest context to comment on.
     - name: postComment
       type: boolean
       default: true

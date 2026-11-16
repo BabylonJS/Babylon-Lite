@@ -100,6 +100,8 @@ interface EsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal Floating-origin offset version (active camera worldMatrixVersion) at last shadow-map render; -1 when never rendered. */
     _lastFoVersion: number;
+    /** @internal Floating-origin camera at last shadow-map render. A replacement camera can report the same version. */
+    _lastFoCamera?: Camera | null;
     _casterMeshes: readonly Mesh[];
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
@@ -271,6 +273,9 @@ export function ensureEsmShadowTaskState(
                 clr: true,
                 clrColor: { r: 0, g: 0, b: 0, a: 0 },
                 cam: camera,
+                // The render list is the caster set only: with no casters the scene must not be mirrored into the
+                // map, or every mesh — receivers included — would cast (see the CSM hooks).
+                autoMirror: false,
                 _skipClusteredLights: true,
             },
             engine,
@@ -307,7 +312,13 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     const offX = foCam ? foCam.worldMatrix[12]! : 0;
     const offY = foCam ? foCam.worldMatrix[13]! : 0;
     const offZ = foCam ? foCam.worldMatrix[14]! : 0;
-    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && foVersion === state._lastFoVersion) {
+    if (
+        !sg._config._forceRefreshEveryFrame &&
+        casterVersion === state._lastCasterVersion &&
+        lightVersion === state._lastLightVersion &&
+        foVersion === state._lastFoVersion &&
+        foCam === state._lastFoCamera
+    ) {
         return 0;
     }
 
@@ -322,6 +333,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastFoVersion = foVersion;
+    state._lastFoCamera = foCam;
 
     const draws = state._task.execute?.() ?? 0;
     const encoder = engine._currentEncoder;

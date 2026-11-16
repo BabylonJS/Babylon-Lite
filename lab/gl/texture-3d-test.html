@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>LiteGL 3D texture source test</title>
+        <style>
+            body {
+                background: #151a23;
+                color: white;
+                font:
+                    16px system-ui,
+                    sans-serif;
+            }
+            canvas {
+                display: block;
+                width: 500px;
+                height: 200px;
+                max-width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>3D texture source test</h1>
+        <canvas id="renderCanvas" width="500" height="200" aria-label="Eight 3D texels and their trilinear midpoint"></canvas>
+        <p id="result" role="status">Checking WebGL2 3D texture sampling…</p>
+        <script type="module" src="/gl/src/texture-3d-test.ts"></script>
+    </body>
+</html>

@@ -59,6 +59,8 @@ describe("@babylonjs/lite has no module-level side effects", () => {
         expect(code).toContain("createArcRotateCamera");
         expect(code).not.toContain("pointerMappings");
         expect(code).not.toContain("gesturestart");
+        expect(code).not.toContain("babylonUsdImporter");
+        expect(code).not.toContain("OpenUSD");
     }, 120_000);
 
     it("drops arc-rotate keyboard behavior from pointer-only controls", async () => {

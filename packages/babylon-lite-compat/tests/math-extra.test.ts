@@ -7,6 +7,7 @@ import { Ray } from "../src/math/ray";
 import { Frustum } from "../src/math/frustum";
 import { Size, Viewport } from "../src/math/size";
 import { Angle, Curve3, Path3D } from "../src/math/curve";
+import { GetWhiteBalanceMatrix, MaxTintMagnitude, MinTemperatureKelvin, TemperatureTintToXyz } from "../src/math/color-temperature";
 
 describe("Plane", () => {
     it("builds from position and normal and measures signed distance", () => {
@@ -68,6 +69,26 @@ describe("Curve / Path", () => {
         expect(pts[0]!.asArray()).toEqual([0, 0, 0]);
         expect(pts[pts.length - 1]!.x).toBeCloseTo(2, 6);
         expect(curve.length()).toBeGreaterThan(2);
+    });
+
+    describe("Color temperature", () => {
+        it("converts temperature and tint to a normalized XYZ white point", () => {
+            expect(MinTemperatureKelvin).toBe(1e6 / 600);
+            expect(MaxTintMagnitude).toBe(150);
+            expect(TemperatureTintToXyz(6500, 0).asArray()).toEqual([0.9690723182747721, 1, 1.1217921546755905]);
+            expect(TemperatureTintToXyz(Number.NaN, 999).asArray()).toEqual(TemperatureTintToXyz(MinTemperatureKelvin, MaxTintMagnitude).asArray());
+        });
+
+        it("matches Babylon.js Bradford adaptation output", () => {
+            expect(Array.from(GetWhiteBalanceMatrix(6500, 0))).toEqual([
+                1.000000238418579, -3.65804595503505e-8, -3.1088023266789833e-9, 3.848475671475171e-8, 1.0000001192092896, -2.124672704439945e-8, 2.0227449937237907e-8,
+                5.9020095477535506e-9, 0.9999998807907104,
+            ]);
+            expect(Array.from(GetWhiteBalanceMatrix(3200, 25))).toEqual([
+                0.8247902393341064, 0.012983075343072414, 0.05875431001186371, -0.2952434718608856, 1.0849566459655762, 0.22875890135765076, -0.11453384906053543,
+                -0.05379151552915573, 3.5795085430145264,
+            ]);
+        });
     });
 
     it("computes cumulative distances along a Path3D", () => {

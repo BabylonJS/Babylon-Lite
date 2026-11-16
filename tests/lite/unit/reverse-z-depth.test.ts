@@ -48,22 +48,22 @@ describe("reverse-Z depth", () => {
             size: { width: 1, height: 1 },
         });
 
-        expect(rt._descriptor._depthClearValue).toBeUndefined();
-        expect(rt._descriptor._depthCompare).toBeUndefined();
+        expect(rt._descriptor.depthClearValue).toBeUndefined();
+        expect(rt._descriptor.depthCompare).toBeUndefined();
         expect(targetSignatureKey({ _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 })).toBe("bgra8unorm|depth24plus-stencil8||1");
     });
 
-    it("allows internal shadow targets to keep standard-Z depth maps", () => {
+    it("allows render targets to declare standard-Z depth maps", () => {
         const rt = createRenderTarget({
             dFormat: "depth32float",
-            _depthClearValue: 1,
-            _depthCompare: "less-equal",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 1, height: 1 },
         });
 
-        expect(rt._descriptor._depthClearValue).toBe(1);
-        expect(rt._descriptor._depthCompare).toBe("less-equal");
+        expect(rt._descriptor.depthClearValue).toBe(1);
+        expect(rt._descriptor.depthCompare).toBe("less-equal");
         expect(targetSignatureKey({ _depthStencilFormat: "depth32float", _depthCompare: "less-equal", _sampleCount: 1 })).toContain("less-equal");
     });
 

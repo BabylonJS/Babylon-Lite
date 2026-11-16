@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { createTransformNode, getAccessibilityTag } from "babylon-lite";
+import type { GaussianSplattingMesh as LiteGaussianSplattingMesh } from "babylon-lite";
+
 import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
+import type { Scene } from "../src/scene/scene";
+
+function fakeLiteMesh(): LiteGaussianSplattingMesh {
+    return createTransformNode("loaded") as unknown as LiteGaussianSplattingMesh;
+}
 
 /**
  * GPU-free surface checks for the Gaussian-Splatting wrapper. The actual splat
@@ -9,6 +17,19 @@ import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
  * parity of the un-loaded handle.
  */
 describe("GaussianSplattingMesh", () => {
+    it("exposes mutable BJS GPU-sort preferences while Lite keeps its CPU worker fallback", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        expect(GaussianSplattingMesh.UseGpuSort).toBe(false);
+        expect(GaussianSplattingMesh.GpuSortMinFrameInterval).toBe(1);
+        expect(gs.useGpuSort).toBeNull();
+        gs.useGpuSort = true;
+        GaussianSplattingMesh.UseGpuSort = true;
+        expect(gs.useGpuSort).toBe(true);
+        expect(GaussianSplattingMesh.UseGpuSort).toBe(true);
+        gs.useGpuSort = null;
+        GaussianSplattingMesh.UseGpuSort = false;
+    });
+
     it("reports the Babylon.js class name", () => {
         const gs = new GaussianSplattingMesh("splat");
         expect(gs.getClassName()).toBe("GaussianSplattingMesh");
@@ -57,5 +78,29 @@ describe("GaussianSplattingMesh", () => {
         gs.safeOrbitCameraLimits = { radiusMin: 2, elevationMinMax: [-0.5, 0.5] };
         expect(gs.safeOrbitCameraLimits.radiusMin).toBe(2);
         expect(gs.safeOrbitCameraLimits.elevationMinMax).toEqual([-0.5, 0.5]);
+    });
+
+    it("attaches accessibility metadata to an imported splat rather than its placeholder", () => {
+        const lite = fakeLiteMesh();
+        const scene = { _registerMesh: () => undefined } as unknown as Scene;
+        const gs = GaussianSplattingMesh._fromLite(lite, scene);
+
+        gs.accessibilityTag = { description: "Imported cloud" };
+
+        expect(getAccessibilityTag(lite)).toEqual({ description: "Imported cloud" });
+        expect(getAccessibilityTag(gs._node)).toBeNull();
+    });
+
+    it("moves pre-load accessibility metadata from the placeholder to the adopted splat", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        const lite = fakeLiteMesh();
+        gs.accessibilityTag = { description: "Deferred cloud" };
+
+        expect(getAccessibilityTag(gs._node)).toEqual({ description: "Deferred cloud" });
+
+        gs._adopt(lite);
+
+        expect(getAccessibilityTag(gs._node)).toBeNull();
+        expect(getAccessibilityTag(lite)).toEqual({ description: "Deferred cloud" });
     });
 });

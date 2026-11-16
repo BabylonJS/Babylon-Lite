@@ -53,6 +53,7 @@ export function createBuildState(): NodeBuildState {
         shadowLights: [],
         hasSkeleton: false,
         hasInstances: false,
+        usesInstanceIndex: false,
     };
 }
 

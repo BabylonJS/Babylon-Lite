@@ -9,6 +9,7 @@
  */
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getTextureImageIndex, resolveImage } from "./gltf-parser.js";
 
 /** Per-load context handed to each material extension's `applyMaterial()`. */
@@ -57,6 +58,8 @@ export interface GltfMaterialData {
      *  extension data + KHR_texture_transform from texture infos. */
     /** @internal */
     _rawMatDef?: any;
+    /** @internal Optional feature callback after a runtime material has been assembled. */
+    _onMaterialCreated?: (material: PbrMaterialProps) => void;
 }
 
 export type GltfImageCache = Array<Promise<ImageBitmap> | undefined>;

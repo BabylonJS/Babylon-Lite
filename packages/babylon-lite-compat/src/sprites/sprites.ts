@@ -20,7 +20,7 @@ import {
     createFacingBillboardSystem,
     addBillboardSpriteIndex,
     updateBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     billboardBlendAlpha,
     billboardBlendAdditive,
     createSprite2DLayer,
@@ -95,8 +95,13 @@ export class SpriteManager {
                 sprite._applyTo(system);
             }
             this._lite = system;
-            addFacingBillboardSystem(scene._lite, system);
+            addBillboardSystemToScene(scene._lite, system);
         });
+    }
+
+    /** Babylon.js `SpriteManager.isReady()` — an empty manager is ready without renderer preparation. */
+    public isReady(): boolean {
+        return this._sprites.length === 0 || this._lite !== undefined;
     }
 
     /** @internal Map the Babylon.js `Constants.ALPHA_*` blend mode to a Lite billboard blend. */
@@ -328,6 +333,11 @@ export class SpriteRenderer {
                 premultipliedAlpha: premultiplied,
             });
         });
+    }
+
+    /** Babylon.js `SpriteRenderer.isReady()` — the next render can build once its atlas is loaded. */
+    public isReady(): boolean {
+        return this._atlas !== undefined;
     }
 
     /** @internal Map the Babylon.js blend mode to a Lite sprite blend descriptor. */

@@ -7,15 +7,12 @@
  * transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff
  * (antialias:false) pink box. Fully static — no seekTime.
  *
- * Golden is regenerated from the BJS reference page on every run (force:true)
- * because GridMaterial relies on screen-space derivatives (dpdx/dpdy) for line
- * anti-aliasing, which is subpixel-sensitive to the GPU/driver. Capturing the
- * BJS oracle on the same machine as the Lite render keeps the comparison
- * apples-to-apples across platforms (e.g. local Windows vs CI macOS).
+ * Compares against the immutable checked-in Babylon.js reference; the test
+ * never recaptures or modifies that reference.
  */
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(213);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene213-gridmaterial");
@@ -24,9 +21,6 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 213 skipped via skipParity in scene-config.json");
 
 test("Scene 213 — GridMaterial matches Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 213, force: true, settleMs: 500 });
-
     await page.goto("/scene213.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);

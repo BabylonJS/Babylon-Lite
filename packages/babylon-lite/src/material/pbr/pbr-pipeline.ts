@@ -24,6 +24,7 @@ import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -54,6 +55,24 @@ let _pbrIblFallbackResolver: ((material: unknown) => _PbrBindCtx["_env"]) | null
 /** @internal */
 export function _installPbrIblFallbackResolver(resolve: (material: unknown) => _PbrBindCtx["_env"]): void {
     _pbrIblFallbackResolver = resolve;
+}
+
+let bindingContext: ((context: _PbrBindCtx, id: number | undefined, disposers: (() => void)[] | undefined) => void) | null = null;
+/** @internal Lazy scalar transport; null folds out of consumers without a scene-binding extension. */
+export let _pbrBindingIdentity: ((id: number | undefined) => number | undefined) | null = null;
+/** @internal Auxiliary binding lifetime collections are allocated only by opted-in extensions. */
+export let _createPbrBindingDisposers: (() => (() => void)[]) | null = null;
+/** @internal Install generic context transport without unconditional per-scene property reads or allocation. */
+export function _installPbrBindingContext(augment: NonNullable<typeof bindingContext>): void {
+    const previous = bindingContext;
+    bindingContext = previous
+        ? (context, id, disposers) => {
+              previous(context, id, disposers);
+              augment(context, id, disposers);
+          }
+        : augment;
+    _pbrBindingIdentity = (id) => id;
+    _createPbrBindingDisposers = () => [];
 }
 
 interface _PbrShaderBindings {
@@ -199,7 +218,12 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         // `topology` and `frontFace` remain omitted from the ordinary state so WebGPU supplies its defaults;
         // non-default topology, strip index format, or mirrored winding arrives through `composed._prim`.
-        primitive: { cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim },
+        // A right-handed engine reverses whatever winding results (its view matrix mirrors Z).
+        primitive: {
+            cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back",
+            ...composed._prim,
+            ...(_rightHanded && { frontFace: composed._prim?.frontFace === "cw" ? "ccw" : "cw" }),
+        },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;
@@ -215,8 +239,10 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null,
-    refractionTexture?: Texture2D | null
+    meshCtx: _PbrBindCtx["_mesh"],
+    refractionTexture?: Texture2D | null,
+    lightingId?: number,
+    disposers?: (() => void)[]
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
@@ -246,6 +272,7 @@ export function createPbrMeshBindGroup(
         _env: env ?? _pbrIblFallbackResolver?.(material) ?? null,
         _refractionTexture: refractionTexture,
     };
+    bindingContext?.(ctx, lightingId, disposers);
 
     const sortedExts = _getPbrExtsSorted();
 

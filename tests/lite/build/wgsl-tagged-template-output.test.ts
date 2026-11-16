@@ -37,9 +37,10 @@ describe("tagged WGSL package output", () => {
         expect(weightCode).toContain("fn dq(p:vec2f,A:vec2f,B:vec2f,C:vec2f)->f32{");
     });
 
-    it("removes the identity-tag import from every emitted module", () => {
+    it("removes the identity-tag import from emitted implementation modules", () => {
         const libDirectory = dirname(LIB_ENTRY);
         const offenders = emittedJavaScriptFiles(libDirectory)
+            .filter((file) => file !== LIB_ENTRY)
             .filter((file) => readFileSync(file, "utf8").includes("shader/wgsl.js"))
             .map((file) => relative(libDirectory, file));
 

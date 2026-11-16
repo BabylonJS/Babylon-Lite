@@ -28,6 +28,18 @@ Both generators return the same `ShadowGenerator` interface, so the downstream r
 
 ## Public API Surface
 
+### Runtime enablement (`shadow-enabled.ts`)
+
+```typescript
+export function setShadowGeneratorEnabled(generator: ShadowGenerator, enabled: boolean): void;
+```
+
+Runtime enablement preserves the generator attachment and every receiver bind group. Disabling
+writes effective darkness `1` to the existing receiver UBO, returns fully lit before texture
+sampling, and skips shadow-map rendering. Re-enabling restores the configured darkness and resumes
+the existing generator before the scene pass. The feature state is installed only when this setter
+is imported and called.
+
 ### Shared Base (`shadow-base.ts`)
 
 ```typescript
@@ -434,6 +446,36 @@ PCF depth rendering uses the regular material renderable path with a pass-specif
 - **Fragment stage retained when needed** with a void entry point so material `discard` / alpha-test logic updates the depth attachment without writing color
 - No multisample
 
+**Incremental PCF casters.** The task, target, shadow camera and UBOs survive caster-set and material changes.
+The state caches no-colour views and keeps persistent snapshots of the actual queued meshes separately from
+`_casterMeshes`, which deformable-caster wrappers temporarily replace with the application's source array.
+Each caster record stores its receive material, terminal material and renderable generation (a null entry
+represents a held or materialless caster). A single cache keyed by terminal material stores each no-colour view
+with its generation and captured features. Override chains sharing a terminal therefore need neither duplicate
+cache entries nor separate chain pruning. Records change only when their caster is queued, so a joining caster
+shares a still-current view without requeueing its peers or rebuilding parallel arrays.
+One stable compaction drops removed/changed packets and reselects draw batches once. Packet resources retire
+behind the frame fence. Added/changed casters are queued without binding, then `_recordedVersion = -1` makes
+the scheduler resolve and bind the complete change once. `_lastCasterVersion = -1` forces the map to redraw;
+task bundle/version caches are invalidated only when membership changes. Reordering/re-supplying identical
+members keeps packets and bundles. Stale terminal views are invalidated before any new view is built, and
+cached terminals no live packet reaches are pruned. A replaced generator depth texture or map size still retires the whole
+task behind the frame fence and creates a new target.
+
+**Caster material changes.** The PCF state snapshots each caster's terminal material, its `_csmGen` and its
+`_renderFeatures`, and the caster's `_renderableGen`. A new caster array, a switched or re-pointed caster material, a
+rebuilt one, a terminal material whose render features were recomputed, or a caster whose own renderable was rebuilt
+makes the next ensure requeue only the affected casters. The features matter when the
+terminal material is rebuilt only through meshes outside the caster set, for example an override that is also the
+material of a mesh that casts no shadow: that rebuild moves only that mesh's generation, while the caster's view still
+holds the features it was built from (alpha testing, culling). Features that were dropped and not recomputed yet do not
+count, as for the CSM: a view built then would read none of them. A caster whose view cannot be built yet is left out of that task with a null caster snapshot,
+using the same `holdShadowCaster` check as the CSM reconcile: the no-colour view factory of its family is not imported
+(the registered set is re-supplied, so the generator is parked once while it imports), or the material it casts through
+itself has no completed group build in this scene. While the held casters stay held, an ensure returns the existing task;
+once a hold lifts, or the change is reverted, the next ensure queues the caster into the same task. This applies to the first
+build too, since a caster can switch family while the registration preload imports.
+
 ### PCF Main-Pass Integration
 
 Standard, PBR, and Node shadow receivers use asynchronously prepared sampling algorithms. Node retains its own group-1 binding and dispatcher assembly. There is no generator-side PCF shader registration path; the generator only exposes receiver-facing texture/sampler/UBO resources.
@@ -488,7 +530,7 @@ For WebGPU directional lights, `depthValues = (0, 1)`. For spot PCF receiver sam
 
 ### ESM Material Shadow View Fragment Output
 
-The caster material's normal fragment logic runs first, including alpha test, `DiscardBlock`, and clip-plane discard. The ESM shadow view then replaces the final color output with the fixed ESM encoding:
+The caster material's normal fragment logic runs first, including alpha test, `DiscardBlock`, and clip-plane discard. Like the no-color view, the ESM shadow view drops the shading-only normal-map and spec-gloss features and refraction (see [06-pbr-material.md](06-pbr-material.md#material-views-and-rebuild)). The ESM shadow view then replaces the final color output with the fixed ESM encoding:
 
 ```wgsl
 @fragment fn main(@location(0) vDepthMetricSM: f32) -> @location(0) vec4<f32> {

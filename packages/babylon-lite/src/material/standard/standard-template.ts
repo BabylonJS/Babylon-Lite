@@ -17,11 +17,24 @@ import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
+let lightingArguments: ((source: string | undefined) => string) | null = null;
+let lightingParameters: ((extraCode: string) => string) | null = null;
+/** @internal A lazy material extension may supply extra scalar arguments for its lighting helper. */
+export function _installStandardLightingArgumentsResolver(resolve: (source: string | undefined) => string): void {
+    lightingArguments = resolve;
+}
+/** @internal Scalar parameter transport disappears when no extension supplies additional lighting inputs. */
+export function _installStandardLightingParametersResolver(resolve: (extraCode: string) => string): void {
+    lightingParameters = resolve;
+}
 
 // ── Lighting function (always present unless disableLighting) ───
 
-const LIGHTING_FN = wgsl`
-fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>) -> array<vec3<f32>, 2> {
+/** @internal Extend the default lighting helper without shader parsing or feature semantics. */
+export function standardLightingFunction(extraLight = ""): string {
+    return wgsl`
+fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>${lightingParameters?.(extraLight) ?? ""}) -> array<vec3<f32>, 2> {
+${extraLight}
 var lv: vec3<f32>;
 var a: f32 = 1.0;
 let t = u32(L.vLightData.w);
@@ -51,6 +64,7 @@ s = pow(s, max(1.0, g));
 return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 }
 `;
+}
 
 export interface StandardTemplateConfig {
     /** @internal */
@@ -69,6 +83,8 @@ export interface StandardTemplateConfig {
     readonly _esmShadowOutput?: boolean;
     /** @internal Has morph targets — switches the vertex shader to morphedPos/morphedNorm (defined by the morph fragment's VR slot). */
     readonly _hasMorph?: boolean;
+    /** @internal Material-owned lighting helper contribution. */
+    readonly _lightingFunction?: string;
 }
 
 /**
@@ -199,7 +215,7 @@ _1: f32,
 };
 `;
 
-    const helpers = _disableLighting ? "" : LIGHTING_FN;
+    const helpers = _disableLighting ? "" : (config._lightingFunction ?? standardLightingFunction());
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly
@@ -208,8 +224,11 @@ _1: f32,
     // View direction
     const viewDirCode = !_disableLighting ? wgsl`let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
-    // Normal computation — fragment can override via AC slot
-    const normalCode = _disableLighting ? "" : wgsl`var normalW = normalize(input.vn);`;
+    // Normal computation — fragment can override via AC slot. Declared for the unlit variant too: the AC
+    // slot exists in both variants, and a bound normal map writes `normalW` there. Without the declaration
+    // an unlit material with a bump texture (e.g. after a live `disableLighting` toggle) compiled invalid
+    // WGSL and its mesh stopped rendering. Unused in the unlit colour path, so the driver drops it.
+    const normalCode = wgsl`var normalW = normalize(input.vn);`;
 
     // Opacity — default from material alpha, fragment can modify via AT
     const opacityCode = wgsl`var alpha = mat.dc.a;`;
@@ -225,7 +244,8 @@ var baseColor = _ds.rgb * mat.tl;`
     // Diffuse color + emissive + specular — defaults, fragments can override via AT
     const diffuseColorCode = wgsl`let diffuseColor = mat.dc.rgb;`;
     const emissiveCode = wgsl`var emissiveContrib = mat.ec;`;
-    const specularColorCode = !_disableLighting ? wgsl`var specularColor = mat.sc.rgb;` : "";
+    // Same for `specularColor`: the AT slot exists in both variants and a bound specular map writes it.
+    const specularColorCode = wgsl`var specularColor = mat.sc.rgb;`;
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
     if (!_disableLighting) {
@@ -237,11 +257,11 @@ var specularBase = vec3<f32>(0.0);
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
-let lc = min(mesh.lc, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AD*/
 for (var li = 0u; li < lc; li++) {
 let lightIndex = mli(li);
-let r = computeLighting(viewDirectionW, normalW, lights.lights[lightIndex], glossiness, input.vp);
+let r = computeLighting(viewDirectionW, normalW, lights.lights[lightIndex], glossiness, input.vp${lightingArguments?.(config._lightingFunction) ?? ""});
 let sf = shadowFactors[lightIndex];
 diffuseBase += r[0] * sf;
 specularBase += r[1] * sf;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { addTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { buildFrameGraphTask, createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
+import { disposeFrameGraphContext, registerFrameGraphContextAsync, type FrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
 import type { Pass } from "../../../packages/babylon-lite/src/frame-graph/pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 
@@ -103,5 +104,55 @@ describe("FrameGraph runtime task insertion", () => {
 
         expect(graph.execute()).toBe(1);
         expect(executions).toBe(1);
+    });
+
+    it("awaits standalone task preloads before recording the frame graph", async () => {
+        const events: string[] = [];
+        const engine = {} as EngineContext;
+        const graph = createFrameGraph(engine);
+        const task = makeTask("compute", events);
+        task._preload = async () => {
+            await Promise.resolve();
+            events.push("compute:preload");
+        };
+        addTask(graph, task);
+        const surface = { engine, _renderingContexts: [] } as unknown as FrameGraphContext["surface"];
+        const context = {
+            _disposed: false,
+            surface,
+            frameGraph: graph,
+        } as unknown as FrameGraphContext;
+
+        await registerFrameGraphContextAsync(context);
+
+        expect(events).toEqual(["compute:preload", "compute:record", "compute:initialize"]);
+        expect(surface._renderingContexts).toContain(context);
+    });
+
+    it("does not register a standalone context disposed during preload", async () => {
+        const events: string[] = [];
+        const engine = {} as EngineContext;
+        const graph = createFrameGraph(engine);
+        let finishPreload!: () => void;
+        const task = makeTask("compute", events);
+        task._preload = () =>
+            new Promise<void>((resolve) => {
+                finishPreload = resolve;
+            });
+        addTask(graph, task);
+        const surface = { engine, _renderingContexts: [] } as unknown as FrameGraphContext["surface"];
+        const context = {
+            _disposed: false,
+            surface,
+            frameGraph: graph,
+        } as unknown as FrameGraphContext;
+
+        const registration = registerFrameGraphContextAsync(context);
+        disposeFrameGraphContext(context);
+        finishPreload();
+        await registration;
+
+        expect(events).toEqual([]);
+        expect(surface._renderingContexts).not.toContain(context);
     });
 });

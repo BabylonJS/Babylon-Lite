@@ -108,16 +108,23 @@ export function _t(scene: SceneContext, engine: EngineContext): readonly [commit
 }
 
 function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
+    scene._outputPipelineChange?.(false);
     let lastRenderTask: RenderTaskBase | null = null;
-    for (const task of scene._frameGraph._tasks) {
-        if ("_renderables" in task) {
-            const renderTask = task as RenderTaskBase;
-            enableTransmission(renderTask, engine);
-            lastRenderTask = renderTask;
+    try {
+        for (const task of scene._frameGraph._tasks) {
+            if ("_renderables" in task) {
+                const renderTask = task as RenderTaskBase;
+                enableTransmission(renderTask, engine);
+                lastRenderTask = renderTask;
+            }
         }
-    }
-    if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
-        scene._frameGraph._tasks.push(createImageProcessingTask({ name: "transmission-image-processing", source: lastRenderTask._config.rt }, engine, scene));
+        if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
+            scene._frameGraph._tasks.push(
+                createImageProcessingTask({ name: "transmission-image-processing", source: () => scene._outputTexture ?? lastRenderTask!._config.rt }, engine, scene)
+            );
+        }
+    } finally {
+        scene._outputPipelineChange?.(true);
     }
 }
 
@@ -225,6 +232,7 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
 function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
     const oldDesc = cfg.rt._descriptor;
+    const oldSize = oldDesc.size;
     const surface = task.scene.surface;
     const sampleCount = surface.msaaSamples;
     // The scene render task may target the shared engine scRT (single-sample,
@@ -242,10 +250,10 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
         lbl: "transmission-linear",
         format: "rgba16float",
         dFormat: ownsDepth ? (oldDesc.dFormat ?? "depth24plus-stencil8") : undefined,
-        _depthClearValue: oldDesc._depthClearValue,
-        _depthCompare: oldDesc._depthCompare,
+        depthClearValue: oldDesc.depthClearValue,
+        depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
-        size: surface,
+        size: "canvas" in oldSize || "surface" in oldSize ? oldSize : surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;
@@ -257,7 +265,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     };
     sig._colorFormat = "rgba16float";
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
-    sig._depthCompare = newRt._descriptor._depthCompare;
+    sig._depthCompare = newRt._descriptor.depthCompare ?? cfg.depth?._descriptor.depthCompare;
     sig._sampleCount = sampleCount;
     task._ob.length = 0;
     task._lastVersion = -1;
@@ -419,7 +427,7 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
             lastPipeline = null;
         }
         const mesh = binding.renderable.mesh;
-        if (mesh && mesh.visible === false) {
+        if (mesh && (mesh.visible === false || mesh._skipColorDraw)) {
             continue;
         }
         if (binding.pipeline !== lastPipeline) {
@@ -429,7 +437,7 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
         draws += binding.draw(pass, engine);
     }
     if (overlay) {
-        draws += drawList(pass, overlay, engine);
+        draws += drawList(pass, overlay, engine, true);
     }
     pass.end();
     return draws;

@@ -30,18 +30,48 @@ import {
     registerScene,
     registerSceneWithShadowSupport,
     enableMirroredMeshes,
+    enableRectAreaLights,
     onBeforeRender,
     createNullEngine,
     stepScene,
     uploadImageToArrayLayer,
+    onEngineDeviceLost,
     VERSION,
 } from "babylon-lite";
-import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
+import type { EngineContext, EngineOptions as LiteEngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
 import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
+
+let lastCreatedEngine: AbstractEngine | null = null;
+
+/** @internal Last compat engine constructed in this realm, matching Babylon.js EngineStore support checks. */
+export function _getLastCreatedEngine(): AbstractEngine | null {
+    return lastCreatedEngine;
+}
+
+function setLastCreatedEngine(engine: AbstractEngine): void {
+    lastCreatedEngine = engine;
+}
+
+/** Babylon.js `AbstractEngineOptions` subset accepted by the compat engine. */
+export interface AbstractEngineOptions extends LiteEngineOptions {
+    antialias?: boolean;
+    adaptToDeviceRatio?: boolean;
+    useLargeWorldRendering?: boolean;
+    useReverseDepthBuffer?: boolean;
+}
+
+/** Babylon.js `EngineOptions` subset accepted by the compat engine. */
+export interface EngineOptions extends AbstractEngineOptions {}
+
+/** Babylon.js `WebGPUEngineOptions` subset accepted by the compat engine. */
+export interface WebGPUEngineOptions extends AbstractEngineOptions {
+    canvasToneMapping?: GPUCanvasToneMapping;
+    canvasColorSpace?: PredefinedColorSpace;
+}
 
 /**
  * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
@@ -85,10 +115,11 @@ export abstract class AbstractEngine {
     public _headless = false;
 
     protected readonly _canvas: RenderCanvas;
-    private readonly _options: EngineOptions | undefined;
+    private readonly _options: LiteEngineOptions | undefined;
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
+    private _disposed = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
 
@@ -104,9 +135,28 @@ export abstract class AbstractEngine {
      * configuration internally, so this is a settable no-op kept for API shape.
      */
     public useReverseDepthBuffer = false;
+    private _maxFramesInFlight = 0;
+    public get maxFramesInFlight(): number {
+        return this._maxFramesInFlight;
+    }
+    public set maxFramesInFlight(value: number) {
+        if (value !== 0) {
+            unsupported(
+                "WebGPUEngine.maxFramesInFlight",
+                "Lite's frame graph owns command submission and GPU-resource retirement; a nonzero limit needs a renderer-wide scheduling and lifetime policy in existing hot paths."
+            );
+        }
+        this._maxFramesInFlight = value;
+    }
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-loss signal, forwarded from Lite's device-loss subscription. */
+    public readonly onContextLostObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-restored signal. Lite does not expose a completed-recovery event, so this remains shape-only. */
+    public readonly onContextRestoredObservable = new Observable<AbstractEngine>();
+    /** @internal Device-loss unsubscriber installed by `initAsync`. */
+    private _unsubscribeDeviceLost: (() => void) | null = null;
 
     /** @internal Babylon.js hardware-scaling level. Babylon Lite manages device-pixel-ratio itself; stored for parity. */
     private _hardwareScalingLevel = 1;
@@ -129,16 +179,34 @@ export abstract class AbstractEngine {
      * not block engine startup.
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
+    /** @internal Number of scene mutations currently holding the Lite render loop paused. */
+    private _sceneMutationPauseCount = 0;
+    /** @internal Whether the render loop was active when the outermost scene mutation paused it. */
+    private _shouldResumeAfterSceneMutation = false;
+    /** @internal Changes whenever a caller explicitly stops the render loop. */
+    private _renderLoopStopRevision = 0;
+    /** @internal Stop revision captured by the outermost scene mutation pause. */
+    private _sceneMutationPauseRevision = 0;
 
-    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | boolean) {
+    public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
+        setLastCreatedEngine(this);
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | undefined =
-            typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        this.useReverseDepthBuffer = opts?.useReverseDepthBuffer ?? false;
         if (opts) {
+            if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
+                unsupported(
+                    "WebGPUEngineOptions.canvasToneMapping/canvasColorSpace",
+                    "Supporting WebGPU canvas presentation options requires changing Lite's existing surface configuration hot path; it cannot be added as an independently tree-shakeable compat capability."
+                );
+            }
             const antialias = opts.antialias;
             delete opts.antialias;
+            delete opts.canvasToneMapping;
+            delete opts.canvasColorSpace;
+            delete opts.useReverseDepthBuffer;
             if (antialias === false) {
                 opts.msaaSamples = 1;
             }
@@ -160,7 +228,16 @@ export abstract class AbstractEngine {
         if (this._initialized) {
             return;
         }
-        this._lite = await createEngine(this._canvas, this._options);
+        if (this._disposed) {
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine has been disposed.");
+        }
+        const lite = await createEngine(this._canvas, this._options);
+        if (this._disposed) {
+            disposeEngine(lite);
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine was disposed during initialization.");
+        }
+        this._lite = lite;
+        this._unsubscribeDeviceLost = onEngineDeviceLost(lite, () => this.onContextLostObservable.notifyObservers(this));
         this._initialized = true;
     }
 
@@ -313,6 +390,33 @@ export abstract class AbstractEngine {
         this._lateWork.push(work);
     }
 
+    /** @internal Pause rendering across an asynchronous scene topology/resource mutation. */
+    public _pauseForSceneMutation(): void {
+        if (this._disposed) {
+            return;
+        }
+        if (this._sceneMutationPauseCount++ > 0) {
+            return;
+        }
+        this._sceneMutationPauseRevision = this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = this._initialized && !this._headless && this._lite._animFrameId !== 0;
+        if (this._shouldResumeAfterSceneMutation) {
+            stopEngine(this._lite);
+        }
+    }
+
+    /** @internal Release a scene-mutation pause, resuming only if the caller did not stop rendering. */
+    public async _resumeAfterSceneMutation(): Promise<void> {
+        if (this._sceneMutationPauseCount === 0 || --this._sceneMutationPauseCount > 0) {
+            return;
+        }
+        const shouldResume = !this._disposed && this._shouldResumeAfterSceneMutation && this._sceneMutationPauseRevision === this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = false;
+        if (shouldResume) {
+            await startEngine(this._lite);
+        }
+    }
+
     /** @internal Scenes register themselves on construction. */
     public _registerScene(scene: Scene): void {
         this._scenes.push(scene);
@@ -348,6 +452,8 @@ export abstract class AbstractEngine {
     }
 
     public stopRenderLoop(): void {
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
@@ -370,12 +476,23 @@ export abstract class AbstractEngine {
     }
 
     public dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+        this._disposed = true;
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
         }
+        this._unsubscribeDeviceLost?.();
+        this._unsubscribeDeviceLost = null;
         if (this._initialized) {
             disposeEngine(this._lite);
+        }
+        if (lastCreatedEngine === this) {
+            lastCreatedEngine = null;
         }
     }
 
@@ -417,6 +534,17 @@ export abstract class AbstractEngine {
     }
 
     /**
+     * Babylon.js `engine.isOcclusionQueryVisible(query)` — Lite does not expose
+     * occlusion-query allocation, render-pass encoding, or asynchronous result state.
+     */
+    public isOcclusionQueryVisible(_query: unknown): never {
+        return unsupported(
+            "AbstractEngine.isOcclusionQueryVisible",
+            "Lite has no occlusion-query subsystem; supporting this requires query allocation, render-pass encoding, and asynchronous result-lifetime policy."
+        );
+    }
+
+    /**
      * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
      * — the engine extension that uploads a decoded image source into one layer of a 2D array
      * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
@@ -448,12 +576,16 @@ export abstract class AbstractEngine {
             scene._buildShadowGenerators();
             await scene._parseNodeMaterials();
             await scene._awaitPendingTextures();
+            scene._ensureRegisteredMaterialsRenderable();
             scene._bakeGroundUvs();
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             scene._buildClusteredContainers();
             await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
+            if (scene._lite.lights.some((light) => light.lightType === "rectArea")) {
+                await enableRectAreaLights(scene._lite);
+            }
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
             // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)
@@ -506,7 +638,23 @@ export class ThinEngine extends AbstractEngine {}
  * Babylon Lite is WebGPU-only, so a compat `Engine` is still backed by the same
  * Lite WebGPU context; this class exists to mirror Babylon.js's name + hierarchy.
  */
-export class Engine extends ThinEngine {}
+export class Engine extends ThinEngine {
+    public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+        if (typeof antialiasOrOptions === "object") {
+            super(canvas, antialiasOrOptions);
+            return;
+        }
+        if (!options && adaptToDeviceRatio === undefined) {
+            super(canvas, antialiasOrOptions);
+            return;
+        }
+        super(canvas, {
+            ...options,
+            antialias: antialiasOrOptions ?? options?.antialias,
+            ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
+        });
+    }
+}
 
 /**
  * Babylon.js's WebGPU engine. In Babylon.js `WebGPUEngine extends AbstractEngine`

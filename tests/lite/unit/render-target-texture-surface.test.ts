@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
-import { buildRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { acquireTexture, releaseTexture, _textureOwners } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 import { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "../../../packages/babylon-lite/src/texture/rtt-surface";
@@ -38,6 +38,81 @@ function makeEngine(): EngineContext {
 }
 
 describe("createSurfaceRenderTargetTexture", () => {
+    it("tracks scaled live surface dimensions with floor rounding and a one-pixel minimum", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 0.5 },
+        });
+        expect(result.texture.width).toBe(32);
+        expect(result.texture.height).toBe(16);
+        const resized = vi.fn();
+        onRenderTargetTextureResize(result, resized);
+
+        engine.canvas.width = 65;
+        engine.canvas.height = 3;
+        buildRenderTarget(result.rt, engine);
+
+        expect(result.texture.width).toBe(32);
+        expect(result.texture.height).toBe(1);
+        expect(resized).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        disposeRenderTargetTexture(result);
+    });
+
+    it("clamps zero-sized scaled surfaces after applying the scale", () => {
+        const engine = makeEngine();
+        engine.canvas.width = 1;
+        engine.canvas.height = 1;
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 2 },
+        });
+        const resized = vi.fn();
+        onRenderTargetTextureResize(result, resized);
+        expect(result.texture.width).toBe(2);
+        expect(result.texture.height).toBe(2);
+
+        engine.canvas.width = 0;
+        engine.canvas.height = 0;
+        buildRenderTarget(result.rt, engine);
+
+        expect(result.texture.width).toBe(1);
+        expect(result.texture.height).toBe(1);
+        expect(resized).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        disposeRenderTargetTexture(result);
+    });
+
+    it("does not wrap scaled dimensions through signed 32-bit integers", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 67_108_865 },
+        });
+
+        expect(result.texture.width).toBe(4_294_967_360);
+        expect(result.texture.height).toBe(2_147_483_680);
+        disposeRenderTargetTexture(result);
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid surface scale %s before allocating", (scale) => {
+        const engine = makeEngine();
+        expect(() => createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(
+            /scale must be a positive finite number/
+        );
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid scale %s at the shared render-target boundary", (scale) => {
+        const engine = makeEngine();
+        expect(() => createRenderTarget({ format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(/scale must be a positive finite number/);
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
     it("rejects depth-only targets without the explicit helper before allocating", () => {
         const engine = makeEngine();
         expect(() => createSurfaceRenderTargetTexture(engine, { dFormat: "depth32float", samples: 1, size: engine })).toThrow(/Depth-only.*withSampledDepthTexture/);
@@ -301,26 +376,28 @@ describe("createSurfaceRenderTargetTexture", () => {
         const engine = makeEngine();
         const createTexture = vi.mocked(engine._device.createTexture);
         const allocate = createTexture.getMockImplementation()!;
+        const defineProperty = vi.spyOn(Object, "defineProperty");
         createTexture.mockImplementationOnce((descriptor) => {
             const texture = allocate(descriptor);
             vi.mocked(texture.destroy).mockImplementation(() => {
                 throw new Error("cleanup failed");
             });
+            defineProperty.mockImplementationOnce(() => {
+                throw new Error("surface setup failed");
+            });
             return texture;
         });
-        let sizeReads = 0;
         const descriptor = {
             format: "rgba8unorm" as GPUTextureFormat,
             samples: 1,
-            get size() {
-                if (sizeReads++ === 0) {
-                    return engine;
-                }
-                throw new Error("surface setup failed");
-            },
+            size: engine,
         };
-        expect(() => createSurfaceRenderTargetTexture(engine, descriptor)).toThrow("surface setup failed");
-        expect((createTexture.mock.results[0]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
+        try {
+            expect(() => createSurfaceRenderTargetTexture(engine, descriptor)).toThrow("surface setup failed");
+            expect((createTexture.mock.results[0]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
+        } finally {
+            defineProperty.mockRestore();
+        }
     });
 
     it("supports callback unregistration and rejects registration after disposal", () => {

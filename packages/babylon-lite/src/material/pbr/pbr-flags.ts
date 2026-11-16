@@ -20,6 +20,10 @@ export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
 export interface _PbrFragCtx {
+    /** @internal Scene-owned extension feature bits. */
+    readonly _sceneFeatures?: number;
+    /** @internal Effective per-mesh light path; zero means no light declarations are emitted. */
+    readonly _lightMode?: number;
     /** @internal */
     readonly _features: number;
     /** @internal */
@@ -46,6 +50,10 @@ export interface _PbrFragCtx {
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
+    /** @internal Opaque scene resource identity. */
+    _lightingId?: number;
+    /** @internal Binding-owned cleanup, including auxiliary material generations. */
+    _disposers?: (() => void)[];
     /** @internal */
     readonly _engine: EngineContext;
     /** @internal */
@@ -56,8 +64,8 @@ export interface _PbrBindCtx {
     readonly _meshFeatures: number;
     /** @internal */
     readonly _material: unknown;
-    /** @internal Populated for "vertex" phase (skeleton, morph). */
-    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null;
+    /** @internal Mesh whose binding is being built, including vertex-phase resources. */
+    readonly _mesh?: Mesh | null;
     /** @internal Scene environment, or an active extension's fallback when the scene has none. */
     readonly _env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
     /** @internal Per-render-task scene-color snapshot for transmissive RTT refraction. */

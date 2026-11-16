@@ -127,27 +127,7 @@ export function createDynamicTexture(engine: EngineContext, width: number, heigh
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
     acquireTexture(tex);
-    // Opt-in device-lost recovery: retain only the *data* needed to re-allocate the
-    // blank texture identically — no logic here. Like the url/solid/bitmap recovery
-    // kinds, the actual rebuild lives elsewhere (the dynamic-texture-recovery
-    // module, dynamically imported by device-lost-recovery only when needed), so
-    // the create/update API never bundles recovery code. `engine._dlr` is a runtime
-    // flag, so this is a runtime gate (a no-op when recovery is disabled), not
-    // compile-time dead-code elimination. The latest source is stamped by
-    // updateDynamicTexture.
-    if (engine._dlr) {
-        engine._dlr.t(tex, {
-            kind: "dynamic",
-            width,
-            height,
-            format,
-            levels,
-            samplerDesc,
-            source: null,
-            flipY: true,
-            premultipliedAlpha: false,
-        });
-    }
+    engine._dlr?.dt(tex, width, height, format, levels, samplerDesc);
     return tex as DynamicTexture2D;
 }
 
@@ -170,14 +150,7 @@ export function updateDynamicTexture(engine: EngineContext, tex: DynamicTexture2
 
     engine._device.queue.copyExternalImageToTexture({ source, flipY: invertY }, { texture: tex.texture, premultipliedAlpha }, [tex.width, tex.height]);
 
-    // Keep the retained recovery source current so a device-lost rebuild
-    // re-blits the most recent pixels (no-op unless recovery is enabled).
-    const rec = tex._recoverySource;
-    if (rec && rec.kind === "dynamic") {
-        rec.source = source;
-        rec.flipY = invertY;
-        rec.premultipliedAlpha = premultipliedAlpha;
-    }
+    engine._updateCapturedDynamicTexture?.(tex, source, invertY, premultipliedAlpha);
 
     if (tex.texture.mipLevelCount > 1) {
         generateMipmaps(engine, tex.texture);

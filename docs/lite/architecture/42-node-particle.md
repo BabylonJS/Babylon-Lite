@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly twenty-five node-particle functions and twelve node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly twenty-seven node-particle functions and twelve node-particle types.
 
 ### 2.1 Functions
 
@@ -50,12 +50,14 @@ function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneCont
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
+function isParticleSystemStarted(system: ParticleSystem): boolean;
 function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
 
 function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSet, options?: RegisterNodeParticleOptions): void;
+function getParticleSystems(scene: SceneContext): readonly ParticleSystem[];
 
 function createParticleSprite2DBridge(system: ParticleSystem, options?: ParticleSprite2DBridgeOptions): ParticleSprite2DBridge;
 function syncParticleSprite2DBridge(bridge: ParticleSprite2DBridge): void;
@@ -68,7 +70,17 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-All twenty-five functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
+All twenty-seven functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
+
+### Scene discovery
+
+`ParticleSystem.name?: string` retains a non-empty NPE `SystemBlock` name for both inline JSON and snippet builds. Unnamed systems omit the property. `isParticleSystemStarted(system)` returns `_started && !_stopped`: stopped systems can still contain draining particles in `buffer.alive`. Capacity remains available through `buffer.capacity`; start/stop use the existing standalone functions.
+
+`getParticleSystems(scene)` enumerates only systems registered through the 3D `registerNodeParticleSet`, in first-registration order, deduped by identity. It returns the live readonly array; copy it for a snapshot. `SceneContext` declares an optional `@internal _particleSystems?: ParticleSystem[]` with a type-only import; this adds no emitted code, and the field is stripped from published declarations. The particle module owns allocation and cleanup. In the existing per-system registration loop, the first system lazily allocates the list and installs exactly one scene disposer that clears it with `length = 0`; each system is appended only when not already included. The list is add-only until scene disposal, and existing references observe the clear. Without a list, the getter returns a fresh `[]`.
+
+Enumeration dedupe does **not** dedupe rendering: each registration still builds its billboard and pushes its own frame callback. Existing callback order, mid-frame registration, pick registration, and `autoStart` behavior are unchanged. There is no unregister or scheduler consolidation. 2D bindings are not enumerated, and all listed systems are CPU systems. Costs are a lazy array and cleanup closure per particle scene, an identity `includes` check per registration, and a name reference per named system; non-particle scenes create no such storage.
+
+Focused tests cover ordered membership, duplicates with duplicate rendering preserved, `autoStart: false`, callback ordering and mid-frame registration, scene isolation, disposal, retained names, and started/stopped state with draining particles.
 
 ### 2.2 Types
 
@@ -213,7 +225,7 @@ serialized value
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
         -> billboard target:
                  createParticleBillboard + syncParticleBillboard
-                 -> addFacingBillboardSystem or registerNodeParticleSet
+                 -> addBillboardSystemToScene or registerNodeParticleSet
              or pure-2D target:
                  createParticleSprite2DBridge + syncParticleSprite2DBridge
                  -> addSpriteRendererLayer or registerNodeParticleSet2D
@@ -1579,7 +1591,7 @@ return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), bas
 
 Interpolating toward white before destination-color blending makes a zero-alpha texel leave the framebuffer unchanged. The Add pass uses the stock billboard fragment (`sampled * tint * opacityMul`).
 
-The internal particle-blend registrar configures the freshly created facing-billboard representation in place. Modes without `_particlePasses` delegate to `addFacingBillboardSystem`. Advanced modes attach the private Multiply shader, register picking, and register a deferred particle renderable builder entirely from the opt-in particle module.
+The internal particle-blend registrar configures the freshly created facing-billboard representation in place. Modes without `_particlePasses` delegate to `addBillboardSystemToScene`. Advanced modes attach the private Multiply shader and join the same scene billboard collection (membership, picking, removal, discovery) with a particle-owned deferred renderable builder, all from the opt-in particle module.
 
 The generic `buildBillboardRenderable(engine, system)` API and its ordinary scene registrar remain unchanged. The optional particle path attaches its static shader before calling that base builder. A single lazily created descriptor and per-device/orientation shader-module cache are shared by every particle system, so identical systems share shader modules and pipeline-cache keys.
 
@@ -1589,7 +1601,7 @@ Mode `3` uses the resulting normal billboard renderable unchanged. Mode `4` wrap
 
 Mode `4` draws the normal Multiply binding first. The primary draw leaves its instance and index buffers bound, so the wrapper then binds only the Add pipeline and Add bind group before issuing the second indexed draw over the same instances. It restores the primary Multiply pipeline so the render task's consecutive-pipeline cache remains correct. The draw reports two GPU draw calls when particles are visible and zero when the system is hidden or empty.
 
-`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addFacingBillboardSystem`. Enriched systems therefore resolve all five modes exactly from the current `system.blendMode`; ordinary builders retain the stock live-registration path and Add fallback.
+`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addBillboardSystemToScene`. Enriched systems therefore resolve all five modes exactly from the current `system.blendMode`; ordinary builders retain the stock live-registration path and Add fallback.
 
 ### 10.2 Billboard synchronization
 
@@ -1616,7 +1628,7 @@ The billboard path uses the transient allocations above and the billboard subsys
 `registerNodeParticleSet(scene, set, options = {})` uses `autoStart = options.autoStart ?? true`. For each system, in `set.systems` order, it:
 
 1. Creates the particle billboard.
-2. Calls `(system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
+2. Calls `(system._registerBillboard ?? addBillboardSystemToScene)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
 3. Calls `startParticleSystem` when auto-start is true.
 4. Appends one internal callback to `scene._beforeRender`.
 

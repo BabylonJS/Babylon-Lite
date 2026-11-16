@@ -46,7 +46,7 @@ describe("computeNodeWorldMatrices", () => {
         const normalWorld = new Float32Array(16);
         const overriddenWorld = new Float32Array(16);
         const worldOverrides = new Map<number, Float32Array>();
-        const bone: Bone = { name: "joint", _nodeIndex: 0 };
+        const bone: Bone = { name: "joint", parent: null, _nodeIndex: 0 };
         const skeleton = {
             bones: [bone],
             _byName: new Map([["joint", bone]]),

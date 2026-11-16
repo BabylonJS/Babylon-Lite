@@ -10,6 +10,7 @@ import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER
 import { evaluateSampler } from "../animation/evaluate.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { _rightHanded } from "#coordinate-system";
 import type { Mat4Storage } from "../math/types.js";
 import type { BoneOverride } from "./bone-control.js";
 import { _boneApplier } from "./bone-control-hooks.js";
@@ -27,9 +28,10 @@ export function _installAnimationMaskResolver(resolver: AnimationMaskResolver): 
     _maskResolver = resolver;
 }
 
-// RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
+// glTF root transform, same as the loader's `__root__` (load-gltf.ts): the RH→LH X mirror diag(-1, 1, 1, 1),
+// or identity in a right-handed engine, which keeps glTF's native space.
 // prettier-ignore
-const RH_TO_LH = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const ROOT_TRANSFORM = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
 
 /** TRS layout per node in the scratch buffer: 12 floats.
  *  [0..2] = translation, [3..6] = rotation (xyzw), [7..9] = scale, [10..11] = padding */
@@ -134,6 +136,8 @@ export function createAnimationController(
     boneOverrides?: ReadonlyMap<number, unknown>,
     nodeNames?: readonly (string | undefined)[]
 ): AnimationController {
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const numNodes = nodes.length;
     const clipSkeletons = skeletons.filter((skeleton) =>
         skeleton.jointNodes.some((jointNode) =>
@@ -242,7 +246,7 @@ export function createAnimationController(
     };
 
     const ctrl: AnimationController = {
-        time: 0,
+        time: startTime,
         playing: true,
         speedRatio: 1,
         loop: true,
@@ -259,7 +263,7 @@ export function createAnimationController(
         },
 
         tick:
-            clip.duration <= 0
+            clip.duration <= 0 && clip.channels.length === 0
                 ? noopAnimationTick
                 : (deltaMs: number, engine?: EngineContext): void => {
                       if (engine) {
@@ -271,18 +275,20 @@ export function createAnimationController(
                       }
                       const device = requiresEngine && uploadGpu ? activeEngine!._device : null;
 
-                      if (ctrl.playing) {
+                      if (ctrl.playing && clip.duration > 0) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
                       }
 
                       // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
-                      if (ctrl.loop) {
-                          ctrl.time %= clip.duration;
-                          if (ctrl.time < 0) {
+                      if (clip.duration <= 0) {
+                          ctrl.time = startTime;
+                      } else if (ctrl.loop) {
+                          ctrl.time = startTime + ((ctrl.time - startTime) % clip.duration);
+                          if (ctrl.time < startTime) {
                               ctrl.time += clip.duration;
                           }
                       } else {
-                          ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
+                          ctrl.time = Math.min(Math.max(ctrl.time, startTime), endTime);
                       }
                       const t = ctrl.time;
 
@@ -418,8 +424,8 @@ export function createAnimationController(
                           if (parentIdx >= 0) {
                               multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
                           } else {
-                              // Root node: pre-multiply RH→LH
-                              multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+                              // Root node: pre-multiply the glTF root transform
+                              multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, ROOT_TRANSFORM, 0, localMat, nodeIdx * 16);
                           }
                       }
 
@@ -454,5 +460,5 @@ export function createAnimationController(
 }
 
 function noopAnimationTick(): void {
-    // Empty controller for zero-duration clips.
+    // Empty controller for clips with no samples to evaluate.
 }

@@ -1,6 +1,6 @@
-import { defineConfig, type Plugin } from "vite";
-import { resolve } from "path";
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { defineConfig, normalizePath, type Plugin } from "vite";
+import { extname, isAbsolute, relative, resolve, sep } from "path";
+import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { spawn } from "child_process";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { mapBabylonImport, type CompatTarget } from "../packages/babylon-lite-compat/src/bundler-resolve.js";
@@ -19,6 +19,8 @@ interface DemoConfigEntry {
     slug: string;
     name: string;
     description: string;
+    /** Optional hosted thumbnail; otherwise use the demo's relative JPG path. */
+    thumbnailUrl?: string;
     tags?: string[];
     mobile?: boolean;
 }
@@ -67,11 +69,12 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
         ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
         : "";
     const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
+    const thumbnailUrl = demo.thumbnailUrl ?? `/thumbnails/demo-${demo.slug}.jpg`;
     return [
         `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<a class="card-main" href="/demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
-        `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="${escapeHtml(thumbnailUrl)}" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,
@@ -167,6 +170,112 @@ function pagesDemoPlugin(): Plugin {
                     }
                 }
                 next();
+            });
+        },
+    };
+}
+
+const TROGIR_MOUNT = "/local-gs/trogir/";
+const TROGIR_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
+
+/** Opt-in, read-only mount for the loose Trogir SOG dataset used by the streaming demo. */
+function gaussianSplatAssetPlugin(): Plugin {
+    const configuredRoot = process.env.GS_STREAM_ASSET_ROOT;
+    let realRoot: string | null = null;
+    if (configuredRoot) {
+        try {
+            const candidate = realpathSync(configuredRoot);
+            if (statSync(candidate).isDirectory()) {
+                realRoot = candidate;
+            }
+        } catch {
+            // Requests return a path-free setup error below.
+        }
+    }
+
+    return {
+        name: "local-gaussian-splat-assets",
+        enforce: "pre",
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const rawPath = (req.url ?? "").split("?")[0];
+                if (rawPath !== TROGIR_MOUNT.slice(0, -1) && !rawPath.startsWith(TROGIR_MOUNT)) {
+                    next();
+                    return;
+                }
+                if (req.method !== "GET" && req.method !== "HEAD") {
+                    res.statusCode = 405;
+                    res.setHeader("Allow", "GET, HEAD");
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Method Not Allowed: the local Gaussian splat mount is read-only.");
+                    return;
+                }
+                res.setHeader("Cache-Control", "no-cache");
+                if (!realRoot) {
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end(`Local Trogir dataset is unavailable. Start the lab with:\n${TROGIR_SETUP}`);
+                    return;
+                }
+
+                let requested: string;
+                try {
+                    requested = decodeURIComponent(rawPath.slice(TROGIR_MOUNT.length));
+                } catch {
+                    res.statusCode = 400;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Bad Request: malformed asset URL.");
+                    return;
+                }
+                const segments = requested.split("/");
+                if (
+                    !requested ||
+                    requested.includes("\0") ||
+                    requested.includes("\\") ||
+                    isAbsolute(requested) ||
+                    segments.some((segment) => segment === ".." || segment === "." || !segment)
+                ) {
+                    res.statusCode = 400;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Bad Request: unsafe asset path.");
+                    return;
+                }
+
+                let realFile: string;
+                try {
+                    realFile = realpathSync(resolve(realRoot, ...segments));
+                    const fromRoot = relative(realRoot, realFile);
+                    if (!fromRoot || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot) || !statSync(realFile).isFile()) {
+                        throw new Error("outside mount");
+                    }
+                } catch {
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Local Trogir asset not found.");
+                    return;
+                }
+
+                const mime =
+                    extname(realFile).toLowerCase() === ".json"
+                        ? "application/json; charset=utf-8"
+                        : extname(realFile).toLowerCase() === ".webp"
+                          ? "image/webp"
+                          : "application/octet-stream";
+                res.statusCode = 200;
+                res.setHeader("Content-Type", mime);
+                res.setHeader("Content-Length", String(statSync(realFile).size));
+                if (req.method === "HEAD") {
+                    res.end();
+                    return;
+                }
+                const source = createReadStream(realFile);
+                source.on("error", () => {
+                    if (!res.headersSent) {
+                        res.statusCode = 404;
+                    }
+                    res.destroy();
+                });
+                source.pipe(res);
             });
         },
     };
@@ -335,6 +444,7 @@ function serveReferenceImages(): Plugin {
                         ".bin": "application/octet-stream",
                         ".glb": "model/gltf-binary",
                         ".env": "application/octet-stream",
+                        ".mp3": "audio/mpeg",
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",
                         ".md": "text/markdown; charset=utf-8",
@@ -852,8 +962,51 @@ function compatScenesPlugin(): Plugin {
     };
 }
 
+/**
+ * Right-handed twin scenes (`"rightHanded": true` in scene-config.json) run ordinary Lite code that an
+ * application would build with the `babylon-lite-rh` resolve condition (see
+ * docs/lite/architecture/61-right-handed-system.md). Resolve conditions are global to a Vite server, so
+ * this server tags every first-party module reached from such a scene's entry with `?lite-rh`: the
+ * browser loads the tagged graph as separate module instances, and `#coordinate-system` resolves to
+ * the right-handed variant inside it. Every other page keeps the untagged, left-handed graph.
+ */
+function rightHandedScenesPlugin(): Plugin {
+    const sceneConfig = JSON.parse(readFileSync(resolve(__dirname, "../scene-config.json"), "utf-8")) as Array<{ id: number; rightHanded?: boolean }>;
+    const entries = new Set(sceneConfig.filter((s) => s.rightHanded).map((s) => normalizePath(resolve(__dirname, `lite/src/lite/scene${s.id}.ts`))));
+    const rightHandedVariant = normalizePath(resolve(__dirname, "../packages/babylon-lite/src/engine/coordinate-system-rh.ts"));
+    const tagged = /[?&]lite-rh(?:&|$)/;
+    const scriptModule = /\.[cm]?[jt]sx?$/;
+    return {
+        name: "lab-right-handed-scenes",
+        enforce: "pre",
+        async resolveId(source, importer, options) {
+            if (!importer || !(tagged.test(importer) || entries.has(normalizePath(importer.split("?")[0])))) {
+                return null;
+            }
+            if (source === "#coordinate-system") {
+                return rightHandedVariant;
+            }
+            const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+            const id = resolved?.id;
+            if (!resolved || resolved.external || !id || id.startsWith("\0") || id.includes("/node_modules/") || tagged.test(id) || !scriptModule.test(id.split("?")[0])) {
+                return resolved;
+            }
+            return { ...resolved, id: `${id}${id.includes("?") ? "&" : "?"}lite-rh` };
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), compatScenesPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin(), ...(LAB_HTTPS ? [basicSsl()] : [])],
+    plugins: [
+        rightHandedScenesPlugin(),
+        pagesDemoPlugin(),
+        compatScenesPlugin(),
+        gaussianSplatAssetPlugin(),
+        serveReferenceImages(),
+        apiDocsPlugin(),
+        tabContentPlugin(),
+        ...(LAB_HTTPS ? [basicSsl()] : []),
+    ],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.

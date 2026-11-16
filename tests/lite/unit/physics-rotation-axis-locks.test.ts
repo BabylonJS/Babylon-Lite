@@ -1,13 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-    lockPhysicsBodyRotationAxes,
-    setPhysicsBodyMass,
-    setPhysicsBodyMassProperties,
-    unlockPhysicsBodyRotationAxes,
-    type PhysicsBody,
-    type PhysicsWorld,
-} from "../../../packages/babylon-lite/src/physics/havok";
+import { setPhysicsBodyMass, type PhysicsBody, type PhysicsWorld } from "../../../packages/babylon-lite/src/physics/havok";
+import { setPhysicsBodyMassProperties } from "../../../packages/babylon-lite/src/physics/havok-body-mass-properties";
+import { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "../../../packages/babylon-lite/src/physics/havok-rotation-locks";
 
 function makeWorld(getMassProperties: ReturnType<typeof vi.fn>, shapeMassProperties?: unknown[]) {
     const setMassProperties = vi.fn();

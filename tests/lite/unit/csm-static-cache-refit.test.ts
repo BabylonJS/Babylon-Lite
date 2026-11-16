@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as CsmShadowTaskHooks from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
+
 const taskMocks = vi.hoisted(() => ({
     record: vi.fn(),
     dispose: vi.fn(),
@@ -21,7 +23,8 @@ vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
         camera.viewProjection = viewProjection;
     },
 }));
-vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof CsmShadowTaskHooks>()),
     csmCameraAspect: () => 1,
     csmWorldBiasClipOffset: () => 0,
     _biasViewProjection: () => {},
@@ -54,6 +57,10 @@ vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => (
         record: taskMocks.record,
         execute: vi.fn(() => 0),
         dispose: taskMocks.dispose,
+        _renderables: [],
+        _opaqueBindings: [],
+        _directBindings: [],
+        _transparentBindings: [],
         _lastVersion: -1,
         _ob: [],
     }),
@@ -81,6 +88,14 @@ function dynamicTask(execute: () => number) {
         _ob: [],
         _lastVersion: 0,
         _lastVis: 0,
+    };
+}
+
+/** The cache's owned per-cascade copies of the matrices it publishes to the shadow cameras. */
+function publishedMatrices(cascadeCount: number) {
+    return {
+        _publishedViews: Array.from({ length: cascadeCount }, () => new Float32Array(16)),
+        _publishedTransforms: Array.from({ length: cascadeCount }, () => new Float32Array(16)),
     };
 }
 
@@ -118,6 +133,7 @@ function makeHarness() {
         _cachedContentVersion: -1,
         _lastCamVersion: -1,
         _lastCamAspect: -1,
+        ...publishedMatrices(1),
     };
     const engine = {
         _device: { queue: { writeBuffer: vi.fn() } },
@@ -175,7 +191,7 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
             expect(taskMocks.record).toHaveBeenCalledTimes(2);
         });
 
-        it("clears reused dynamic bundles when a caster-list generation changes", () => {
+        it("clears reused dynamic bundles when the caster list changes, not for a new array of the same casters", () => {
             const engine = {
                 _device: {
                     createTexture: vi.fn(() => ({ createView: vi.fn(), destroy: vi.fn() })),
@@ -187,10 +203,15 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
                 _csmCache: { a: 0.1, i: 0 },
             };
             const config = { _numCascades: 1, _mapSize: 4 };
-            const firstCasters: never[] = [];
-            const state = ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, firstCasters, null) as any;
+            const caster = { worldMatrixVersion: 1, thinInstances: null };
+            const state = ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [caster] as any, null) as any;
             state._tasks[0]._ob.push({});
             state._tasks[0]._lastVersion = 1;
+
+            ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [caster] as any, state);
+
+            expect(state._tasks[0]._lastVersion).toBe(1);
+            expect(state._tasks[0]._ob).toHaveLength(1);
 
             ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [], state);
 
@@ -214,6 +235,16 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
     it("still redraws the static layer when a demoted caster MOVES", () => {
         const before = h.staticExecute.mock.calls.length;
         h.caster.worldMatrixVersion++;
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+    });
+
+    it("refits when the active camera is REPLACED by one with the same change key", () => {
+        const before = h.staticExecute.mock.calls.length;
+        h.scene.camera = { key: h.scene.camera.key };
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+
         h.render();
         expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
     });
@@ -241,6 +272,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
             _cachedContentVersion: -1,
             _lastCamVersion: -1,
             _lastCamAspect: -1,
+            ...publishedMatrices(3),
         };
         const copy = vi.fn();
         const engine = {
@@ -356,6 +388,7 @@ describe("renderCsmShadowMapCached spread static refit: a drift refit during the
             _cachedContentVersion: -1,
             _lastCamVersion: -1,
             _lastCamAspect: -1,
+            ...publishedMatrices(3),
         };
         const engine = { _device: { queue: { writeBuffer: vi.fn() } }, _currentEncoder: { copyTextureToTexture: vi.fn() } };
         const sg = { _light: { direction: { x: 0, y: -1, z: 0 }, worldMatrix: lightWorldMatrix() }, _shadowUBO: {}, _version: 0, _depthTexture: {} };

@@ -29,7 +29,12 @@ export class Observable<T> {
     }
 
     public addOnce(callback: ObserverCallback<T>, mask = -1): ObserverCallback<T> {
+        let consumed = false;
         const wrapper: ObserverCallback<T> = (eventData) => {
+            if (consumed) {
+                return;
+            }
+            consumed = true;
             this.removeCallback(wrapper);
             callback(eventData);
         };
@@ -61,6 +66,31 @@ export class Observable<T> {
                 observer.callback(eventData as T);
             }
         }
+    }
+
+    /** @internal Notify every matching observer and capture the first thrown value. */
+    public _notifyObserversSafely(eventData?: T, mask = -1): { hasError: boolean; error: unknown } {
+        if (this.notifyIfTriggered) {
+            this._hasNotified = true;
+            this._lastNotifiedValue = eventData;
+            this._lastNotifiedMask = mask;
+        }
+        let hasError = false;
+        let firstError: unknown;
+        for (const observer of this._observers.slice()) {
+            if ((observer.mask & mask) === 0) {
+                continue;
+            }
+            try {
+                observer.callback(eventData as T);
+            } catch (error) {
+                if (!hasError) {
+                    hasError = true;
+                    firstError = error;
+                }
+            }
+        }
+        return { hasError, error: firstError };
     }
 
     public hasObservers(): boolean {

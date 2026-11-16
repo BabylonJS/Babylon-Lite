@@ -12,7 +12,7 @@
 
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     billboardBlendAdditive,
     createArcRotateCamera,
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     for (const bb of SCENE98_BILLBOARDS) {
         addBillboardSpriteIndex(billboards, { position: bb.position, sizeWorld: bb.sizeWorld, frame: bb.frame, color: bb.color });
     }
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     await registerScene(scene);
     await startEngine(engine);

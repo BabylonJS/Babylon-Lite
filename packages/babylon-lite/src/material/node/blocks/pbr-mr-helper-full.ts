@@ -22,6 +22,7 @@
 import type { NodePbrMrHelperRequest } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 function ccDirectBlock(useClearcoat: boolean, useCcTint: boolean): string {
     if (!useClearcoat) {
@@ -160,6 +161,23 @@ let finalRefraction = finalRefractionRaw;`;
 }
 
 export function buildPbrMrHelperFull(request: NodePbrMrHelperRequest): string {
+    if (_rightHanded !== null) {
+        // Like Babylon.js's REFLECTIONMAP_OPPOSITEZ, negate Z after every hand-inlined environment Y rotation.
+        return HELPER_WGSL(
+            request.useEnv,
+            request.useClearcoat,
+            request.useSheen,
+            request.useRefraction,
+            request.useSubsurface,
+            request.useAnisotropy,
+            request.useIridescence,
+            request.useShAlbedoScaling,
+            request.useCcBump,
+            request.useCcTint,
+            request.useSpecularAA,
+            request.remapClearcoatF0
+        ).replace(/-(\w+)\.x\s*\*\s*sinA\s*\+\s*\1\.z\s*\*\s*cosA/g, "$1.x*sinA-$1.z*cosA");
+    }
     return HELPER_WGSL(
         request.useEnv,
         request.useClearcoat,

@@ -3,11 +3,11 @@
  *
  * Loads Halo_Believe.splat with retained splat data, shifts the first
  * 30 000 splats down on Y, calls updateData(), and compares the render
- * against a Babylon.js reference captured from babylon-ref-scene121.html.
+ * against the committed Babylon.js golden reference.
  */
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(121);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene121-gs-update-data");
@@ -18,12 +18,9 @@ test.skip(!!sceneConfig.skipParity, "Scene 121 skipped via skipParity in scene-c
 test("Scene 121 — Gaussian Splatting updateData matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
 
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 121, timeout: 150_000, settleMs: 800 });
-
     await page.goto("/scene121.html");
-    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
-    await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
+    await waitForCanvasReady(page, { timeout: 150_000, label: "Lite scene 121" });
+    await expect(page.locator("#loader-overlay")).toHaveCount(0, { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");

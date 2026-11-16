@@ -2,6 +2,7 @@ import {
     addToScene,
     createArcRotateCamera,
     createEngine,
+    createOverlayScene,
     createSceneContext,
     loadEnvironment,
     loadGltf,
@@ -82,9 +83,9 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const left = createSceneContext(engine);
-    const right = createSceneContext(engine);
+    // The right viewport composites over the left scene; a second ordinary scene would clear the whole canvas.
+    const right = createOverlayScene(left);
     left.clearColor = { r: 0, g: 0, b: 0, a: 1 };
-    right.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
     left.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
     left.camera.nearPlane = 0.1;

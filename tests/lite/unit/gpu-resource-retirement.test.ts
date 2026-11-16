@@ -41,7 +41,6 @@ function makeThinInstances(): ThinInstanceData {
         _capacity: 2,
         _version: 2,
         _gpuBuffer: null,
-        _gpuBufferStorage: false,
         _gpuVersion: 1,
         _dirtyMin: 0,
         _dirtyMax: 2,

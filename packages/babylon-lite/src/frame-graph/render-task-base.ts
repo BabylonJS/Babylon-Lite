@@ -41,13 +41,14 @@ import type { Material } from "../material/material.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
+import { getViewMatrix, _applyCameraViewport, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { ensureSceneLightState, refreshSceneLightsUBO } from "../render/scene-lights-ubo.js";
 import type { Task } from "./task.js";
+import { drawBindingLifecycle } from "../render/draw-binding-lifecycle.js";
 
 /** Configuration for `createRenderTask`: render target, clear state, optional camera override, and transmission settings. */
 export interface RenderTaskConfig {
@@ -139,7 +140,7 @@ export interface RenderTask extends Task {
     /** @internal Scene version captured before building the active bindings, not when drawing them. */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal Optional feature-owned update work for the active generation. */
     _batchState?: DrawBatchState;
     /** @internal */
@@ -177,8 +178,12 @@ export interface RenderTask extends Task {
     _updateContext: MutableDrawUpdateContext;
     /** @internal Optional explicit mesh-population strategy, installed by addMeshToTask. */
     _addMesh?(mesh: Mesh, opts?: { material?: Material }): void;
+    /** @internal Atomic batch population strategy paired with _addMesh. */
+    _addMeshes?(meshes: readonly Mesh[], opts?: { material?: Material }): void;
     /** @internal Optional refresh source-list removal hook. */
     _removeMesh?(mesh: object): void;
+    /** @internal Optional set-based refresh source-list removal hook. */
+    _removeMeshes?(meshes: readonly object[], members: ReadonlySet<object>): void;
     /** @internal */
     _pendingMeshes?: TaskMeshRequest[];
 }
@@ -207,7 +212,7 @@ export interface RenderTaskBindingGeneration {
     /** @internal */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal */
     _batchState?: DrawBatchState;
 }
@@ -222,6 +227,7 @@ interface MutableDrawUpdateContext {
     targetWidth: number;
     targetHeight: number;
     _camera?: Camera | null;
+    _projectionAspect?: number;
 }
 
 function createBindingGeneration(renderables: Renderable[], version: number): RenderTaskBindingGeneration {
@@ -232,8 +238,6 @@ function createBindingGeneration(renderables: Renderable[], version: number): Re
         _transparentBindings: [],
         _ob: [],
         _lastVersion: version,
-        _lastVis: 0,
-        _batchState: undefined,
     };
 }
 
@@ -246,20 +250,19 @@ export type RenderTaskBase = Omit<RenderTask, "_pendingMeshes" | "_prepareTaskMe
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time.
  *  @internal Automatic tasks borrow renderables and do not expose explicit mesh population. */
 export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTaskBase {
-    const sc = scene as SceneContext;
     config.clr ??= true;
     const desc = config.rt._descriptor;
+    const depthDesc = config.depth?._descriptor;
     // Render upright: row 0 of the GPU texture is the top of the scene. Every
     // RT (offscreen or swapchain) renders without a projection Y-flip; pipelines
     // use the default ccw front face; downstream samplers see upright pixels.
     const targetSignature = {
         _colorFormat: desc.format,
-        _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
-        _depthCompare: desc._depthCompare,
-        _sampleCount: desc.samples ?? 1,
+        _depthStencilFormat: depthDesc?.dFormat ?? desc.dFormat,
+        _depthCompare: desc.depthCompare ?? depthDesc?.depthCompare,
+        _sampleCount: desc.samples,
     };
 
-    const sceneUBO = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
     const task: RenderTaskBase = {
@@ -268,16 +271,15 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _config: config,
         _ownsTargets: !config.sharedRt,
         engine: engine,
-        scene: sc,
+        scene,
         _passes: [],
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _sceneUBO: sceneUBO,
-        _sceneBG: undefined,
-        _lightsUBO: undefined,
+        _sceneUBO: createEmptyUniformBuffer(engine, SCENE_UBO_BYTES),
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
+        _getOutputInfo: () => (task.enabled === false ? undefined : { colorTexture: config.rt, resolveTexture: config.rst }),
         _updateContext: updateContext,
         record(): void {
             if (task._disposed) {
@@ -286,7 +288,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
             if (task._recordExplicit) {
                 task._recordExplicit(task, true);
             } else {
-                _buildBindings(task, config.autoMirror !== false ? sc._renderables.slice() : task._renderables, true);
+                _buildBindings(task, config.autoMirror !== false ? scene._renderables.slice() : task._renderables, true);
             }
         },
         execute(): number {
@@ -297,6 +299,9 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
                 return;
             }
             task._disposed = true;
+            if (drawBindingLifecycle) {
+                drawBindingLifecycle._retire([task._opaqueBindings, task._directBindings, task._transparentBindings]);
+            }
             const pending = (task as RenderTask)._pendingMeshes;
             if (pending) {
                 pending.length = 0;
@@ -326,27 +331,47 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
 
 /** Remove a mesh from this task's renderable + binding lists. Idempotent. */
 export function _removeMeshFromRenderTask(task: RenderTaskBase, mesh: object): void {
+    _removeMeshesFromRenderTask(task, [mesh]);
+}
+
+/** @internal Evict a mesh set with one scan of each active list and one batch-state selection. */
+export function _removeMeshesFromRenderTask(task: RenderTaskBase, meshes: readonly object[], members = new Set(meshes)): void {
     // Not a renderable-bearing task (e.g. a post/effect task that also carries `_config`): nothing to
     // remove. Guard keeps callers that scan all frame-graph tasks (removeFromScene) shape-safe.
     if (!task._renderables) {
         return;
     }
-    task._removeMesh?.(mesh);
-    let removed = false;
-    for (let i = task._renderables.length - 1; i >= 0; i--) {
-        if (task._renderables[i]!.mesh === mesh) {
-            task._retireRenderable?.(task.engine, task._renderables[i]!);
-            task._renderables.splice(i, 1);
-            removed = true;
+    if (task._removeMeshes) {
+        task._removeMeshes(meshes, members);
+    } else {
+        for (const mesh of meshes) {
+            task._removeMesh?.(mesh);
         }
     }
+    let removed = false;
+    let kept = 0;
+    for (const renderable of task._renderables) {
+        if (renderable.mesh && members.has(renderable.mesh)) {
+            task._retireRenderable?.(task.engine, renderable);
+            removed = true;
+        } else {
+            task._renderables[kept++] = renderable;
+        }
+    }
+    task._renderables.length = kept;
     for (const arr of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
-        for (let i = arr.length - 1; i >= 0; i--) {
-            if (arr[i]!.renderable.mesh === mesh) {
-                arr.splice(i, 1);
+        kept = 0;
+        for (const binding of arr) {
+            if (binding.renderable.mesh && members.has(binding.renderable.mesh)) {
+                if (drawBindingLifecycle) {
+                    drawBindingLifecycle._retire([[binding]]);
+                }
                 removed = true;
+            } else {
+                arr[kept++] = binding;
             }
         }
+        arr.length = kept;
     }
     if (removed) {
         const previous = task._batchState;
@@ -394,15 +419,16 @@ export function _buildBindings(
     const previousBatchState = task._batchState;
     const generation = createBindingGeneration(renderables, task.scene._renderableVersion);
     if (record) {
-        if (task._ownsTargets) {
-            buildRenderTarget(rt, task.engine);
-            if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
-                buildRenderTarget(config.rst, task.engine);
+        const buildTarget = (target: RenderTarget | undefined, always?: boolean): void => {
+            if (target && (always || task._ownsTargets || target._eager)) {
+                buildRenderTarget(target, task.engine);
             }
+        };
+        buildTarget(rt);
+        if (rt._descriptor.samples > 1) {
+            buildTarget(config.rst);
         }
-        if (config.depth && !config.depth._eager) {
-            buildRenderTarget(config.depth, task.engine);
-        }
+        buildTarget(config.depth, true);
     }
     const { _opaqueBindings: opaque, _directBindings: direct, _transparentBindings: transparent } = generation;
     try {
@@ -423,6 +449,12 @@ export function _buildBindings(
             refreshTaskSceneBindGroup(task, task.engine, false);
         }
     } catch (error) {
+        if (drawBindingLifecycle) {
+            drawBindingLifecycle._retire(
+                [generation._opaqueBindings, generation._directBindings, generation._transparentBindings],
+                [task._opaqueBindings, task._directBindings, task._transparentBindings]
+            );
+        }
         generation._batchState?._release(undefined, retainedOnFailure ?? [previousBatchState]);
         throw error;
     }
@@ -432,6 +464,9 @@ export function _buildBindings(
         task._updateContext.targetHeight = rt._height;
     }
     if (publish) {
+        if (drawBindingLifecycle) {
+            drawBindingLifecycle._retire([task._opaqueBindings, task._directBindings, task._transparentBindings], [opaque, direct, transparent]);
+        }
         Object.assign(task, generation);
         previousBatchState?._release(task.engine, [generation._batchState]);
     }
@@ -455,7 +490,7 @@ function buildRenderPassDescriptor(task: RenderTaskBase, rt: RenderTarget): void
         const loadOp = (config.depth ? depthSrc._eager : config.depthClear === false) ? "load" : "clear";
         depthAttachment = {
             view: depthView,
-            depthClearValue: dd._depthClearValue ?? 0,
+            depthClearValue: dd.depthClearValue ?? 0,
             depthLoadOp: loadOp,
             depthStoreOp: "store",
         };
@@ -550,17 +585,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
     const sceneBG = task._sceneBG!;
 
     const camera = cfg.cam ?? scene.camera;
-    const v = camera?.viewport;
-    if (v) {
-        const rw = rt._width;
-        const rh = rt._height;
-        const x = Math.floor(v.x * rw);
-        const y = Math.floor((1 - v.y - v.height) * rh);
-        const w = Math.ceil((v.x + v.width) * rw) - x;
-        const h = Math.ceil((1 - v.y) * rh) - y;
-        pass.setViewport(x, y, w, h, 0, 1);
-        pass.setScissorRect(x, y, w, h);
-    }
+    _applyCameraViewport(pass, camera, rt._width, rt._height);
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, sceneBG);
 
@@ -576,7 +601,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
             // carries no depthStencilFormat of its own. The bundle encoder's
             // attachment state must match those pipelines exactly.
             depthStencilFormat: task._targetSignature._depthStencilFormat,
-            sampleCount: desc.samples ?? 1,
+            sampleCount: desc.samples,
         });
         be.setBindGroup(0, sceneBG);
         drawList(be, opaqueBindings, eng);
@@ -588,7 +613,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
     // executeBundles invalidates pass bind-group state — rebind group 0 before further draws.
     pass.setBindGroup(0, sceneBG);
     draws += drawList(pass, task._directBindings, eng);
-    draws += drawList(pass, task._transparentBindings, eng);
+    draws += drawList(pass, task._transparentBindings, eng, true);
     return draws;
 }
 
@@ -622,6 +647,9 @@ export function _writePassSceneUBO(task: RenderTaskBase, eng: EngineContext, sce
     const v = camera.viewport;
     const rt = task._config.rt;
     const aspect = (task._config.cs ? eng.canvas.width / eng.canvas.height : rt._width / rt._height) * (v ? v.width / v.height : 1);
+    if (drawBindingLifecycle) {
+        drawBindingLifecycle._setProjectionAspect(task._updateContext, aspect);
+    }
     const fog = scene.fog;
     const img = scene.imageProcessing;
     // Change key = camera transform version + projection revision, the latter covering both
@@ -662,13 +690,15 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
     }
 }
 
-/** @internal Iterate DrawBindings, deduping setPipeline. */
-export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
+/** @internal Iterate DrawBindings, deduping setPipeline.
+ *  Pass `transparent` only for transparent lists: shadow bindings are never
+ *  transparent, so their opaque/direct lists ignore colour-only draw omission. */
+export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext, transparent?: boolean): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {
         const mesh = b.renderable.mesh;
-        if (mesh && mesh.visible === false) {
+        if (mesh && (mesh.visible === false || (transparent && mesh._skipColorDraw))) {
             continue;
         }
         if (b.pipeline !== lp) {

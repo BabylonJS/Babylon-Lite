@@ -21,7 +21,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { XrInputManager } from "./xr-input.js";
-import { setXrPoseToLeftHanded } from "./xr-coordinates.js";
+import { setXrPoseToWorld } from "./xr-coordinates.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import type { XrHandedness } from "./xr-support.js";
 import type { HandMeshOptions, LoadedHandMesh } from "./xr-hand-mesh.js";
@@ -31,6 +31,7 @@ import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
+import type { _WritableVisibility } from "../scene/scene-node.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -135,7 +136,7 @@ function makeDefaultFactory(color: readonly [number, number, number]): XrHandJoi
         mesh.material = mat as unknown as Mesh["material"];
         mesh.pickable = false;
         mesh.receiveShadows = false;
-        mesh.visible = false;
+        (mesh as _WritableVisibility).visible = false;
         return mesh;
     };
 }
@@ -296,7 +297,7 @@ export function updateXrHandTracking(handTracking: XrHandTracking, input: XrInpu
                 continue;
             }
             const d = (pose.radius ?? FALLBACK_RADIUS) * 2 * handTracking._jointScale;
-            setXrPoseToLeftHanded(mesh, pose.transform);
+            setXrPoseToWorld(mesh, pose.transform);
             mesh.scaling.set(d, d, d);
             setSubtreeVisible(mesh, true);
         }

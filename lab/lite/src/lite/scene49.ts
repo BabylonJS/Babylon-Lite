@@ -217,7 +217,7 @@ async function main(): Promise<void> {
 
     // Interactive rotation gizmo — created lazily on first cylinder click so the static
     // capture frame contains no gizmo. Both cylinders are attachable.
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene);
     await registerUtilityLayer(utilityLayer);
     const picker = createGpuPicker(scene);
     let rotationGizmo: RotationGizmo | null = null;

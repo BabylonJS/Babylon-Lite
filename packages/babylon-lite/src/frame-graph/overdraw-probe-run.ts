@@ -173,7 +173,7 @@ export async function _measureRenderTaskOverdrawCost(engine: EngineContext, task
         usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
     const hasStencil = depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8";
-    const depthClearValue = depthTarget._descriptor._depthClearValue ?? 0;
+    const depthClearValue = depthTarget._descriptor.depthClearValue ?? 0;
 
     // 6 timestamps per repeat: A, B, and C begin/end pairs.
     const querySet = device.createQuerySet({ type: "timestamp", count: repeats * 6 });

@@ -1,20 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, enableMirroredMeshesMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
-    createEngineMock: vi.fn(),
-    enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
-    registerSceneMock: vi.fn<() => Promise<void>>(),
-    startEngineMock: vi.fn<() => Promise<void>>(),
-}));
+const { createEngineMock, disposeEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock, stopEngineMock } =
+    vi.hoisted(() => ({
+        createEngineMock: vi.fn(),
+        disposeEngineMock: vi.fn(),
+        enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+        enableRectAreaLightsMock: vi.fn<() => Promise<void>>(),
+        onEngineDeviceLostMock: vi.fn(),
+        registerSceneMock: vi.fn<() => Promise<void>>(),
+        startEngineMock: vi.fn<() => Promise<void>>(),
+        stopEngineMock: vi.fn(),
+    }));
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
         createEngine: createEngineMock,
+        disposeEngine: disposeEngineMock,
         enableMirroredMeshes: enableMirroredMeshesMock,
+        enableRectAreaLights: enableRectAreaLightsMock,
+        onEngineDeviceLost: onEngineDeviceLostMock,
         registerScene: registerSceneMock,
         startEngine: startEngineMock,
+        stopEngine: stopEngineMock,
     };
 });
 
@@ -28,8 +37,20 @@ interface TestEngine {
     _lateWork: Array<() => Promise<void>>;
     _scenes: object[];
     _lite: EngineContext;
+    _initialized: boolean;
+    _disposed: boolean;
+    _headless: boolean;
+    _rafId: number | null;
+    _sceneMutationPauseCount: number;
+    _shouldResumeAfterSceneMutation: boolean;
+    _renderLoopStopRevision: number;
+    _sceneMutationPauseRevision: number;
     _start(): Promise<void>;
     _registerLateWork(work: () => Promise<void>): void;
+    _pauseForSceneMutation(): void;
+    _resumeAfterSceneMutation(): Promise<void>;
+    stopRenderLoop(): void;
+    dispose(): void;
 }
 
 interface StartupScene {
@@ -45,6 +66,14 @@ function makeEngine(): TestEngine {
     engine._lateWork = [];
     engine._scenes = [];
     engine._lite = {} as EngineContext;
+    engine._initialized = false;
+    engine._disposed = false;
+    engine._headless = false;
+    engine._rafId = null;
+    engine._sceneMutationPauseCount = 0;
+    engine._shouldResumeAfterSceneMutation = false;
+    engine._renderLoopStopRevision = 0;
+    engine._sceneMutationPauseRevision = 0;
     return engine;
 }
 
@@ -52,11 +81,17 @@ describe("compat engine startup ordering", () => {
     beforeEach(() => {
         createEngineMock.mockReset();
         createEngineMock.mockResolvedValue({});
+        disposeEngineMock.mockReset();
         enableMirroredMeshesMock.mockReset();
         enableMirroredMeshesMock.mockResolvedValue();
+        enableRectAreaLightsMock.mockReset();
+        enableRectAreaLightsMock.mockResolvedValue();
+        onEngineDeviceLostMock.mockReset();
+        onEngineDeviceLostMock.mockReturnValue(() => undefined);
         registerSceneMock.mockReset();
         registerSceneMock.mockResolvedValue();
         startEngineMock.mockReset();
+        stopEngineMock.mockReset();
     });
 
     it("translates disabled antialiasing into a single-sample Lite surface", async () => {
@@ -68,6 +103,10 @@ describe("compat engine startup ordering", () => {
 
         const objectEngine = new Engine(canvas, { antialias: false, msaaSamples: 4 });
         await objectEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+
+        const optionsEngine = new Engine(canvas, undefined, { antialias: false, msaaSamples: 4 });
+        await optionsEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
@@ -81,6 +120,76 @@ describe("compat engine startup ordering", () => {
         const configuredEngine = new Engine(canvas, { antialias: true, msaaSamples: 1 });
         await configuredEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("accepts useReverseDepthBuffer in Babylon.js engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+        const engine = new Engine(canvas, true, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
+    it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
+        const engine = new WebGPUEngine(canvas, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
+    it("forwards Lite device loss to the BJS context-loss observable", async () => {
+        const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
+        const observer = vi.fn();
+        engine.onContextLostObservable.add(observer);
+        await engine.initAsync();
+
+        const callback = onEngineDeviceLostMock.mock.calls[0]![1] as () => void;
+        callback();
+
+        expect(observer).toHaveBeenCalledWith(engine);
+    });
+
+    it("releases an engine context acquired after disposal and keeps cleanup idempotent", async () => {
+        let finishCreate!: (context: EngineContext) => void;
+        createEngineMock.mockImplementationOnce(
+            () =>
+                new Promise<EngineContext>((resolve) => {
+                    finishCreate = resolve;
+                })
+        );
+        const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
+        const context = {} as EngineContext;
+
+        const initialization = engine.initAsync();
+        engine.dispose();
+        finishCreate(context);
+
+        await expect(initialization).rejects.toThrow("disposed during initialization");
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledWith(context);
+        expect(onEngineDeviceLostMock).not.toHaveBeenCalled();
+
+        engine.dispose();
+        await expect(engine.initAsync()).rejects.toThrow("has been disposed");
+        expect(createEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+    });
+
+    it("rejects BJS canvas presentation options that require Lite's hot surface path", () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        expect(() => new WebGPUEngine(canvas, { canvasToneMapping: { mode: "extended" } })).toThrow(/surface configuration hot path/);
+        expect(() => new WebGPUEngine(canvas, { canvasColorSpace: "display-p3" })).toThrow(/surface configuration hot path/);
+    });
+
+    it("exposes maxFramesInFlight while rejecting unsupported nonzero scheduling", () => {
+        const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
+        const engine = new WebGPUEngine(canvas);
+        expect(engine.maxFramesInFlight).toBe(0);
+        expect(() => (engine.maxFramesInFlight = 2)).toThrow(/scheduling and lifetime policy/);
     });
 
     it("starts the main engine before awaiting utility-layer work", async () => {
@@ -108,6 +217,7 @@ describe("compat engine startup ordering", () => {
             _buildShadowGenerators: () => undefined,
             _parseNodeMaterials: () => Promise.resolve(),
             _awaitPendingTextures: () => Promise.resolve(),
+            _ensureRegisteredMaterialsRenderable: () => undefined,
             _bakeGroundUvs: () => undefined,
             _flushPendingAdds: () => undefined,
             _buildMorphTargets: () => undefined,
@@ -115,7 +225,7 @@ describe("compat engine startup ordering", () => {
             _enableMaterialPlugins: () => Promise.resolve(),
             _loadPendingEnvironment: () => Promise.resolve(),
             _hasShadows: () => false,
-            _lite: {},
+            _lite: { lights: [] },
             _reconcilePendingMaterialPlugins: () => {
                 order.push("plugins");
                 return Promise.resolve();
@@ -138,6 +248,7 @@ describe("compat engine startup ordering", () => {
             _buildShadowGenerators: () => undefined,
             _parseNodeMaterials: () => Promise.resolve(),
             _awaitPendingTextures: () => Promise.resolve(),
+            _ensureRegisteredMaterialsRenderable: () => undefined,
             _bakeGroundUvs: () => undefined,
             _flushPendingAdds: () => undefined,
             _buildMorphTargets: () => undefined,
@@ -145,7 +256,7 @@ describe("compat engine startup ordering", () => {
             _enableMaterialPlugins: () => Promise.resolve(),
             _loadPendingEnvironment: () => Promise.resolve(),
             _hasShadows: () => false,
-            _lite: {},
+            _lite: { lights: [] },
         };
         let sceneADrains = 0;
         const sceneA: StartupScene & typeof startupSceneDefaults = {
@@ -233,5 +344,56 @@ describe("compat engine startup ordering", () => {
 
         expect(error).toHaveBeenCalledWith(expect.stringContaining("post-startup sync blew up"));
         error.mockRestore();
+    });
+
+    it("holds nested scene mutations under one render-loop pause", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+        startEngineMock.mockResolvedValue();
+
+        engine._pauseForSceneMutation();
+        engine._pauseForSceneMutation();
+        await engine._resumeAfterSceneMutation();
+
+        expect(stopEngineMock).toHaveBeenCalledOnce();
+        expect(startEngineMock).not.toHaveBeenCalled();
+
+        await engine._resumeAfterSceneMutation();
+
+        expect(startEngineMock).toHaveBeenCalledOnce();
+        expect(startEngineMock).toHaveBeenCalledWith(engine._lite);
+    });
+
+    it("does not resume a scene mutation pause after an explicit stopRenderLoop", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+
+        engine._pauseForSceneMutation();
+        engine.stopRenderLoop();
+        await engine._resumeAfterSceneMutation();
+
+        expect(stopEngineMock).toHaveBeenCalledTimes(2);
+        expect(startEngineMock).not.toHaveBeenCalled();
+    });
+
+    it("does not resume a pending scene mutation after engine disposal, including rejected work", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+        let rejectPreparation!: (error: Error) => void;
+        const preparation = new Promise<void>((_resolve, reject) => {
+            rejectPreparation = reject;
+        }).finally(() => engine._resumeAfterSceneMutation());
+
+        engine._pauseForSceneMutation();
+        engine.dispose();
+        rejectPreparation(new Error("area-light preparation failed"));
+
+        await expect(preparation).rejects.toThrow("area-light preparation failed");
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledWith(engine._lite);
+        expect(startEngineMock).not.toHaveBeenCalled();
     });
 });

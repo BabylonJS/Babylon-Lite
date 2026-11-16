@@ -11,8 +11,26 @@
 import type { ShaderMaterial } from "../material/shader/shader-material.js";
 import { createShaderMaterial } from "../material/shader/shader-material.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
-const VERTEX = wgsl`
+const VERTEX = _rightHanded
+    ? wgsl`
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) viewZ: f32,
+};
+@vertex
+fn mainVertex(input: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let worldPos = shaderSystem.world * vec4<f32>(input.position, 1.0);
+    let viewPos  = shaderSystem.view * worldPos;
+    out.position = shaderSystem.projection * viewPos;
+    // Right-handed view space: negative z is in front of the camera.
+    out.viewZ = -viewPos.z;
+    return out;
+}
+`
+    : wgsl`
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) viewZ: f32,

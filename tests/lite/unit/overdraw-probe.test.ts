@@ -122,7 +122,7 @@ describe("render-task overdraw probe", () => {
             _height: 32,
         } as RenderTarget;
         const depthTarget = {
-            _descriptor: { dFormat: "depth32float", _depthClearValue: 1, samples: 1, size: { width: 64, height: 32 } },
+            _descriptor: { dFormat: "depth32float", depthClearValue: 1, samples: 1, size: { width: 64, height: 32 } },
         } as RenderTarget;
         const far = makeBinding("far", 5, drawOrders);
         const hidden = makeBinding("hidden", 4, drawOrders, false);

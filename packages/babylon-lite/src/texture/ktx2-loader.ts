@@ -56,12 +56,45 @@ export interface Ktx2Decoder {
 interface Ktx2DecoderModule {
     KTX2Decoder: new () => Ktx2Decoder;
     MSCTranscoder: { UseFromWorkerThread: boolean };
-    WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean };
+    WASMMemoryManager: Ktx2WasmLoader;
 }
 
-// Public URL of the KTX2/Basis decoder script (default: the Babylon CDN). Override via
+/** The decoder's WASM fetcher. `LoadWASM` is absent on decoder builds that predate it. */
+interface Ktx2WasmLoader {
+    LoadBinariesFromCurrentThread: boolean;
+    LoadWASM?: (path: string) => Promise<ArrayBuffer>;
+}
+
+/** Attempts made by a transcoder WASM fetch before its failure is final. */
+const KTX2_WASM_LOAD_ATTEMPTS = 3;
+
+/** Retry a failed transcoder WASM fetch before the decoder sees it. Each transcoder caches the FIRST promise its
+ *  `LoadWASM` call returns, rejected or not, so a single network hiccup would otherwise fail every later KTX2
+ *  texture of the page. Idempotent: an already-wrapped loader is left alone. The decoding worker
+ *  (`_ktx2WorkerMain`) carries its own copy of this wrapper because its body cannot import. */
+function retryKtx2WasmLoads(loader: Ktx2WasmLoader): void {
+    const load = loader.LoadWASM;
+    if (typeof load !== "function" || (load as { _ktx2Retry?: true })._ktx2Retry) {
+        return;
+    }
+    const retrying = async (path: string): Promise<ArrayBuffer> => {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                return await load.call(loader, path);
+            } catch (error) {
+                if (attempt >= KTX2_WASM_LOAD_ATTEMPTS) {
+                    throw error;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+            }
+        }
+    };
+    loader.LoadWASM = Object.assign(retrying, { _ktx2Retry: true as const });
+}
+
+// Pin the default decoder to a published release with matching transcoder JS/WASM assets. Override via
 // `setKtx2DecoderUrl()` to self-host the decoder (e.g. to avoid the cross-origin CDN dependency).
-let _ktx2DecoderUrl = "https://cdn.babylonjs.com/babylon.ktx2Decoder.js";
+let _ktx2DecoderUrl = "https://cdn.babylonjs.com/v9.32.1/babylon.ktx2Decoder.js";
 // Optional overrides for the WASM/JS modules the decoder pulls after it loads (keyed by the property
 // name on the matching KTX2DECODER transcoder, e.g. MSCTranscoder→{JSModuleURL,WASMModuleURL},
 // ZSTDDecoder→{WASMModuleURL}, LiteTranscoder_*→{WASMModuleURL}). Needed to FULLY self-host — the
@@ -75,6 +108,18 @@ export function setKtx2DecoderUrl(url: string, wasmUrls?: Record<string, Record<
     _ktx2WasmUrls = wasmUrls ?? null;
 }
 let _ktx2DecoderPromise: Promise<Ktx2Decoder> | null = null;
+// Decoder source installed by an opt-in decoding mode (`enableKtx2WorkerDecoding`); null = the main-thread decoder.
+let _ktx2DecoderSource: (() => Promise<Ktx2Decoder>) | null = null;
+
+/** @internal Install (or clear, with null) the decoder source `loadKtx2Decoder` hands out instead of the main-thread decoder. */
+export function _setKtx2DecoderSource(source: (() => Promise<Ktx2Decoder>) | null): void {
+    _ktx2DecoderSource = source;
+}
+
+/** @internal The decoder script URL and transcoder module overrides set by `setKtx2DecoderUrl`. */
+export function _getKtx2DecoderUrls(): { url: string; wasmUrls: Record<string, Record<string, string>> | null } {
+    return { url: _ktx2DecoderUrl, wasmUrls: _ktx2WasmUrls };
+}
 
 const GL_RGBA8 = 0x8058;
 const GL_R8 = 0x8229;
@@ -101,8 +146,12 @@ function deviceKtx2Caps(engine: EngineContext): Ktx2DecoderCaps {
     };
 }
 
-/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl`. */
+/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl` — or hand out the
+ *  decoder of an enabled opt-in mode (`enableKtx2WorkerDecoding`). */
 export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
+    if (_ktx2DecoderSource) {
+        return _ktx2DecoderSource();
+    }
     if (_ktx2DecoderPromise) {
         return _ktx2DecoderPromise;
     }
@@ -116,6 +165,7 @@ export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
             }
             mod.MSCTranscoder.UseFromWorkerThread = false;
             mod.WASMMemoryManager.LoadBinariesFromCurrentThread = true;
+            retryKtx2WasmLoads(mod.WASMMemoryManager);
             // Redirect the decoder's WASM/JS module fetches to self-hosted copies, if configured. Each key
             // names a transcoder on the module (MSCTranscoder, ZSTDDecoder, LiteTranscoder_*); set props
             // that exist (JSModuleURL/WASMModuleURL) and ignore the rest, so it survives decoder updates.

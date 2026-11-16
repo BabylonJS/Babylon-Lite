@@ -15,13 +15,25 @@
  * transforms set in the meantime, then adopting the loaded Lite node.
  */
 
-import { loadSplat, loadSOG, loadSPZ, bakeCurrentTransformIntoVertices, createTransformNode } from "babylon-lite";
-import type { GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, SceneNode } from "babylon-lite";
+import {
+    loadSplat,
+    loadSOG,
+    loadSPZ,
+    bakeCurrentTransformIntoVertices,
+    createTransformNode,
+    setParent,
+    _getGaussianPointSplattingPackedShBytesPerSplat,
+    _hasGaussianPointSplattingProjectedDepth,
+    disableGaussianPointSplatting,
+    enableGaussianPointSplatting,
+} from "babylon-lite";
+import type { GaussianPointSplatting as LiteGaussianPointSplatting, GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, Mat4, SceneNode } from "babylon-lite";
 
 import { TransformNode } from "./meshes.js";
 import type { Scene } from "../scene/scene.js";
 import type { Vector3 } from "../math/vector.js";
 import { liteBackedVector3 } from "../math/vector.js";
+import type { Matrix } from "../math/matrix.js";
 
 /**
  * Babylon.js `ISafeOrbitCameraLimits` — safe-orbit camera limits embedded in a Gaussian
@@ -35,6 +47,20 @@ export interface ISafeOrbitCameraLimits {
     elevationMinMax?: [number, number];
 }
 
+export interface IGaussianPointSplattingProgress {
+    renderedFrameCount: number;
+    accumulationVersion: number;
+    pixelCycleLength: number;
+}
+
+export function _HasGaussianPointSplattingProjectedDepth(projection: Matrix): boolean {
+    return _hasGaussianPointSplattingProjectedDepth(projection.m as unknown as Mat4);
+}
+
+export function _GetPackedShBytesPerSplat(shDegree: number): number {
+    return _getGaussianPointSplattingPackedShBytesPerSplat(shDegree);
+}
+
 /** Lite loader chosen by file extension (mirrors the BJS splat plugin dispatch). */
 function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext, url: string, fragments?: readonly GsShaderFragment[]) => Promise<LiteGsMesh> {
     const lower = url.split("?")[0]!.toLowerCase();
@@ -46,6 +72,18 @@ function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext
     }
     // `.ply`, `.splat`, and compressed-PLY all flow through `loadSplat`.
     return loadSplat;
+}
+
+/** Translate Babylon.js's resolution multiplier into Lite's integer downsampling factor. */
+function litePointSplattingRenderScale(value: number | "auto"): number | "auto" {
+    if (value === "auto") {
+        return value;
+    }
+    const divisor = 1 / value;
+    if (!Number.isFinite(divisor) || !Number.isInteger(divisor) || divisor < 1 || divisor > 8) {
+        throw new RangeError("GaussianSplattingMesh.pointSplattingRenderScale must be 'auto' or the reciprocal of an integer from 1 through 8.");
+    }
+    return divisor;
 }
 
 /** `.splat` row stride: position(3f) + scale(3f) + rgba(4×u8) + rot(4×u8) = 32 bytes. */
@@ -76,12 +114,44 @@ function mirrorSplatRowY(buffer: ArrayBuffer): ArrayBuffer {
  * cloud's `position` / `rotation` / `scaling` proxy onto the Lite splat node.
  */
 export class GaussianSplattingMesh extends TransformNode {
+    private static _useGpuSort = false;
+    public static GpuSortMinFrameInterval = 1;
+
+    public static get UseGpuSort(): boolean {
+        return this._useGpuSort;
+    }
+
+    public static set UseGpuSort(value: boolean) {
+        this._useGpuSort = value;
+    }
+
     /** @internal The loaded Lite splat node (undefined until `loadFileAsync` resolves). */
     private _gs?: LiteGsMesh;
     /** @internal The constructor's deferred URL, loaded by `loadFileAsync()` with no argument. */
     private readonly _ctorUrl: string | null;
     /** @internal Optional Lite shader-fragment plugins applied at load (scene 126). */
     private _fragments?: readonly GsShaderFragment[];
+    /** @internal Point-splatting configuration retained before the native renderer is enabled. */
+    private _pointSplattingRenderScale: number | "auto" = "auto";
+    /** @internal Point-splatting configuration retained before the native renderer is enabled. */
+    private _pointSplattingOcclusionCulling = false;
+    /** @internal Point-splatting configuration retained before the native renderer is enabled. */
+    private _pointSplattingScale = 1;
+    /** @internal Native point renderer enabled for this loaded splat, if any. */
+    private _pointSplatting: LiteGaussianPointSplatting | null = null;
+    /** @internal Requested BJS color-pass ownership, retained before the splat loads. */
+    private _pointSplattingRenderMode = false;
+    /** @internal Requested BJS depth-pass ownership, retained before the splat loads. */
+    private _pointSplattingDepthRenderMode = false;
+    private _useGpuSort: boolean | null = null;
+
+    public get useGpuSort(): boolean | null {
+        return this._useGpuSort;
+    }
+
+    public set useGpuSort(value: boolean | null) {
+        this._useGpuSort = value;
+    }
 
     /**
      * Babylon.js `gs.safeOrbitCameraLimits` — safe-orbit camera limits parsed from the source
@@ -93,6 +163,75 @@ export class GaussianSplattingMesh extends TransformNode {
      * to Lite's splat loaders; the field is exposed here for shape parity so ported reads resolve.
      */
     public safeOrbitCameraLimits: ISafeOrbitCameraLimits | null = null;
+
+    public get pointSplattingRenderScale(): number | "auto" {
+        return this._pointSplattingRenderScale;
+    }
+
+    public set pointSplattingRenderScale(value: number | "auto") {
+        const liteValue = litePointSplattingRenderScale(value);
+        this._pointSplattingRenderScale = value;
+        if (this._pointSplatting) {
+            this._pointSplatting.renderScale = liteValue;
+        }
+    }
+
+    public get pointSplattingOcclusionCulling(): boolean {
+        return this._pointSplattingOcclusionCulling;
+    }
+
+    public set pointSplattingOcclusionCulling(value: boolean) {
+        this._pointSplattingOcclusionCulling = value;
+        if (this._pointSplatting) {
+            this._pointSplatting.occlusionCulling = value;
+        }
+    }
+
+    public get pointSplattingRenderMode(): boolean {
+        return this._pointSplattingRenderMode;
+    }
+
+    public set pointSplattingRenderMode(value: boolean) {
+        if (value === this._pointSplattingRenderMode) {
+            return;
+        }
+        this._pointSplattingRenderMode = value;
+        this._syncPointSplatting();
+    }
+
+    public get pointSplattingDepthRenderMode(): boolean {
+        return this._pointSplattingDepthRenderMode;
+    }
+
+    public set pointSplattingDepthRenderMode(value: boolean) {
+        if (value === this._pointSplattingDepthRenderMode) {
+            return;
+        }
+        this._pointSplattingDepthRenderMode = value;
+        this._syncPointSplatting();
+    }
+
+    public get pointSplattingProgress(): IGaussianPointSplattingProgress | null {
+        const progress = this._pointSplatting?.progress;
+        return progress
+            ? {
+                  renderedFrameCount: progress.renderedFrameCount,
+                  accumulationVersion: progress.accumulationVersion,
+                  pixelCycleLength: progress.pixelCycleLength,
+              }
+            : null;
+    }
+
+    public get pointSplattingScale(): number {
+        return this._pointSplattingScale;
+    }
+
+    public set pointSplattingScale(value: number) {
+        this._pointSplattingScale = value;
+        if (this._pointSplatting) {
+            this._pointSplatting.pointScale = value;
+        }
+    }
 
     public constructor(name: string, url?: string | null, scene?: Scene, _keepInRam?: boolean) {
         // A placeholder transform node carries any transforms set before the splat
@@ -106,8 +245,13 @@ export class GaussianSplattingMesh extends TransformNode {
         return "GaussianSplattingMesh";
     }
 
-    /** @internal The transform-carrying Lite node: the loaded splat node once present, else the placeholder. */
+    /** @internal The wrapper's transform node; the loaded cloud is parented beneath it during deferred adoption. */
     private get _xform(): SceneNode {
+        return this._gs?.parent === this._node ? this._node : (this._gs ?? this._node);
+    }
+
+    /** @internal Accessibility metadata belongs to the loaded cloud, or its placeholder before loading. */
+    protected override _accessibilitySource(): object {
         return this._gs ?? this._node;
     }
 
@@ -155,14 +299,21 @@ export class GaussianSplattingMesh extends TransformNode {
         return this;
     }
 
-    /** @internal Adopt a loaded Lite splat node: carry over placeholder transforms + name, and register on the scene. */
-    private _adopt(lite: LiteGsMesh): void {
+    /**
+     * @internal Adopt a loaded Lite splat node from either the mesh or loader-plugin API.
+     * Parenting preserves the loader's format-specific local transform while composing it
+     * with transforms applied to the wrapper before loading.
+     */
+    public _adopt(lite: LiteGsMesh): void {
         const placeholder = this._node;
-        lite.position.set(placeholder.position.x, placeholder.position.y, placeholder.position.z);
-        lite.scaling.set(placeholder.scaling.x, placeholder.scaling.y, placeholder.scaling.z);
-        lite.rotation.set(placeholder.rotation.x, placeholder.rotation.y, placeholder.rotation.z);
+        const previousAccessibilitySource = this._accessibilitySource();
+        this._disablePointSplatting();
+        lite.parent = placeholder;
+        placeholder.children.push(lite);
         lite.name = this.name;
         this._gs = lite;
+        this._syncPointSplatting();
+        this._syncAccessibilityTag(previousAccessibilitySource);
         this._scene?._registerMesh(this);
     }
 
@@ -170,8 +321,35 @@ export class GaussianSplattingMesh extends TransformNode {
     public static _fromLite(lite: LiteGsMesh, scene: Scene): GaussianSplattingMesh {
         const mesh = new GaussianSplattingMesh(lite.name, null, scene);
         mesh._gs = lite;
+        mesh._syncPointSplatting();
         scene._registerMesh(mesh);
         return mesh;
+    }
+
+    /** @internal Reconcile BJS point-mode state with Lite's opt-in renderer. */
+    private _syncPointSplatting(): void {
+        if (!this._gs || !this._scene) {
+            return;
+        }
+        if (!this._pointSplattingRenderMode && !this._pointSplattingDepthRenderMode) {
+            this._disablePointSplatting();
+            return;
+        }
+        this._pointSplatting = enableGaussianPointSplatting(this._scene._lite, this._gs, {
+            colorRenderMode: this._pointSplattingRenderMode,
+            depthRenderMode: this._pointSplattingDepthRenderMode,
+            pointScale: this._pointSplattingScale,
+            renderScale: litePointSplattingRenderScale(this._pointSplattingRenderScale),
+            occlusionCulling: this._pointSplattingOcclusionCulling,
+        });
+    }
+
+    /** @internal Release the point renderer owned by the currently adopted splat. */
+    private _disablePointSplatting(): void {
+        if (this._pointSplatting && this._scene) {
+            disableGaussianPointSplatting(this._scene._lite, this._pointSplatting);
+            this._pointSplatting = null;
+        }
     }
 
     /** Babylon.js `gs.splatsData` — the raw 32-byte/splat row buffer (for inspection / `updateData`). */
@@ -200,6 +378,23 @@ export class GaussianSplattingMesh extends TransformNode {
     public bakeCurrentTransformIntoVertices(): void {
         if (this._gs) {
             bakeCurrentTransformIntoVertices(this._gs);
+            if (this._gs.parent === this._node) {
+                const userChildren = this._node.children.filter((child) => child !== this._gs && child.parent === this._node);
+                for (const child of this.getChildren(undefined, true)) {
+                    if (child instanceof TransformNode && child._node !== this._gs && !userChildren.includes(child._node)) {
+                        userChildren.push(child._node);
+                    }
+                }
+                for (const child of userChildren) {
+                    setParent(child, null);
+                }
+                this._node.position.set(0, 0, 0);
+                this._node.rotation.set(0, 0, 0);
+                this._node.scaling.set(1, 1, 1);
+                for (const child of userChildren) {
+                    setParent(child, this._node);
+                }
+            }
         }
     }
 
@@ -211,5 +406,11 @@ export class GaussianSplattingMesh extends TransformNode {
     /** @internal The loaded Lite splat node, for the GPU picker's result mapping (undefined until loaded). */
     public get _pickLiteNode(): LiteGsMesh | undefined {
         return this._gs;
+    }
+
+    /** @internal Release the opt-in point renderer before removing the splat node. */
+    protected override _disposeSelf(doNotRecurse: boolean): void {
+        this._disablePointSplatting();
+        super._disposeSelf(doNotRecurse);
     }
 }

@@ -55,6 +55,64 @@ async function initialViteCode(source: string): Promise<string> {
 }
 
 describe("rendering opt-in boundaries", () => {
+    it.each([false, true])("retains the custom post-process adapter only when requested (%s)", async (custom) => {
+        const result = await runRollup({
+            entrySource: `export { ${custom ? "createCustomPostProcessTask" : "createBlackAndWhitePostProcessTask"} } from ${JSON.stringify(LIB_ENTRY)};`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("function createCustomPostProcessTask")).toBe(custom);
+    });
+
+    it("emits identical built-in post-process code when the custom adapter is imported but unused", async () => {
+        const source = `export { createBlackAndWhitePostProcessTask } from ${JSON.stringify(LIB_ENTRY)};`;
+        const baseline = await runRollup({ entrySource: source, format: "es", minify: false });
+        const unused = await runRollup({
+            entrySource: `import { createCustomPostProcessTask } from ${JSON.stringify(LIB_ENTRY)}; ${source}`,
+            format: "es",
+            minify: false,
+        });
+        expect(baseline.errors).toEqual([]);
+        expect(unused.errors).toEqual([]);
+        expect(unused.code).toBe(baseline.code);
+    });
+
+    it.each([false, true])("retains hidden ShaderMaterial policy only with its explicit enabler (%s)", async (enabled) => {
+        const code = await initialViteCode(`import { createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""} } from ${JSON.stringify(LIB_ENTRY)};
+console.log(createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""});`);
+        expect(code.includes("function enableShaderMaterialVisiblePacketUpdates")).toBe(enabled);
+        expect(code.includes("function isHidden")).toBe(enabled);
+    });
+
+    it("emits byte-identical code when the visible-packet enabler is imported but unused", async () => {
+        const source = `import { createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)}; console.log(createShaderMaterial);`;
+        const baseline = await runRollup({ entrySource: source, format: "es", minify: false });
+        const unused = await runRollup({
+            entrySource: `import { enableShaderMaterialVisiblePacketUpdates } from ${JSON.stringify(LIB_ENTRY)}; ${source}`,
+            format: "es",
+            minify: false,
+        });
+        expect(baseline.errors).toEqual([]);
+        expect(unused.errors).toEqual([]);
+        expect(unused.code).toBe(baseline.code);
+    });
+
+    it.each([false, true])("keeps Node implementations out of storage-only Shader graphs (%s)", async (node) => {
+        const code = await initialViteCode(`import { createMeshFromStorageBuffer, createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)};
+${
+    node
+        ? `import { compileNodePipeline } from ${JSON.stringify(join(BUILD_LIB_DIR, "material", "node", "node-pipeline.js"))};
+import { buildNodeMeshRenderables } from ${JSON.stringify(join(BUILD_LIB_DIR, "material", "node", "node-renderable.js"))};
+console.log(compileNodePipeline, buildNodeMeshRenderables);`
+        : ""
+}
+console.log(createMeshFromStorageBuffer, createShaderMaterial);`);
+        expect(code.includes("function compileNodePipeline")).toBe(node);
+        expect(code.includes("function groupNodeMeshPackets")).toBe(node);
+    });
+
     it.each([false, true])("keeps retirement out of Vite's initial engine graph unless disposal is requested (%s)", async (dispose) => {
         const initialCode = await initialViteCode(`import { createEngine, startEngine${dispose ? ", disposeEngine" : ""} } from ${JSON.stringify(LIB_ENTRY)};
 console.log(createEngine, startEngine${dispose ? ", disposeEngine" : ""});`);
@@ -137,6 +195,14 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "_resizeCallbacks", true],
         ["createRenderTargetTexture, cloneTexture2D", "RenderTargetTexture resize callbacks failed.", false],
         ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "RenderTargetTexture resize callbacks failed.", true],
+        ["createRenderTarget, createRenderTask", "function createMipMappedRenderTarget", false],
+        ["createRenderTarget, createRenderTask", "function createClearTextureTask", false],
+        ["createRenderTarget, createRenderTask", "function createGenerateMipMapsTask", false],
+        ["createClearTextureTask", "function createClearTextureTask", true],
+        ["createClearTextureTask", "function prepareMipmaps", false],
+        ["createGenerateMipMapsTask", "function prepareMipmaps", true],
+        ["createGenerateMipMapsTask", "function createMipMappedRenderTarget", false],
+        ["createMipMappedRenderTarget", "function createMipMappedRenderTarget", true],
     ] as const)("keeps only requested capabilities for %s", async (imports, marker, retained) => {
         const result = await runRollup({
             entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
@@ -146,5 +212,64 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code.includes(marker)).toBe(retained);
+    });
+
+    it.each([
+        ["createRenderTask", false],
+        ["createMipMappedRenderTarget", true],
+    ] as const)("retains render-target mip allocation only for %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("mipLevelCount")).toBe(retained);
+    });
+
+    it.each([
+        ["createComputeShader, createComputeDispatch", false],
+        ["createComputeImmediateShader, setComputeDispatchImmediates", true],
+    ] as const)("keeps compute immediate-data support opt-in: %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("immediate_address_space")).toBe(retained);
+    });
+
+    it.each([
+        ["createEngine", false],
+        ["createEngineWithFeatures", true],
+    ] as const)("keeps explicit device-feature validation opt-in: %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("function createEngineWithFeatures")).toBe(retained);
+        expect(result.code.includes("_installDeviceFeaturesResolver")).toBe(retained);
+    });
+
+    it("keeps device-only bootstrap independent of engine and surface initialization", async () => {
+        const result = await runRollup({
+            entrySource: `import { createDevice } from ${JSON.stringify(LIB_ENTRY)};\nvoid createDevice();\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).toContain("requestAdapter");
+        expect(result.code).toContain("requestDevice");
+        expect(result.code).not.toContain("getContext");
+        expect(result.code).not.toContain("getPreferredCanvasFormat");
+        expect(result.code).not.toContain("requestAnimationFrame");
+        expect(result.code).not.toContain("GPU resource retirement failed.");
     });
 });

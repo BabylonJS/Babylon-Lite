@@ -12,6 +12,7 @@ import { acquireTexture } from "../resource/texture-acquire.js";
 import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { PixelsTexture2DOptions } from "./pixels-texture.js";
+import type { AreaLightImage } from "../light/area-light-image.js";
 
 /** A loaded 2D texture: the GPU texture, its default view and sampler, pixel
  *  dimensions, and an optional per-texture UV transform. This is the public
@@ -42,8 +43,12 @@ export interface Texture2D {
     invertY?: boolean;
     /** @internal Depth textures require texture_depth_2d shader bindings. */
     _sampleType?: "float" | "depth";
+    /** @internal This texture cannot participate in material UV transforms. */
+    _uvTransformDisabled?: true;
     /** @internal Retained source for opt-in device-lost recovery. */
     _recoverySource?: Texture2DRecoverySource;
+    /** @internal Processed emitter identity; ordinary clones preserve this image provenance. */
+    _areaLightImage?: AreaLightImage;
 }
 
 export type Texture2DRecoverySource =

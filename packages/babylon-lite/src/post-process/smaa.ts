@@ -61,7 +61,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import {
     createPostProcessTask,
     type PostProcessAlphaMode,
@@ -553,10 +553,8 @@ function resolveSourceSize(source: RenderTarget): { width: number; height: numbe
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    const size = source._descriptor.size;
-    const width = "canvas" in size ? size.canvas.width : size.width;
-    const height = "canvas" in size ? size.canvas.height : size.height;
-    return { width: Math.max(1, width), height: Math.max(1, height) };
+    const size = _resolveRenderTargetSize(source._descriptor);
+    return { width: Math.max(1, size.width), height: Math.max(1, size.height) };
 }
 
 /** Hard ceiling on the pattern search, matching reference SMAA's maximum. The shader's loops

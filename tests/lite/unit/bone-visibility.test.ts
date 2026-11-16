@@ -67,7 +67,7 @@ function boneDiagonal(binding: SkeletonBinding): number[] {
 /** Minimal in-memory `Skeleton` over a shared override map, so the public setters can be
  *  exercised without a glTF load. `_bake` just records that it ran. */
 function createSkeleton(overrides: Map<number, BoneOverride>, bake: () => void = (): void => {}): { skeleton: Skeleton; bone: Bone } {
-    const bone: Bone = { name: JOINT_NAME, _nodeIndex: 0 };
+    const bone: Bone = { name: JOINT_NAME, parent: null, _nodeIndex: 0 };
     return { skeleton: { bones: [bone], _byName: new Map([[JOINT_NAME, bone]]), _overrides: overrides, _worldOverrides: new Map(), _bake: bake }, bone };
 }
 

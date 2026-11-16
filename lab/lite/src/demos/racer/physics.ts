@@ -23,6 +23,7 @@ import {
     PhysicsShapeType,
     setPhysicsBodyCollisionEventsEnabled,
     setPhysicsShapeFilterMembershipMask,
+    setMeshVisible,
 } from "babylon-lite";
 
 import type { BumpCollider, Wall } from "./track.js";
@@ -66,7 +67,7 @@ export function buildBarriers(engine: EngineContext, scene: SceneContext, world:
             const h = w.rot / 2;
             box.rotationQuaternion.set(0, Math.sin(h), 0, Math.cos(h));
         }
-        box.visible = false;
+        setMeshVisible(box, false);
         addToScene(scene, box);
         const agg = createPhysicsAggregate(world, box, PhysicsShapeType.BOX, { mass: 0, extents: { x: w.sx, y: WALL_HEIGHT, z: w.sz } });
         setPhysicsShapeFilterMembershipMask(world, agg.shape, GROUP_WALL);
@@ -78,7 +79,7 @@ export function buildGroundCollider(engine: EngineContext, scene: SceneContext, 
     const floor = createBox(engine, 1);
     floor.position.set(0, -0.5, 0); // centre 0.5 below → top surface at y = 0
     floor.scaling.set(400, 1, 400);
-    floor.visible = false;
+    setMeshVisible(floor, false);
     addToScene(scene, floor);
     const agg = createPhysicsAggregate(world, floor, PhysicsShapeType.BOX, { mass: 0, extents: { x: 400, y: 1, z: 400 } });
     setPhysicsShapeFilterMembershipMask(world, agg.shape, GROUP_GROUND);
@@ -93,7 +94,7 @@ export function buildBumpColliders(engine: EngineContext, scene: SceneContext, w
     for (const b of bumps) {
         const sphere = createSphere(engine, { diameter: b.radius * 2, segments: 8 });
         sphere.position.set(b.x, b.y, b.z);
-        sphere.visible = false;
+        setMeshVisible(sphere, false);
         addToScene(scene, sphere);
         const agg = createPhysicsAggregate(world, sphere, PhysicsShapeType.SPHERE, { mass: 0, radius: b.radius });
         setPhysicsShapeFilterMembershipMask(world, agg.shape, GROUP_GROUND);
@@ -108,7 +109,7 @@ export function buildBumpColliders(engine: EngineContext, scene: SceneContext, w
 export function createCarBall(engine: EngineContext, scene: SceneContext, world: PhysicsWorld, startX: number, startZ: number): CarBall {
     const ball = createSphere(engine, { diameter: BALL_RADIUS * 2, segments: 8 });
     ball.position.set(startX, BALL_REST_Y, startZ);
-    ball.visible = false;
+    setMeshVisible(ball, false);
     addToScene(scene, ball);
     const { body, shape } = createPhysicsAggregate(world, ball, PhysicsShapeType.SPHERE, {
         mass: BALL_MASS,

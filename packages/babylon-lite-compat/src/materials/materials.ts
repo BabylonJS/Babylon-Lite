@@ -21,6 +21,7 @@ import {
     setPbrAnisotropy,
     setPbrIridescence,
     setPbrGammaAlbedo,
+    enableBentNormals,
     setStandardBumpTexture,
     setStandardEmissiveTexture,
 } from "babylon-lite";
@@ -107,6 +108,11 @@ export abstract class Material {
         target.backFaceCulling = this._backFaceCulling;
     }
 
+    /** @internal Initialize facade culling state for a loaded material without mutating its Lite source. */
+    protected _initializeBackFaceCulling(value: boolean): void {
+        this._backFaceCulling = value;
+    }
+
     /** The scene this material was constructed against (Babylon.js `Material.getScene`). */
     public getScene(): Scene | undefined {
         return this._scene;
@@ -170,7 +176,7 @@ export abstract class Material {
             return;
         }
         this._ensureRenderable(scene.getEngine()._lite);
-        rebuildMaterial(scene._lite, this._lite);
+        void rebuildMaterial(scene._lite, this._lite);
     }
 
     /**
@@ -216,7 +222,7 @@ function copyLiteMaterialData(src: object, dst: object): void {
     const s = src as Record<string, unknown>;
     const d = dst as Record<string, unknown>;
     for (const key of Object.keys(s)) {
-        if (key.startsWith("_")) {
+        if (key === "_buildGroup" || key === "_uboVersion" || key === "_renderFeatures" || key === "_pi" || key === "_preparedPlugins" || key === "_csmGen" || key === "_uvTxExt") {
             continue;
         }
         const value = s[key];
@@ -224,13 +230,65 @@ function copyLiteMaterialData(src: object, dst: object): void {
     }
 }
 
+/** Structural view of a compat material as the mesh registration paths need it. */
+interface SceneAttachableMaterial {
+    _ensureRenderable(engine: EngineContext): void;
+    _adoptScene?(scene: Scene): void;
+}
+
+/**
+ * @internal Scene OWNERSHIP of a material, independent of GPU finalization. Babylon.js allows
+ * `new StandardMaterial(name)` with no scene, so the material a mesh renders with adopts that mesh's scene
+ * as soon as the two meet — whether or not the scene has started. A material rendered by a scene it never
+ * adopted has no scene to rebuild in, and its later `_refreshInScene()` requests (a `disableLighting`
+ * toggle, a texture that finished loading) silently do nothing.
+ */
+export function adoptMaterialScene(material: SceneAttachableMaterial, scene: Scene): void {
+    material._adoptScene?.(scene);
+}
+
+/**
+ * @internal Ownership plus GPU finalization (`_ensureRenderable`). Finalization needs the engine, so it stays
+ * gated to the moments a mesh actually enters the running scene: the live branch of the `material` setter
+ * and the deferred registration at engine start.
+ */
+export function attachMaterialToScene(material: SceneAttachableMaterial, scene: Scene): void {
+    adoptMaterialScene(material, scene);
+    material._ensureRenderable(scene.getEngine()._lite);
+}
+
 export class StandardMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite standard-material props. */
-    public readonly _lite: StandardMaterialProps;
+    public _lite: StandardMaterialProps;
+    /** Diffuse colour as the app set it. Kept apart from `_lite.diffuseColor`, which is forced to white
+     *  while the material is unlit (see `_syncDiffuse`). */
+    private _diffuse: Tuple3 | null = null;
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
         this._lite = createStandardMaterial();
+    }
+
+    /** @internal Wrap a loader-produced Lite Standard material without replacing its GPU state. */
+    public static _fromLite(name: string, lite: StandardMaterialProps, scene: Scene): StandardMaterial {
+        const material = new StandardMaterial(name);
+        material._lite = lite;
+        material._diffuse = [...lite.diffuseColor];
+        material._initializeBackFaceCulling(lite.backFaceCulling);
+        material._scene = scene;
+        scene._registerMaterial(material);
+        return material;
+    }
+
+    /**
+     * Babylon.js shades an unlit StandardMaterial as `emissive + ambient`: the diffuse colour only scales
+     * the accumulated light, and there is none. Lite's unlit path is `emissive × diffuse`, so the usual
+     * "unlit colour" setup (black diffuse, colour in emissive) rendered black. Hand Lite a neutral white
+     * diffuse while lighting is disabled and the app's own colour otherwise.
+     */
+    private _syncDiffuse(): void {
+        const diffuse = (this._diffuse ??= [...this._lite.diffuseColor]);
+        this._lite.diffuseColor = this._lite.disableLighting ? [1, 1, 1] : [diffuse[0], diffuse[1], diffuse[2]];
     }
 
     public override getClassName(): string {
@@ -238,10 +296,11 @@ export class StandardMaterial extends PushMaterial {
     }
 
     public get diffuseColor(): Color3 {
-        return readColor3(this._lite.diffuseColor);
+        return readColor3(this._diffuse ?? this._lite.diffuseColor);
     }
     public set diffuseColor(value: Color3) {
-        this._lite.diffuseColor = [value.r, value.g, value.b];
+        this._diffuse = [value.r, value.g, value.b];
+        this._syncDiffuse();
         this._markDirty();
     }
 
@@ -250,6 +309,14 @@ export class StandardMaterial extends PushMaterial {
     }
     public set specularColor(value: Color3) {
         this._lite.specularColor = [value.r, value.g, value.b];
+        this._markDirty();
+    }
+
+    public get roughness(): number {
+        return this._lite.roughness ?? 0;
+    }
+    public set roughness(value: number) {
+        this._lite.roughness = value;
         this._markDirty();
     }
 
@@ -273,8 +340,17 @@ export class StandardMaterial extends PushMaterial {
         return this._lite.disableLighting;
     }
     public set disableLighting(value: boolean) {
+        const changed = this._lite.disableLighting !== value;
         this._lite.disableLighting = value;
+        this._syncDiffuse();
         this._markDirty();
+        // Lighting on/off is a shader variant, not a uniform: a material that has already rendered keeps
+        // its compiled shader until its renderables are rebuilt. Rebuild together with the diffuse swap —
+        // otherwise the cached lit shader would run with the neutral white diffuse and let the scene
+        // lights tint an unlit material. No-op until the scene has started.
+        if (changed) {
+            this._refreshInScene();
+        }
     }
 
     protected override _applyBackFaceCulling(value: boolean): void {
@@ -392,10 +468,14 @@ export class StandardMaterial extends PushMaterial {
     public override clone(name: string): StandardMaterial {
         const cloned = new StandardMaterial(name, this._scene);
         this._cloneBaseInto(cloned);
+        cloned._diffuse = this._diffuse && [this._diffuse[0], this._diffuse[1], this._diffuse[2]];
         cloned.useAlphaFromDiffuseTexture = this.useAlphaFromDiffuseTexture;
         cloned._diffuseTexture = this._diffuseTexture;
         cloned._bumpTexture = this._bumpTexture;
         cloned._emissiveTexture = this._emissiveTexture;
+        cloned._watchTexture(cloned._diffuseTexture);
+        cloned._watchTexture(cloned._bumpTexture);
+        cloned._watchTexture(cloned._emissiveTexture);
         return cloned;
     }
 }
@@ -447,7 +527,8 @@ export class PBRClearCoatConfiguration {
 export class PBRSheenConfiguration {
     public constructor(
         private readonly _props: SheenProps,
-        private readonly _markDirty: () => void
+        private readonly _markDirty: () => void,
+        private readonly _watchTexture: (texture: BaseTexture | null) => void
     ) {}
 
     public get isEnabled(): boolean {
@@ -488,20 +569,42 @@ export class PBRSheenConfiguration {
         return this._texture;
     }
     public set texture(value: BaseTexture | null) {
+        this._textureAssigned = true;
         this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
         } else {
             delete this._props.texture;
         }
+        this._watchTexture(value);
         this._markDirty();
     }
 
     private _texture: BaseTexture | null = null;
+    private _textureAssigned = false;
 
     /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
     public getActiveTextures(): BaseTexture[] {
         return this._texture ? [this._texture] : [];
+    }
+
+    /** @internal Rebind a replaced or newly-ready texture handle. */
+    public _ensureRenderable(): void {
+        if (!this._textureAssigned) {
+            return;
+        }
+        if (this._texture?._lite) {
+            this._props.texture = this._texture._lite;
+        } else {
+            delete this._props.texture;
+        }
+    }
+
+    /** @internal Copy an explicit facade texture assignment without disturbing loader-owned state. */
+    public _copyTextureTo(target: PBRSheenConfiguration): void {
+        if (this._textureAssigned) {
+            target.texture = this._texture;
+        }
     }
 }
 
@@ -588,7 +691,7 @@ export class PBRIridescenceConfiguration {
 
 export class PBRMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite PBR-material props. */
-    public readonly _lite: PbrMaterialProps;
+    public _lite: PbrMaterialProps;
     private _albedoFactor: Tuple4 = [1, 1, 1, 1];
 
     public constructor(name: string, scene?: Scene) {
@@ -601,6 +704,18 @@ export class PBRMaterial extends PushMaterial {
 
     public override getClassName(): string {
         return "PBRMaterial";
+    }
+
+    /** @internal Wrap a loader-produced Lite PBR material without replacing its GPU state. */
+    public static _fromLite(name: string, lite: PbrMaterialProps, scene: Scene): PBRMaterial {
+        const material = new PBRMaterial(name);
+        material._lite = lite;
+        const factor = lite.baseColorFactor ?? [1, 1, 1, 1];
+        material._albedoFactor = [factor[0], factor[1], factor[2], factor[3]];
+        material._initializeBackFaceCulling(!lite.doubleSided);
+        material._scene = scene;
+        scene._registerMaterial(material);
+        return material;
     }
 
     public get albedoColor(): Color3 {
@@ -627,6 +742,35 @@ export class PBRMaterial extends PushMaterial {
     }
 
     private _albedoTexture: BaseTexture | null = null;
+    private _bentNormalTexture: BaseTexture | null = null;
+    private _bentNormalLevelUnsubscribe: (() => void) | undefined;
+
+    /** Babylon.js `PBRMaterial.bentNormalTexture` over Lite's native IBL occlusion extension. */
+    public get bentNormalTexture(): BaseTexture | null {
+        return this._bentNormalTexture;
+    }
+    public set bentNormalTexture(texture: BaseTexture | null) {
+        const featureWasEnabled = !!this._lite.bentNormalTexture;
+        this._bentNormalLevelUnsubscribe?.();
+        this._bentNormalLevelUnsubscribe = undefined;
+        this._bentNormalTexture = texture;
+        if (texture) {
+            enableBentNormals();
+            this._bentNormalLevelUnsubscribe = texture._onLevelChanged?.((level) => {
+                if (this._bentNormalTexture === texture) {
+                    this._lite.bentNormalStrength = level;
+                    this._markDirty();
+                }
+            });
+        }
+        this._lite.bentNormalTexture = (texture?._lite as Texture2D | undefined) ?? undefined;
+        this._lite.bentNormalStrength = texture?.level ?? 1;
+        this._watchTexture(texture);
+        this._markDirty();
+        if (featureWasEnabled && !this._lite.bentNormalTexture) {
+            this._refreshInScene();
+        }
+    }
 
     /**
      * Enumerate every bound PBR texture slot, including extension sub-configurations
@@ -636,6 +780,9 @@ export class PBRMaterial extends PushMaterial {
         const textures: BaseTexture[] = [];
         if (this._albedoTexture) {
             textures.push(this._albedoTexture);
+        }
+        if (this._bentNormalTexture) {
+            textures.push(this._bentNormalTexture);
         }
         const environmentTexture = this.environmentTexture;
         if (environmentTexture) {
@@ -727,7 +874,11 @@ export class PBRMaterial extends PushMaterial {
     public get sheen(): PBRSheenConfiguration {
         if (!this._sheen) {
             setPbrSheen(this._lite, this._lite._sheen ?? { isEnabled: false });
-            this._sheen = new PBRSheenConfiguration(this._lite._sheen!, () => this._markDirty());
+            this._sheen = new PBRSheenConfiguration(
+                this._lite._sheen!,
+                () => this._markDirty(),
+                (texture) => this._watchTexture(texture)
+            );
         }
         return this._sheen;
     }
@@ -800,21 +951,26 @@ export class PBRMaterial extends PushMaterial {
                 lite._gammaAlbedo = false;
             }
         }
+        const bent = this._bentNormalTexture as { _lite?: Texture2D; level?: number } | null;
+        if (bent?._lite) {
+            enableBentNormals();
+            lite.bentNormalTexture = bent._lite;
+            lite.bentNormalStrength = bent.level ?? 1;
+        }
+        this._sheen?._ensureRenderable();
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
-        // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
-        // so each contribution is applied exactly once.
+        // 1×1 solid textures. Keep those NEUTRAL (white) and leave the values in the factors.
+        // Baking the values into the texel and neutralizing the factors applied them once only
+        // until the next `albedoColor` / `metallic` / `roughness` write: the setters write the
+        // factor, which then multiplied the already-baked texel (colour², roughness²), and the
+        // getters read back the neutralized 1.
         if (!lite.baseColorTexture) {
-            const f = this._albedoFactor;
-            lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
-            lite.baseColorFactor = [1, 1, 1, 1];
+            lite.baseColorTexture = createSolidTexture2D(engine, 1, 1, 1, 1);
+            lite.baseColorFactor = [...this._albedoFactor];
         }
         if (!lite.ormTexture) {
-            const rough = lite.roughnessFactor ?? 1;
-            const metal = lite.metallicFactor ?? 1;
-            lite.ormTexture = createSolidTexture2D(engine, 1, rough, metal);
-            lite.roughnessFactor = 1;
-            lite.metallicFactor = 1;
+            lite.ormTexture = createSolidTexture2D(engine, 1, 1, 1);
         }
     }
 
@@ -842,6 +998,8 @@ export class PBRMaterial extends PushMaterial {
         target.forceIrradianceInFragment = this.forceIrradianceInFragment;
         target._albedoFactor = [...this._albedoFactor];
         target._albedoTexture = this._albedoTexture;
+        target._watchTexture(target._albedoTexture);
+        target.bentNormalTexture = this._bentNormalTexture;
         const src = this._lite;
         const dst = target._lite;
         // Route each sub-feature through its setter so the clone's copy also registers the
@@ -857,6 +1015,9 @@ export class PBRMaterial extends PushMaterial {
         }
         if (src._sheen) {
             setPbrSheen(dst, { ...src._sheen });
+            if (this._sheen) {
+                this._sheen._copyTextureTo(target.sheen);
+            }
         }
         if (src._anisotropy) {
             setPbrAnisotropy(dst, { ...src._anisotropy });
@@ -864,6 +1025,17 @@ export class PBRMaterial extends PushMaterial {
         if (src._iridescence) {
             setPbrIridescence(dst, { ...src._iridescence });
         }
+        if (src.bentNormalTexture) {
+            enableBentNormals();
+            dst.bentNormalTexture = src.bentNormalTexture;
+            dst.bentNormalStrength = src.bentNormalStrength;
+        }
+    }
+
+    public override dispose(): void {
+        this._bentNormalLevelUnsubscribe?.();
+        this._bentNormalLevelUnsubscribe = undefined;
+        super.dispose();
     }
 }
 

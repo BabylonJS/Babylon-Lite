@@ -21,7 +21,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *  - PASS 1 renders the SAME radial pattern into a 512×512 RGBA8 render target.
  *    `renderer.render(patternWrapper, rtw)` binds the RT framebuffer, sets the
  *    viewport to the RT size, draws the fullscreen quad, then unbinds — the
- *    analogue of lite-gl's `bindRenderTarget(engine, rt)` + `drawEffect`.
+ *    analogue of lite-gl's `bindRenderTarget(rt)` + `drawEffect`.
  *  - PASS 2 samples that RT fullscreen with the SAME aspect-corrected vignette.
  *  - The pattern depends ONLY on `length(vUV - 0.5)`, so it is invariant to any
  *    FBO sampling-origin / Y-flip difference between the two engines — the

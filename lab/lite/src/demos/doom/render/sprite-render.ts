@@ -10,7 +10,7 @@
 
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     billboardBlendCutout,
     clearBillboardSprites,
     createBillboardCustomShader,
@@ -81,7 +81,7 @@ export class SpriteRenderer {
         // Must register BEFORE `registerScene` runs: the scene drains its deferred
         // renderable builders exactly once at registration, so a system added later
         // (e.g. lazily inside the render loop) would never be built or drawn.
-        addFacingBillboardSystem(scene, this.system);
+        addBillboardSystemToScene(scene, this.system);
     }
 
     /** Refills the billboard system from the given visible sprites (call once/frame). */

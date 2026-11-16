@@ -2,13 +2,13 @@
 
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
-📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), the [Porting Guide](docs/lite/03-porting-guide.md), and [Headless (Null Engine)](docs/lite/05-headless-null-engine.md)
+📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), the [Porting Guide](docs/lite/03-porting-guide.md), [Headless (Null Engine)](docs/lite/05-headless-null-engine.md), and [Right-Handed Coordinate System](docs/lite/07-right-handed-system.md)
 
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 
 ## Prerequisites
 
-- **Node.js** ≥ 20.19 (ESLint 10 requires `^20.19 || ^22.13 || >=24`; CI runs Node 22)
+- **Node.js** 22.13+, 24.x, or 26+ (Vitest 5 no longer supports Node 20; CI runs Node 22)
 - **pnpm** ≥ 9 (`corepack enable` to activate the version pinned in `package.json`)
 - A browser with **WebGPU** support (Chrome 113+, Edge 113+, or recent Firefox and Safari)
 
@@ -30,6 +30,66 @@ Open **http://localhost:5174** to browse the scene gallery.
 Scene and demo pages are served live from source, so this is the loop for engine work. The
 **Bundle** tab additionally needs the production bundles — build them with `pnpm dev:lab`
 (same server, preceded by a full bundle build) or with the tab's **Regenerate** button.
+
+Lab startup and static builds restore scene 112's Flight Helmet KTX2 fixture
+from a pinned BabylonJS/Assets revision, verifying each file before use.
+`pnpm fetch:flight-helmet` runs this preparation separately. The downloaded
+files live in the gitignored `lab/public/models/FlightHelmetKTX/` directory;
+no model binaries are added to the Lite package.
+
+## MeshLoD conversion
+
+The native glTF/GLB-to-`.mlod` converter is maintained separately in
+[MegameshCLI](https://github.com/CedricGuillemet/MegameshCLI). Download the
+`mesh-lod-tool` executable for your platform from its
+[releases](https://github.com/CedricGuillemet/MegameshCLI/releases), or build it
+there with CMake.
+Conversion does not require this repository or a Babylon Lite installation.
+
+For the Harvard-Yenching Institute statue, run the CLI from a MegameshCLI
+checkout after extracting/building the executable. Its `assets/` directory
+includes the [source GLB](https://assets.babylonjs.com/meshes/harvard-yenching/harvard-yenching_institute_statue.glb):
+
+```sh
+mesh-lod-tool --input assets/harvard-yenching_institute_statue.glb \
+  --output harvard-yenching_institute_statue.mlod \
+  --stats-json statue-stats.json
+```
+
+The source has three mesh primitives, so this produces
+`harvard-yenching_institute_statue.mesh000.prim000.mlod` through
+`...mesh002.prim000.mlod`; a single selected primitive uses the exact output
+path. On Windows use `mesh-lod-tool.exe` and join the command onto one line.
+See the [CLI README](https://github.com/CedricGuillemet/MegameshCLI#readme)
+for conversion options, supported inputs, installation, and validation.
+
+Serve `.mlod` files with **HTTP byte ranges** and `Content-Encoding: identity`
+(no compression that changes byte offsets). For each primitive, use its
+corresponding source glTF material and placement with the root package API:
+
+```ts
+import { addMeshLoDToScene, createMeshLoDInstance, loadMeshLoD } from "@babylonjs/lite";
+
+const asset = await loadMeshLoD(engine, "/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod");
+const instance = createMeshLoDInstance(asset, sourcePrimitive.material);
+addMeshLoDToScene(scene, instance);
+```
+
+After registration, texture/sampler replacements and structural material changes
+such as `doubleSided` require `await rebuildMaterial(scene, material)`, imported
+from the same root package. MeshLoD replaces matching batches transactionally
+and retires their old GPU resources and texture references behind a queue fence.
+UBO-only scalar/vector edits use `markMaterialUboDirty(material)` instead.
+
+The CLI converts **geometry**, not materials or textures. The demo fetches the
+original GLB from BabylonJS/Assets for those properties and uses the three
+checked-in MLOD sidecars for streaming geometry; the source GLB is not kept in
+this repository. See the [MeshLoD architecture](docs/lite/architecture/mesh-lod.md)
+for the runtime design. The model is
+[“Harvard-Yenching Institute statue” by Alexandre Tokovinine](https://sketchfab.com/3d-models/harvard-yenching-institute-statue-fc245710c4d64d0886a7f37dc522ff87),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); credit
+the author and link the license when redistributing the source or converted
+assets. Other models are not bundled with this demo.
 
 ## Available Scripts
 

@@ -9,7 +9,7 @@ import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const ASSET_ROOT = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/FlightHelmetKTX/";
+const ASSET_ROOT = "/models/FlightHelmetKTX/";
 
 (async function () {
     const __initStart = performance.now();
@@ -24,7 +24,7 @@ const ASSET_ROOT = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/F
     scene.createDefaultCameraOrLight(true, true, true);
     (scene.activeCamera as ArcRotateCamera).alpha = Math.PI / 2;
 
-    const envTex = await new Promise<CubeTexture>((resolve) => {
+    const envTex = await new Promise<CubeTexture>((resolve, reject) => {
         const tex = new CubeTexture(
             "https://assets.babylonjs.com/core/environments/environmentSpecular.env",
             scene,
@@ -34,7 +34,7 @@ const ASSET_ROOT = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/F
             function onLoad() {
                 resolve(tex);
             },
-            null,
+            (message, exception) => reject(exception ?? new Error(message || "Failed to load scene 112 environment")),
             undefined,
             true
         );
@@ -69,4 +69,10 @@ const ASSET_ROOT = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/F
     canvas.dataset.camFov = String(cam.fov);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
-})().catch(console.error);
+})().catch((error: unknown) => {
+    console.error(error);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = error instanceof Error ? error.message : String(error);
+    }
+});

@@ -12,15 +12,18 @@
  * references a decoding entry point — `enableErrorDecoding()` (global decoder) or `decodeError()`
  * (on-demand, single caught error) — so by default the bundle ships numeric codes, not prose.
  *
- * Determinism: codes are assigned in a stable order (relative file path, then source position)
- * during `buildStart`, independent of Vite's parallel per-module `transform` ordering, so the
- * same source always yields the same codes and table.
+ * Determinism: codes are assigned in a stable compatibility order during `buildStart`: core
+ * files, established compute files, then accessibility files; each tier uses relative file path
+ * and source position. This is independent of Vite's parallel per-module `transform` ordering,
+ * so the same source always yields the same codes and table.
  *
- * Safety guards:
+ * Rewrite rules:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
  *     subclasses and non-string args are left untouched.
- *   - A per-file byte guard skips files whose total rewrite savings would not cover the one-time
- *     `import { ThrowLiteError }` cost, so the transform never makes a module larger.
+ *   - Every qualifying file is rewritten, even one with a single short throw. In a consumer
+ *     bundle, Rollup can combine module imports and share the helper, so source-level import
+ *     length does not reliably predict shipped bytes. Module-granular output can retain the
+ *     imports, and a bundle that otherwise did not need the helper can grow.
  *   - `transform` re-parses the module Vite hands it and zips throws (in source order) with the
  *     codes assigned in `buildStart`, so it never relies on cross-pass byte offsets.
  */
@@ -37,10 +40,6 @@ interface Candidate {
     tableFnSource: string;
     /** Argument expression source texts forwarded at the call site. */
     argTexts: string[];
-    /** Replacement length excluding the code number. */
-    rewrittenLenSansCode: number;
-    /** Original `throw new Error(...)` expression length. */
-    originalLen: number;
 }
 
 interface FilePlan {
@@ -67,6 +66,32 @@ function walkTsFiles(root: string): string[] {
         }
     }
     return out;
+}
+
+function liteErrorFileRank(root: string, file: string): number {
+    const relative = path.relative(root, file).replace(/\\/g, "/");
+    // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
+    if (
+        relative === "frame-graph/enable-geometry-velocity.ts" ||
+        relative.startsWith("post-process/ssao") ||
+        relative.startsWith("material/geometry-deformation") ||
+        relative.startsWith("material/pbr/pbr-geometry-velocity") ||
+        relative === "material/plugin/dynamic-pbr-bindings.ts"
+    ) {
+        return 3;
+    }
+    if (relative.startsWith("accessibility/") || relative === "scene/scene-change.ts") {
+        return 2;
+    }
+    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-") ? 1 : 0;
+}
+
+export function isDeferredLiteErrorFile(root: string, file: string): boolean {
+    return liteErrorFileRank(root, file) !== 0;
+}
+
+export function compareLiteErrorFiles(root: string, a: string, b: string): number {
+    return liteErrorFileRank(root, a) - liteErrorFileRank(root, b) || a.localeCompare(b);
 }
 
 /** Re-escape already-cooked template text so it can be embedded inside a new template literal. */
@@ -108,10 +133,8 @@ function candidateFor(node: ts.ThrowStatement, sf: ts.SourceFile): Candidate | n
 
     const start = node.getStart(sf);
     const end = expr.getEnd();
-    const callArgs = argTexts.length ? ", " + argTexts.join(", ") : "";
-    const rewrittenLenSansCode = "ThrowLiteError(".length + callArgs.length + ")".length;
 
-    return { start, end, tableFnSource, argTexts, rewrittenLenSansCode, originalLen: end - start };
+    return { start, end, tableFnSource, argTexts };
 }
 
 /** Collect rewrite candidates from a module's source, in source order. */
@@ -150,7 +173,7 @@ export function liteErrorPlugin(): Plugin {
 
         buildStart() {
             plans.clear();
-            const files = walkTsFiles(srcRoot).sort((a, b) => a.localeCompare(b));
+            const files = walkTsFiles(srcRoot).sort((a, b) => compareLiteErrorFiles(srcRoot, a, b));
             const tableEntries: string[] = [];
             let nextCode = 0;
 
@@ -167,17 +190,6 @@ export function liteErrorPlugin(): Plugin {
                 if (!rel.startsWith(".")) {
                     rel = "./" + rel;
                 }
-                const importLen = `import { ThrowLiteError } from "${rel}";\n`.length;
-
-                const codeWidth = String(nextCode + candidates.length).length;
-                let totalSavings = 0;
-                for (const c of candidates) {
-                    totalSavings += c.originalLen - (c.rewrittenLenSansCode + codeWidth);
-                }
-                if (totalSavings <= importLen) {
-                    continue;
-                }
-
                 const codes = candidates.map((c) => {
                     const code = nextCode++;
                     tableEntries.push(`/*${code}*/ ${c.tableFnSource},`);

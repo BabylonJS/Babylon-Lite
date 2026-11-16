@@ -64,10 +64,37 @@ describe("enableCsmStaticCache", () => {
         expect(generator._csmCache).toMatchObject({ _refitAngle: 0.05, _refitMaxIntervalMs: 250, _loaded: true });
     });
 
+    it("stores the opt-in camera-coverage padding for stabilized cascades, 0 when omitted", async () => {
+        const engine = { _device: { createTexture: vi.fn(() => ({ destroy: vi.fn() })) }, surfaces: [{ _renderingContexts: [] }] } as unknown as EngineContext;
+        const omitted = makeGenerator().generator;
+        await enableCsmStaticCache(engine, omitted, { refitAngle: 0.05 });
+        expect(omitted._csmCache?._cascadeCoveragePadding).toBe(0);
+
+        const stabilized = makeGenerator().generator;
+        (stabilized._config as unknown as { _stabilizeCascades: boolean })._stabilizeCascades = true;
+        await enableCsmStaticCache(engine, stabilized, { refitAngle: 0.05, cascadeCoveragePadding: 0.1 });
+        expect(stabilized._csmCache?._cascadeCoveragePadding).toBe(0.1);
+
+        // The floor is 2 / mapSize (512 here: 0.00390625). Below it a fresh fit would fail its own coverage test.
+        const floor = makeGenerator().generator;
+        (floor._config as unknown as { _stabilizeCascades: boolean })._stabilizeCascades = true;
+        await expect(enableCsmStaticCache(engine, floor, { refitAngle: 0.05, cascadeCoveragePadding: 0.0039 })).rejects.toThrow("at least 2 / mapSize");
+        await enableCsmStaticCache(engine, floor, { refitAngle: 0.05, cascadeCoveragePadding: 2 / 512 });
+        expect(floor._csmCache?._cascadeCoveragePadding).toBe(2 / 512);
+    });
+
     it("rejects invalid generators, angles, and late activation", async () => {
         const engine = { _device: { createTexture: vi.fn() }, surfaces: [{ _renderingContexts: [] }] } as unknown as EngineContext;
         await expect(enableCsmStaticCache(engine, makeGenerator("pcf").generator, { refitAngle: 0.05 })).rejects.toThrow("requires a CSM");
         await expect(enableCsmStaticCache(engine, makeGenerator().generator, { refitAngle: 0 })).rejects.toThrow("positive finite");
+
+        for (const padding of [-0.1, 1.5, Number.NaN]) {
+            await expect(enableCsmStaticCache(engine, makeGenerator().generator, { refitAngle: 0.05, cascadeCoveragePadding: padding })).rejects.toThrow(
+                "cascadeCoveragePadding between 0 and 1"
+            );
+        }
+        // The coverage test reads a stabilized fit's bounding sphere; a tight per-frame box has none to pad.
+        await expect(enableCsmStaticCache(engine, makeGenerator().generator, { refitAngle: 0.05, cascadeCoveragePadding: 0.1 })).rejects.toThrow("requires stabilizeCascades");
 
         const late = makeGenerator().generator;
         late._shadowTaskState = {} as ShadowGenerator["_shadowTaskState"];

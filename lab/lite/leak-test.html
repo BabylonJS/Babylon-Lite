@@ -96,7 +96,7 @@
           scene.camera = createArcRotateCamera(0, Math.PI / 3, 100, { x: 0, y: 0, z: 0 });
           addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
           const { loadBabylon } = await import('babylon-lite');
-          addToScene(scene, await loadBabylon(engine, 'https://www.babylonjs.com/scenes/Sponza/Sponza.babylon'));
+          addToScene(scene, await loadBabylon(engine, 'https://www.babylonjs.com/Scenes/Sponza/Sponza.babylon'));
           break;
         }
         default: {

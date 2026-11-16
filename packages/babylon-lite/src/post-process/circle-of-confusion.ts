@@ -1,3 +1,4 @@
+import { _rightHanded } from "#coordinate-system";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
@@ -26,8 +27,9 @@ export interface CircleOfConfusionPostProcessTaskConfig extends Omit<PostProcess
     focusDistance?: number;
     /** Focal length of the camera in scene units / 1000. Default 50. */
     focalLength?: number;
-    /** When true the depth texture stores camera-space depth (0..maxZ) rather
-     *  than normalized [0,1] depth, skipping the `cameraMinMaxZ` reconstruction. */
+    /** When true the depth texture stores camera-space depth (0..maxZ, or
+     *  0..-maxZ in a right-handed build, like the geometry renderer's VIEW_DEPTH)
+     *  rather than normalized [0,1] depth, skipping the `cameraMinMaxZ` reconstruction. */
     depthNotNormalized?: boolean;
 }
 
@@ -47,9 +49,10 @@ const COC_UNIFORM_WGSL = wgsl`struct CircleOfConfusionParams{focusDistance:f32,c
 
 /** Builds the fragment body. The only difference between normalized and
  *  camera-space depth is how `pixelDistance` is reconstructed. See the BJS
- *  `circleOfConfusion.fragment` shader. */
+ *  `circleOfConfusion.fragment` shader. A right-handed VIEW_DEPTH is the
+ *  signed (negative) camera-space z, so it is negated back to a distance. */
 function cocFragmentWGSL(depthNotNormalized: boolean): WgslSource {
-    const pixelDistance = depthNotNormalized ? `depth*1000.0` : `(cocParams.minZ+cocParams.maxZRange*depth)*1000.0`;
+    const pixelDistance = depthNotNormalized ? (_rightHanded ? `-depth*1000.0` : `depth*1000.0`) : `(cocParams.minZ+cocParams.maxZRange*depth)*1000.0`;
     return wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let depth=textureSample(cocDepthTexture,sourceSampler,uv).r;let pixelDistance=${pixelDistance};var coc=abs(cocParams.cocPrecalculation*((cocParams.focusDistance-pixelDistance)/pixelDistance));coc=clamp(coc,0.0,1.0);return vec4f(coc,coc,coc,1.0);}`;
 }
 

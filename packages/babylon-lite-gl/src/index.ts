@@ -34,13 +34,18 @@ export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.j
 export { getAlphaToCoverage, getCurrentSampleCount, setAlphaToCoverage } from "./alpha-to-coverage.js";
 
 // ─── Render loop ─────────────────────────────────────────────────────
-export { runRenderLoop, stopRenderLoop } from "./render-loop.js";
+export { runRenderLoop, stopRenderLoop, beginFrame, endFrame } from "./render-loop.js";
+
+// ─── GPU frame timing (optional) ────────────────────────────────────
+export { captureGPUFrameTime, getGPUFrameTimeCounter } from "./gpu-frame-time.js";
+export type { GLPerfCounter } from "./gpu-frame-time.js";
 
 // ─── Effects ─────────────────────────────────────────────────────────
 export {
     createEffect,
     useEffect,
     isEffectReady,
+    getEffectCompilationError,
     executeWhenCompiled,
     disposeEffect,
     setEffectFloat,
@@ -60,6 +65,8 @@ export {
     setEffectIntArray,
 } from "./effect.js";
 export type { GLEffectOptions, GLEffect } from "./effect.js";
+export { waitForEffect } from "./effect-ready.js";
+export type { GLEffectWaitOptions } from "./effect-ready.js";
 
 // ─── Effect renderer (fullscreen quad) ───────────────────────────────
 export { createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, disposeEffectWrapper } from "./effect-renderer.js";
@@ -72,13 +79,32 @@ export {
     generateTextureMipMaps,
     loadTexture2D,
     bindTexture,
+    unbindTexture,
     disposeTexture,
     updateRawTexture,
     updateTextureSamplingMode,
+    updateTextureSamplingPreset,
     updateTextureWrapMode,
     createTextureFromHandle,
+    getSamplingModeFilters,
+    isTextureReady,
+    // GLSamplingMode is a const + same-name type; one value re-export carries both.
+    GLSamplingMode,
 } from "./texture.js";
-export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export type { GLTextureOptions, GLTextureUpdateOptions, GLRawTextureOptions, GLFloatTextureOptions, GLTexture, GLSamplingFilters } from "./texture.js";
+export { createTextureFromSource } from "./texture-source.js";
+export type { GLTextureSourceOptions } from "./texture-source.js";
+export {
+    createTexture3DFromPixels,
+    bindTexture3D,
+    unbindTexture3D,
+    setEffectTexture3D,
+    generateTexture3DMipMaps,
+    updateTexture3DSamplingMode,
+    updateTexture3DWrapMode,
+    disposeTexture3D,
+} from "./texture-3d.js";
+export type { GLPixelsTexture3DOptions, GLTexture3D } from "./texture-3d.js";
 
 // ─── Dynamic textures ────────────────────────────────────────────────
 export { createDynamicTexture, updateDynamicTexture, clearDynamicTextureSource } from "./dynamic-texture.js";
@@ -88,12 +114,21 @@ export {
     createRenderTarget,
     createFloatRenderTarget,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     generateRenderTargetMipMaps,
     resizeRenderTarget,
     readRenderTargetPixels,
+    readRenderTargetPixelsToBuffer,
     disposeRenderTarget,
 } from "./render-target.js";
-export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions } from "./render-target.js";
+export type {
+    GLRenderTarget,
+    GLRenderTargetOptions,
+    GLFloatRenderTargetOptions,
+    GLReadPixelsRegionOptions,
+    GLReadPixelsOptions,
+    GLReadPixelsToBufferOptions,
+} from "./render-target.js";
 
 // ─── Meshes / buffers / instancing ───────────────────────────────────
 export {
@@ -130,6 +165,30 @@ export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeS
 export type { GLSprite, GLSpriteColor, GLSpriteRendererOptions, GLSpriteRenderer } from "./sprites.js";
 
 // ─── HTML-element textures ───────────────────────────────────────────
-// GLSamplingMode is a const + same-name type; one value re-export carries both.
-export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
-export type { GLHtmlElementTextureOptions } from "./html-texture.js";
+export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
+
+// ─── Text (analytic Slug coverage) ───────────────────────────────────
+export type { GLFont } from "./text/font.js";
+export { loadFont, createFontFromBuffer } from "./text/font.js";
+export { extractGlyphCurves, cubicToQuadratics } from "./text/glyph-extraction.js";
+export type { GLTextLayoutOptions } from "./text/layout.js";
+export type { GLGlyphStorage, GLCurveSetId, GLQuadCurve, GLGlyphBounds, GLGlyphCurves } from "./text/glyph-storage.js";
+export { createGlyphStorage, updateGlyphStorage, disposeGlyphStorage } from "./text/glyph-storage.js";
+export type { GLTextData, GLPlacedGlyph, GLGlyphRun, GLTextDataUpdate } from "./text/text-data.js";
+export { createTextData, updateTextData, disposeTextData } from "./text/text-data.js";
+export type { GLDefaultTextData } from "./text/default-text-data.js";
+export { createDefaultTextData, updateDefaultTextData, disposeDefaultTextData } from "./text/default-text-data.js";
+export type { GLTextLayer, GLTextLayerOptions, GLTextRenderer, GLTextRendererOptions } from "./text/text-renderer.js";
+export {
+    createTextLayer,
+    setTextLayerPosition,
+    createTextRenderer,
+    renderText,
+    isTextRendererReady,
+    addTextRendererLayer,
+    removeTextRendererLayer,
+    registerTextRenderer,
+    unregisterTextRenderer,
+    disposeTextRenderer,
+} from "./text/text-renderer.js";
+export { setFontWeightOffset } from "./text/set-font-weight-offset.js";

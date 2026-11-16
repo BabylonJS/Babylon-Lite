@@ -101,6 +101,8 @@ function makePhysicsNode(scene: Scene, overrides: Record<string, unknown> = {}):
             position: { x: 0, y: 0, z: 0 },
             rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
             scaling: { x: 1, y: 1, z: 1 },
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            worldMatrixVersion: 1,
             ...overrides,
         },
         getScene: () => scene,
@@ -114,7 +116,7 @@ function makePhysicsNode(scene: Scene, overrides: Record<string, unknown> = {}):
 
 /** Minimal scene exposing what the physics step reads: `_beforeRender`, `fixedDeltaMs`, real-delta fallback. */
 function makeScene(fixedDeltaMs = 0, engineCurrentDelta = 0): SceneContext {
-    return { _beforeRender: [], fixedDeltaMs, surface: { engine: { _currentDelta: engineCurrentDelta } } } as unknown as SceneContext;
+    return { _beforeRender: [], _disposables: [], fixedDeltaMs, surface: { engine: { _currentDelta: engineCurrentDelta } } } as unknown as SceneContext;
 }
 
 /** Invoke every registered before-render callback with `deltaMs`, as the render loop would each frame. */
@@ -463,9 +465,11 @@ describe("PhysicsEngine", () => {
             parent.addConstraint(child, hinge);
 
             plugin.dispose();
+            // World teardown releases each live constraint exactly once before the world itself.
+            expect(hknp.HP_Constraint_Release).toHaveBeenCalledTimes(1);
 
             expect(() => hinge.dispose()).not.toThrow();
-            expect(hknp.HP_Constraint_Release).not.toHaveBeenCalled();
+            expect(hknp.HP_Constraint_Release).toHaveBeenCalledTimes(1);
         });
     });
 

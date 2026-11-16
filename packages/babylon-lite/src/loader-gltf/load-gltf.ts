@@ -25,6 +25,7 @@ import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, applyGltfOp
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
 import { _appendEnabledGltfFeatures } from "./gltf-feature-hooks.js";
+import { _rightHanded } from "#coordinate-system";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -289,6 +290,8 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
  *  bundle for plain metallic-roughness assets. */
 function assetUsesGltfFeatures(json: any) {
     return (
+        // A right-handed engine routes every mesh through the primitive feature (see the registry).
+        _rightHanded ||
         json.extensionsUsed?.length ||
         json.animations?.length ||
         // "extras" (per-item metadata) or "sparse" (sparse accessor) anywhere in the asset means a
@@ -350,10 +353,11 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
     }
 
     // Synthetic root (like BJS __root__) — applies RH→LH conversion via scale
-    // BJS: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1, 1, 1, 1)
+    // BJS: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1, 1, 1, 1). A right-handed engine keeps glTF's
+    // native space, so its root is the identity (BJS adds no root conversion either).
     const sceneRoots: number[] = json.scenes?.[json.scene ?? 0]?.nodes ?? [];
     const rootChildren = sceneRoots.map((ni: number) => buildNode(ni));
-    const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+    const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, _rightHanded ? 1 : -1, 1, 1);
     root.children.push(...rootChildren);
     return { root, nodeMap };
 }
@@ -620,7 +624,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 let props: PbrMaterialProps;
                 if (_needsPbrExt) {
                     const extMod = await _ensurePbrExt();
-                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
+                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, extLayers, samplerFor);
                     props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
                     // UV-transform is opt-in; the gate and its conditional import live in the ext
                     // module so the import plumbing is not emitted into this file, which every
@@ -629,8 +633,8 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     await extMod.applyGltfUvTransform(props, tex);
                 } else {
                     const tex = buildSampledPbrTextures
-                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture, extLayers)
+                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture, extLayers);
                     props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
                 }
                 // Opt-in PBR features decided from the glTF material data (emissive,

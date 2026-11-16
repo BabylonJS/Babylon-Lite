@@ -74,6 +74,15 @@ function releaseCapturedTexture(tex: Texture2D): void {
     }
 }
 
+function updateCapturedDynamicTexture(tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean): void {
+    const rec = tex._recoverySource;
+    if (rec?.kind === "dynamic") {
+        rec.source = source;
+        rec.flipY = flipY;
+        rec.premultipliedAlpha = premultipliedAlpha;
+    }
+}
+
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
     const owner = new WeakRef(state);
@@ -86,8 +95,28 @@ function attachRecoveryCapture(engine: EngineContext): void {
     // for any other engine still capturing.
     _setDerivedTexture2DHook(trackDerivedTexture);
     _setTextureReleaseHook(releaseCapturedTexture);
+    // Disabling capture stops new records, not updates to sources a later enable may reuse.
+    engine._updateCapturedDynamicTexture = updateCapturedDynamicTexture;
     engine._dlr = {
         t: stamp,
+        dt(tex, width, height, format, levels, samplerDesc): void {
+            stamp(tex, {
+                kind: "dynamic",
+                width,
+                height,
+                format,
+                levels,
+                samplerDesc,
+                source: null,
+                flipY: true,
+                premultipliedAlpha: false,
+            });
+        },
+        c(renderable, builder, ...args): void {
+            if (state._meshCaptureRefs) {
+                renderable._rebuild = () => builder(...args);
+            }
+        },
         async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload): Promise<Texture2D> {
             const bitmap = await createImageBitmap(source, {
                 premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",
@@ -140,16 +169,17 @@ function attachRecoveryCapture(engine: EngineContext): void {
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
             stamp(tex, { kind: "render", width, height, format, samplerDesc });
         },
-        w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
+        w(tex: Texture2D, data: ArrayBufferView, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
             const source = tex._recoverySource;
             if (source?.kind !== "pixels") {
                 return;
             }
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
             const rowBytes = width * 4;
             for (let row = 0; row < height; row++) {
                 const srcStart = dataOffset + row * bytesPerRow;
                 const dstStart = ((y + row) * source.width + x) * 4;
-                source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
+                source.data.set(bytes.subarray(srcStart, srcStart + rowBytes), dstStart);
             }
         },
         m(

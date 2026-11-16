@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { getMeshGeometry, getMeshTriangles } from "../../../packages/babylon-lite/src/mesh/get-mesh-geometry";
+import { createMeshFromData } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 function completeMesh(): Mesh {
@@ -15,7 +17,63 @@ function completeMesh(): Mesh {
     } as unknown as Mesh;
 }
 
+function createMeshEngine(): EngineContext {
+    const device = {
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const storage = new ArrayBuffer(Number(descriptor.size));
+            return {
+                destroy: vi.fn(),
+                getMappedRange: vi.fn(() => storage),
+                unmap: vi.fn(),
+            } as unknown as GPUBuffer;
+        }),
+    };
+    return { _device: device } as unknown as EngineContext;
+}
+
 describe("getMeshGeometry", () => {
+    it.each([
+        ["omitted", undefined],
+        ["empty", new Float32Array()],
+    ] as const)("omits %s tangents from factory-created public geometry", (_name, tangents) => {
+        const mesh = createMeshFromData(
+            createMeshEngine(),
+            "triangle",
+            new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            new Uint32Array([0, 1, 2]),
+            undefined,
+            undefined,
+            tangents
+        );
+
+        const geometry = getMeshGeometry(mesh);
+
+        expect(geometry?.tangents).toBeUndefined();
+        expect(Object.hasOwn(geometry!, "tangents")).toBe(false);
+    });
+
+    it("returns a caller-owned copy of nonempty factory tangents", () => {
+        const tangents = new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]);
+        const mesh = createMeshFromData(
+            createMeshEngine(),
+            "triangle",
+            new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            new Uint32Array([0, 1, 2]),
+            undefined,
+            undefined,
+            tangents
+        );
+
+        const geometry = getMeshGeometry(mesh);
+
+        expect(geometry?.tangents).toEqual(tangents);
+        expect(geometry?.tangents).not.toBe(tangents);
+        geometry!.tangents![0] = -1;
+        expect(tangents[0]).toBe(1);
+    });
+
     it("returns exact caller-owned copies of every retained attribute", () => {
         const mesh = completeMesh();
         const geometry = getMeshGeometry(mesh);

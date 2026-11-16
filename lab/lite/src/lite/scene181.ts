@@ -11,7 +11,7 @@ import {
     createDefaultTextData,
     updateDefaultTextData,
     createTextRenderable,
-    addTextRenderable,
+    addTextRenderableToScene,
 } from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -33,7 +33,7 @@ async function run(): Promise<void> {
     const scale = 0.01;
     text.position.set(-data.width * scale * 0.5, data.height * scale * 0.5, 0);
     text.scaling.set(scale, scale, scale);
-    addTextRenderable(scene, text);
+    addTextRenderableToScene(scene, text);
 
     textarea.addEventListener("input", () => {
         updateDefaultTextData(data, textarea.value);

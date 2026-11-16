@@ -9,10 +9,9 @@
  * per-mesh light path; this wrapper mirrors that shape and forwards the feature
  * work to Lite — the clustering math lives entirely in Lite.
  *
- * Scope (⚡ partial): Babylon Lite clusters **point lights only**, so
- * {@link ClusteredLightContainer.IsLightSupported} accepts a compat `PointLight`
- * and rejects everything else (Babylon.js additionally clusters spot lights).
- * Each added light is snapshotted into a Lite `ClusteredPointLight` at add time;
+ * Scope (⚡ partial): Babylon Lite's clustered spot payload cannot represent
+ * Babylon.js exponent / inner-cone falloff, so only point lights are accepted.
+ * Each added point light is snapshotted into a Lite clustered light at add time;
  * later in-place mutation of the source light does not propagate. `maxRange` is a
  * clustering optimisation Babylon Lite manages internally, so the property is
  * stored for shape parity but does not re-bin lights.
@@ -23,9 +22,20 @@ import type { ClusteredLightContainer as LiteClusteredLightContainer, ClusteredP
 
 import { Light, PointLight } from "./lights.js";
 import type { Scene } from "../scene/scene.js";
+import { unsupported } from "../error.js";
 
 /** The numeric light type id Babylon.js reports for a clustered container (`LIGHTTYPEID_CLUSTERED_CONTAINER`). */
 const LIGHTTYPEID_CLUSTERED_CONTAINER = 5;
+
+function isSupportedPointLight(light: Light): light is PointLight {
+    if (!(light instanceof PointLight)) {
+        return false;
+    }
+    if (light.getScene()?.getEngine()._headless) {
+        return false;
+    }
+    return light._shadowGenerator === null && light._lite.shadowGenerator === undefined;
+}
 
 /**
  * Babylon.js `ClusteredLightContainer` — a `Light` that renders a large set of
@@ -56,18 +66,17 @@ export class ClusteredLightContainer extends Light {
     private _selfIntensity = 1;
 
     /**
-     * True if a point/spot light can be clustered by this container. Babylon Lite
-     * clusters point lights only.
+     * True if this point light can be represented by Lite's clustered payload.
      */
     public static IsLightSupported(light: Light): boolean {
-        return light instanceof PointLight;
+        return isSupportedPointLight(light);
     }
 
     /**
      * Creates a new clustered light container.
      *
      * @param name - The container's node name.
-     * @param lights - Initial lights to cluster (point lights).
+     * @param lights - Initial point lights to cluster.
      * @param scene - Owning scene; when supplied the container is registered and
      * built into the Lite scene at engine start.
      */
@@ -93,7 +102,7 @@ export class ClusteredLightContainer extends Light {
 
     /** True when clustered lighting is available (Babylon Lite backs it on WebGPU). */
     public get isSupported(): boolean {
-        return true;
+        return !this._scene?.getEngine()._headless;
     }
 
     /** The lights added to this clustering system. */
@@ -140,22 +149,29 @@ export class ClusteredLightContainer extends Light {
         this._maxRange = value;
     }
 
-    /** Babylon.js `container.addLight(light)`. Only point lights are clustered. */
+    /** Babylon.js `container.addLight(light)`. */
     public addLight(light: Light): void {
-        if (!ClusteredLightContainer.IsLightSupported(light) || light._clusteredContainer) {
+        if (!isSupportedPointLight(light) || light._clusteredContainer) {
             return;
         }
-        const point = light as PointLight;
+        if (this._built) {
+            // Lite bakes clustered capacity and point/spot layout into GPU state.
+            // Growing after registration needs a Lite-owned rebuild lifecycle.
+            unsupported(
+                "ClusteredLightContainer.addLight after engine start",
+                "Lite bakes clustered-light capacity and layout into GPU state; dynamic growth needs a Lite-owned rebuild lifecycle."
+            );
+        }
         light._clusteredContainer = this;
-        const pos = point.position;
-        const diffuse = point.diffuse;
+        const position = light.position;
+        const diffuse = light.diffuse;
         const liteLight = createClusteredPointLight(this._container, {
-            position: [pos.x, pos.y, pos.z],
+            position: [position.x, position.y, position.z],
             diffuse: [diffuse.r, diffuse.g, diffuse.b],
-            range: point.range,
-            intensity: point.intensity,
+            range: light.range,
+            intensity: light.intensity,
         });
-        this._childLights.push(point);
+        this._childLights.push(light);
         this._liteLights.push(liteLight);
         // Exclude the light from the ordinary per-mesh light path (Babylon.js
         // removes it from scene.lights when it joins a cluster). The detach targets
@@ -163,10 +179,10 @@ export class ClusteredLightContainer extends Light {
         // different scene (or none at all) must not touch this container's scene
         // bookkeeping, since `removeFromScene` also disposes the light's shadow
         // generator against the scene it is handed.
-        const lightScene = point.getScene();
+        const lightScene = light.getScene();
         if (lightScene) {
-            lightScene._unregisterNode(point);
-            removeFromScene(lightScene._lite, point._lite);
+            lightScene._unregisterNode(light);
+            removeFromScene(lightScene._lite, light._lite);
         }
         this._markDirty();
     }
@@ -176,25 +192,23 @@ export class ClusteredLightContainer extends Light {
      * in the container's light list, or `-1` if it was not present.
      */
     public removeLight(light: Light): number {
-        const index = this._childLights.indexOf(light as PointLight);
+        const index = this._childLights.findIndex((child) => child === light);
         if (index === -1) {
             return -1;
         }
         this._childLights.splice(index, 1);
         const liteLight = this._liteLights.splice(index, 1)[0];
-        const pool = this._container.pointLights;
-        const j = liteLight ? pool.indexOf(liteLight) : -1;
+        const j = liteLight ? this._container.pointLights.indexOf(liteLight) : -1;
         if (j !== -1) {
-            pool.splice(j, 1);
+            this._container.pointLights.splice(j, 1);
         }
         light._clusteredContainer = null;
         // Return the light to the ordinary per-mesh light path of its own scene —
         // the mirror of the detach performed by {@link addLight}.
-        const point = light as PointLight;
-        const lightScene = point.getScene();
+        const lightScene = light.getScene();
         if (lightScene) {
-            lightScene._registerLight(point);
-            addToScene(lightScene._lite, point._lite);
+            lightScene._registerLight(light);
+            addToScene(lightScene._lite, light._lite);
         }
         this._markDirty();
         return index;

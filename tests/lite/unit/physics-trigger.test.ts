@@ -72,7 +72,7 @@ describe("Havok trigger events", () => {
             HP_World_SetGravity: vi.fn(),
             HP_World_Step: vi.fn(),
         });
-        const scene = { _beforeRender: [], fixedDeltaMs: 0, surface: { engine: { _currentDelta: 16 } } } as unknown as SceneContext;
+        const scene = { _beforeRender: [], _disposables: [], fixedDeltaMs: 0, surface: { engine: { _currentDelta: 16 } } } as unknown as SceneContext;
         const world = createHavokWorld(scene, hknp);
         const calls: string[] = [];
         let dispose = (): void => undefined;

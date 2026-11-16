@@ -1,6 +1,6 @@
 import type { Mesh } from "../mesh/mesh.js";
 import { retireGpuResourceBatch } from "../engine/gpu-resource-retirement.js";
-import { _enableTaskMeshPopulation, _rebindRenderTask, type RenderTask } from "./render-task.js";
+import { _enableTaskMeshPopulation, _queueTaskMeshes, _rebindRenderTask, type RenderTask } from "./render-task.js";
 import type { Renderable } from "../render/renderable.js";
 
 /** Opt an `autoMirror: false` render task into following runtime geometry and material rebuilds
@@ -87,6 +87,41 @@ export function enableRenderTaskMeshRefresh(task: RenderTask): void {
             dirty = false;
         }
     };
+    task._addMeshes = (meshes, options): void => {
+        const length = tracked.length;
+        const wasDirty = dirty;
+        try {
+            if (options?.material) {
+                dirty = true;
+                _queueTaskMeshes(task, meshes, options);
+            } else {
+                const members = new Set(tracked);
+                for (const mesh of meshes) {
+                    if (mesh.material && !members.has(mesh)) {
+                        members.add(mesh);
+                        tracked.push(mesh);
+                    }
+                }
+                if (tracked.length === length) {
+                    return;
+                }
+                dirty = true;
+                if (task._sceneBG) {
+                    _rebindRenderTask(task);
+                }
+            }
+        } catch (error) {
+            tracked.length = length;
+            dirty = wasDirty;
+            replacedRenderables = [];
+            trackedEntryCount = 0;
+            throw error;
+        }
+        finishReplacements();
+        if (task._sceneBG) {
+            dirty = false;
+        }
+    };
     task.record = (): void => {
         try {
             record();
@@ -121,6 +156,19 @@ export function enableRenderTaskMeshRefresh(task: RenderTask): void {
         if (index >= 0) {
             tracked.splice(index, 1);
         }
+        dirty = true;
+    };
+    task._removeMeshes = (meshes, members): void => {
+        for (const mesh of meshes) {
+            removeMesh?.(mesh);
+        }
+        let kept = 0;
+        for (const mesh of tracked) {
+            if (!members.has(mesh)) {
+                tracked[kept++] = mesh;
+            }
+        }
+        tracked.length = kept;
         dirty = true;
     };
     task.dispose = (): void => {

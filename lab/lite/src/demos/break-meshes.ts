@@ -44,6 +44,7 @@ import {
     setPbrEmissive,
     setShadowTaskCasterMeshes,
     startEngine,
+    setMeshVisible,
 } from "babylon-lite";
 import type { Mesh, PhysicsBody } from "babylon-lite";
 import { breakMesh } from "./break-mesh.js";
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
 
     // Resolve the glTF decoders + brdf LUT relative to this demo module so the
     // deployed demos site finds them under any base path.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     const asset = await loadGltf(engine, MODEL_URL);
     addToScene(scene, asset);
@@ -331,7 +332,7 @@ async function main(): Promise<void> {
     for (const [ax, az] of corners) {
         const a = createBox(engine, span * 0.02);
         a.position.set(cx + ax, groundY, cz + az);
-        a.visible = false;
+        setMeshVisible(a, false);
         addToScene(scene, a);
         anchors.push(a);
     }

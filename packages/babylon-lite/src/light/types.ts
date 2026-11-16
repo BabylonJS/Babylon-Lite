@@ -2,9 +2,15 @@
  *
  *  Each light type provides pipeline integration callbacks.
  *  PBR + Standard both consume the shared lights UBO (render/lights-ubo.ts);
- *  light type is encoded in vLightData.w (1=dir, 2=spot, 3=hemi, other=point). */
+ *  light type is encoded by its factory in vLightData.w; material extensions
+ *  own any additional packed interpretations. */
 
+import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneLightingExtension } from "./lighting-extension.js";
+
+/** @internal Copies shared light state onto a fresh clone; handed to `_cloneNode` by `cloneTransformNode`. */
+export type LightBaseCopier = (source: LightBase, clone: LightBase) => void;
 
 /** Shared base for all light types.
  *  Provides pipeline integration callbacks so render pipelines are light-agnostic. */
@@ -14,6 +20,11 @@ export interface LightBase extends SceneNode {
     excludedMeshIds?: ReadonlySet<string>;
     /** If non-empty, ONLY these mesh IDs are lit by this light. Takes priority over excludedMeshIds. */
     includedOnlyMeshIds?: ReadonlySet<string>;
+    /** Meshes excluded from this light by object identity. Applied before the ID sets. */
+    excludedMeshes?: ReadonlySet<Mesh>;
+    /** If non-empty, ONLY these meshes are lit by this light, minus any in {@link excludedMeshes}.
+     *  Applied before the ID sets. */
+    includedOnlyMeshes?: ReadonlySet<Mesh>;
     /** Shadow generator attached to this light. Set this to make the light cast shadows. */
     shadowGenerator?: import("../shadow/shadow-generator.js").ShadowGenerator;
 
@@ -26,6 +37,8 @@ export interface LightBase extends SceneNode {
     readonly _lightVersion: number;
     /** @internal Bumps `_lightVersion` after direct mutation of scalar/array light fields. */
     readonly _bumpLightVersion?: (() => void) | undefined;
+    /** @internal Verify an explicitly enabled material lighting implementation before scene build. */
+    readonly _validateLighting?: (extension: SceneLightingExtension | undefined) => void;
 }
 
 /** Maximum number of scene lights packed into the shared lights UBO.

@@ -64,12 +64,18 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 
 `DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) and active pass camera (`_camera`) so bindings can refresh target-size-dependent UBOs or camera-sorted instance buffers without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need this state still use this hook and version-guard their writes.
 
+Opaque material-family renderables may merge several meshes into one cached
+draw binding. Each per-mesh packet in such a binding remains independently
+owned: removing a mesh synchronously marks and detaches its packet before GPU
+retirement, and hidden or detached packets are never updated or drawn.
+Per-packet resources are retired with their mesh; resources shared by the
+merged material group stay alive until its last packet retires.
+
 ### Frame graph (`frame-graph/`)
 
 ```typescript
 export interface Task {
     readonly name: string;
-    executionEnabled?: boolean;
     readonly engine: EngineContext;
     readonly scene?: SceneContext;
     _passes: Pass[];
@@ -90,8 +96,6 @@ export interface FrameGraph {
 ```
 
 `createSceneContext()` eagerly creates a `FrameGraph` with one default `RenderTask` named `"scene"` that renders into the swapchain unless called with `{ defaultRenderTask: false }`. Post-process pipelines that render the scene to an offscreen source and write their final pass to the swapchain disable this default task so the scene is not drawn twice. User code can add tasks with `addTask()`, `addTaskAtStart()`, or `addTaskBefore()`.
-
-`executionEnabled` defaults to enabled. Setting it to `false` keeps the task recorded and its resources alive while `FrameGraph.execute()` skips both its task-level `execute()` hook and recorded passes for that frame.
 
 ### RenderTask
 
@@ -129,6 +133,12 @@ Important fields:
 | `autoMirror` | Set `false` to keep an empty explicit render list instead of mirroring the scene renderables.                                                             |
 
 `addMeshToTask(task, mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the completed scene-local material group's `r` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`. Standalone geometry-view factories explicitly opt into `_sceneIndependentRebuild`; only these may fall back to `_buildGroup._rebuildSingle` when no scene group exists.
+
+For multiple meshes, `addMeshesToTask(task, meshes, { material })` queues in input order and
+publishes at most one binding generation on a live task. Failure restores the pre-call queue and
+generation. `removeMeshesFromTask(task, meshes)` compacts all task lists using a membership set
+and reselects/releases update batches once. Empty batches are no-ops; task-specific refresh hooks
+preserve the same population and removal semantics as individual calls.
 
 `RenderTask.enabled` defaults to `true`. Setting it to `false` skips the pass before updates, attachment loads, resolves, or draws.
 
@@ -289,6 +299,31 @@ export function isNodeMaterial(material: Material): material is NodeMaterial;
 Material renderables intentionally do not import material-view helpers or unwrap the source material. They read the selected material object normally: plain materials recompute/store `material._renderFeatures` at build time, while views provide their own `_renderFeatures` and inherit every other property from the source. This keeps material-view helper bytes isolated to scenes that import `createMaterialView()` or family-specific view helpers. Mesh/pass feature bits remain separate and are computed per renderable.
 
 `markMaterialUboDirty()` increments `source._uboVersion`, so every renderable/view derived from that source can observe scalar/vector UBO changes independently. `rebuildMaterial()` scans scene meshes and matches either the source or views whose `source` is that material; `rebuildViews: false` limits matching to the exact supplied material/view. Use it for feature/layout changes such as texture changes, sampler/layout changes, alpha/culling changes, or view feature changes.
+
+### PBR Material Rebuild Lifecycle
+
+`rebuildMaterial()` clears the source material's cached `_renderFeatures`, runs the optional `scene._materialRebuild` seam, and collects the matching scene meshes. Meshes whose material family is not `"pbr"` always rebuild one by one through their group's closure (`resolveMeshRebuild`). The PBR meshes of the call take one of two paths, decided synchronously inside the call, so a request joins a pending PBR group rebuild exactly when it would without the choice:
+
+- **Group rebuild (default).** Each PBR mesh goes through the runtime mesh build (`scene-runtime-mesh-build.ts`) and joins one PBR group rebuild (`rebuildScenePbrPipelines`): every PBR renderable of the scene is replaced, the captured scene state is refreshed, a new PBR context is published, and the frame graph is rebuilt. Before the scene is built, a PBR mesh without a built group is skipped (the deferred build will build it).
+- **Per-mesh rebuild.** Taken only when `_pbrRebuildsComposed(scene, pbrMeshes)` (`material/pbr/pbr-built-variant.ts`) returns `true` for the whole set. Each PBR mesh is rebuilt through the scene-local group closure `r`, exactly like a material assignment, and no other PBR renderable, the PBR context or the frame graph is touched.
+
+**Cold start.** `material-rebuild.ts` loads `pbr-built-variant.ts` with a dynamic import and keeps `_pbrRebuildsComposed` in a module-level variable. The first `rebuildMaterial()` that matches a PBR mesh (in any scene) only starts that import and takes the group rebuild; once the import has resolved, later calls use the check. A failed import is ignored and PBR rebuilds keep taking the group rebuild. Scenes that never rebuild a PBR material fetch none of this code.
+
+**Build-time snapshot.** `buildPbrRenderables()` builds all of its meshes through `rebuildSingle`, then stores `_b = new Set(composePbr._c.keys())` on its PBR geometry context (`_PbrGeometryContext._b`): the composer-cache keys that this group build composed (see 06-pbr-material, Composed Shader Caching). Every variant in the snapshot was composed after the build loaded the lazy WGSL and helper modules its meshes need, so composing it again returns a complete shader. Variants composed later through the closure (runtime material assignments) are not added: such a variant may lack a module the build never loaded. Each group build (initial build, the per-mesh context of a runtime build, group rebuild) stores its own snapshot on the context it publishes.
+
+**Eligibility.** `_pbrRebuildsComposed` returns `true` only when no runtime build is in flight (`scene._runtimeBuilds.w`) and every PBR mesh of the set passes all of:
+
+1. The material's scene-local group exists, has its closure `r`, and lists the mesh (a mesh outside the member list needs the group rebuild to move it in).
+2. The mesh has no thin instances and no runtime thin-instance build (`_runtimeThinBuild`), and the material is not transmissive (`_transmissive`): their closures also capture culling and refraction state the key does not encode.
+3. The key the closure will ask its composer for is in the context's `_b`. The key is `_pbrComposeKey(features, features2, meshFeatures, ctx._sceneFeatures, lightMode, singleLightType, mesh._gpu._vbKey ?? "", mat._uv2Mask ?? 0, mat._pi ?? 0)`, where `features`/`features2` come from the cached `_renderFeatures` or, when it was cleared, from `_computePbrMaterialFeatures(mat)` without populating the cache, and `ctx`, `meshFeatures`, `lightMode` and `singleLightType` come from `_pbrMeshRequest(scene, mesh, features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT))`.
+
+One ineligible mesh sends all PBR meshes of the call to the group rebuild. If the check throws, the error is reported through the returned promise and the PBR meshes take the group rebuild.
+
+**Per-mesh execution.** The call empties the scene's material-swap queue, fills it with the PBR meshes of the call, drains it synchronously with `processMaterialSwaps(scene)`, and then puts back the meshes that were queued for other reasons, which keep their place for the next frame's drain. The drain rebuilds each mesh through `r` and bumps the material's `_csmGen`, `scene._renderableVersion` and `scene._materialEpoch`, as a material assignment does. The reused closure keeps the scene state it captured (environment textures, shadow lights, fog, tone mapping) instead of refreshing it. With `rebuildFrameGraph: true`, the frame graph is rebuilt once after all pending work settles, on either path.
+
+**Fallback.** If the drain throws, the call empties the queue, reports the error once through the returned promise (`rebuildMaterial()` forwards it to `scene._runtimeBuilds._x` and `console.error`), and sends those meshes to the group rebuild. The drain has already retired the failing mesh's renderable, so the mesh draws again once that group rebuild commits. Leaving the meshes queued instead would make the frame drain rethrow every frame.
+
+**Tests.** `tests/lite/unit/pbr-built-variant.test.ts` covers the eligibility rules (a variant another mesh of the group was built with; a variant composed through the closure after the build; UV2, UV-transform and shadow-receiving changes the build never composed; thin-instanced, transmissive and non-member meshes; a runtime build in flight). `tests/lite/unit/runtime-material-rebuild.test.ts` covers the cold start, both paths, meshes queued for other reasons, `rebuildFrameGraph` on the per-mesh path, and the fallback after a throwing rebuild.
 
 ## `_buildGroup` Pattern
 

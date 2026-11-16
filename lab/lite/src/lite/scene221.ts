@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
     // Utility layer — its render pass overlays the main scene with a freshly
     // cleared depth buffer so gizmos always appear on top.
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene);
 
     const axisDrag = createAxisDragGizmo(engine, utilityLayer, {
         dragAxis: { x: 1, y: 0, z: 0 },
