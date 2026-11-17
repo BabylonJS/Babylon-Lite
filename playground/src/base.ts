@@ -50,7 +50,7 @@ export function currentDeployVersion(): string | null {
  * immutable `/v/<ver>/` snapshot for a fixed release. Pass `null` for nightly.
  */
 export function baseForVersion(version: string | null): string {
-    return version ? `/v/${version}/` : "/";
+    return version ? `/v/${encodeURIComponent(version)}/` : "/";
 }
 
 // Same-origin asset extensions worth treating as deploy-base-relative when they
