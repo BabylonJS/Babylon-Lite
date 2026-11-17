@@ -120,13 +120,15 @@ still compile but alter behavior, so check them by hand:
 
 ## Entry points
 
-The entire public API is available from the single `@babylonjs/lite-gl` entry:
+The entire WebGL2 API is available from the `@babylonjs/lite-gl` entry:
 engine + render loop, effects & uniform setters, textures (incl. float / HDR +
 dynamic), the `EffectWrapper` fullscreen-quad renderer, render targets, meshes /
 vertex-index buffers + instancing, depth / stencil / color-mask / clear, scissor,
 blend modes, the sprite renderer, and HTML-element textures. The package is
 `sideEffects: false`, so a bundler tree-shakes away whichever features you don't
-use.
+use. A separate, **experimental and temporary** `@babylonjs/lite-gl/native` entry targets Babylon Native (see
+[below](#babylon-native-babylonjslite-glnative)); the two entries share no
+modules, so importing one never bundles the other.
 
 ### Core API (`@babylonjs/lite-gl`)
 
@@ -252,6 +254,61 @@ size. If a retained source was closed anyway, restore logs an error and falls
 back to transparent black for that texture only. Mipmaps requested with
 `generateTextureMipMaps` are rebuilt after the restored upload. No source is
 closed by lite-gl.
+
+### Babylon Native (`@babylonjs/lite-gl/native`)
+
+> **Experimental and temporary.** This backend is a temporary implementation
+> for evaluation, not a stable API or a long-term backend commitment. Its API
+> and implementation may change, be replaced, or be removed.
+
+The same function-based style, encoded into the Babylon Native engine protocol
+(protocol 9) instead of a `WebGL2RenderingContext`. The native runtime is read
+only when `createNativeEngine()` is called, never at import time. For the
+composition subset it implements, the entry uses the web entry's `GL*` type
+names, function signatures, and options, so shared rendering code can select
+either entry with a build-time alias. Engine creation, frames, and borrowed host
+textures are native-specific.
+
+```ts
+import { createNativeEngine, beginFrame, endFrame, createEffect, setEffectFloat, createVertexBuffer, createIndexBuffer, createMeshVao, drawMesh } from "@babylonjs/lite-gl/native";
+
+const engine = createNativeEngine();
+const effect = createEffect(engine, { name: "gradient", vertexSource, fragmentSource, attributeNames: ["position"], uniformNames: ["uTime"], samplerNames: [] });
+const vertices = createVertexBuffer(engine, new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]));
+const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 0, 2, 3]));
+const quad = createMeshVao(engine, [{ buffer: vertices, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, effect);
+
+beginFrame(engine);
+setEffectFloat(effect, "uTime", time);
+drawMesh(quad);
+endFrame(engine);
+```
+
+- **Engine / frames** — `createNativeEngine`, `disposeNativeEngine`,
+  `beginFrame` / `endFrame` (one command submission per frame),
+  `getRenderWidth`, `getRenderHeight` (native output size),
+  `getCurrentRenderTarget`, and `engine.caps.maxTextureSize`.
+- **Effects** — `createEffect` (accepts Lite GL `#version 300 es` sources),
+  `useEffect`, `isEffectReady`, `getEffectCompilationError` (always `null`:
+  compilation errors throw from `createEffect`), `disposeEffect`,
+  and the cached setters `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` /
+  `…Int` / `…Matrix` / `…FloatArray` / `…FloatArray2` / `…FloatArray3` /
+  `…FloatArray4` / `…Texture`.
+- **Geometry** — `createVertexBuffer`, `createIndexBuffer`, `createMeshVao`,
+  `bindMeshVao`, `drawMesh` (non-instanced: `instanceCount` must be `0`),
+  `disposeBuffer`, `disposeMeshVao`. A mesh vertex array owns only itself, so
+  several meshes can share one vertex/index buffer.
+- **Textures / targets** — `wrapNativeTexture` (borrows host storage),
+  `createRawTexture` (owns storage; `RGBA` / `UNSIGNED_BYTE` only), `disposeTexture`,
+  `createRenderTarget` (`width, height, { colorTexture? }`), `bindRenderTarget` /
+  `restoreDefaultFramebuffer` (also set a full-target viewport), `updateWrappedNativeTexture`
+  (replaces a borrowed handle and rebuilds its framebuffers),
+  `disposeRenderTarget`.
+- **State** — `setViewport` (pixel `GLViewport`), `setScissor`, `disableScissor`,
+  `setBlendMode`, `clearEngine` (`GLClearOptions`).
+
+The ownership and device-reset contract is documented in
+`docs/gl/architecture/03-native-lite-gl.md`.
 
 ## Demos
 

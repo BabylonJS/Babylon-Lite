@@ -29,6 +29,19 @@
 import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
+/** Presents a retained composition target without disturbing its contents. */
+export function presentRenderTarget(target: GLRenderTarget): void {
+    const engine = target._engine;
+    if (engine._isLost || engine._disposed || target._disposed || !target.isReady) {
+        return;
+    }
+    restoreDefaultFramebuffer(engine);
+    const gl = engine.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target._framebuffer);
+    gl.blitFramebuffer(0, 0, target.width, target.height, 0, 0, engine.canvas.width, engine.canvas.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+}
+
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */
 const UNSIGNED_BYTE = 0x1401;
 /** GL `gl.HALF_FLOAT`. */

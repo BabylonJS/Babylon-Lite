@@ -42,6 +42,20 @@ function callsNamed(mock: MockGL, name: string): MockCall[] {
 }
 
 describe("lite-gl mesh: buffer creation", () => {
+    it.each([false, true])("draws an indexed subrange without reconfiguring its VAO (32-bit=%s)", (wide) => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const buffer = createVertexBuffer(engine, new Float32Array([0, 0, 1, 0, 1, 1]));
+        const indices = createIndexBuffer(engine, wide ? new Uint32Array([0, 1, 2, 2, 1, 0]) : new Uint16Array([0, 1, 2, 2, 1, 0]));
+        const vao = createMeshVao(engine, [{ buffer, attributes: [{ name: "a", size: 2, divisor: 0 }] }], indices, effect);
+        useEffect(effect);
+        mock.clear();
+        drawMesh(vao, 0, 3, 3);
+        drawMesh(vao, 0, 0, 3);
+        expect(callsNamed(mock, "drawElements")[0]?.args).toEqual([engine.gl.TRIANGLES, 3, wide ? engine.gl.UNSIGNED_INT : engine.gl.UNSIGNED_SHORT, wide ? 12 : 6]);
+        expect(mock.count("vertexAttribPointer")).toBe(0);
+        disposeGLEngine(engine);
+    });
     it("createVertexBuffer uploads STATIC_DRAW by default and registers for restore", () => {
         const { mock, engine } = makeEngine();
         const data = new Float32Array([0, 0, 1, 0, 1, 1]);

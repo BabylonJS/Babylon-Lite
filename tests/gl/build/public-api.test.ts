@@ -3,6 +3,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { pathToFileURL } from "url";
+import { build as bundle } from "esbuild";
 import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "../../..");
@@ -15,10 +16,10 @@ const NODE = process.execPath;
 const BUILD_SCRIPT = resolve(PACKAGE_DIR, "build.mjs");
 const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 
-// The package ships a SINGLE public entry: the `@babylonjs/lite-gl` barrel (".").
-// The former per-feature sub-entries (`/sprites`, `/mesh`, …) were collapsed into
-// the barrel; their modules still emit as internal `dist/*.js` + `.d.ts` (the
-// barrel imports them) but are NOT public `exports`.
+// The package ships two public entries: the WebGL2 barrel (".") and the Babylon
+// Native backend ("./native"). The former per-feature sub-entries (`/sprites`,
+// `/mesh`, …) were collapsed into the barrel; their modules still emit as internal
+// `dist/*.js` + `.d.ts` (the barrel imports them) but are NOT public `exports`.
 const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture", "texture-source"] as const;
 const REMOVED_SUBPATHS = ["./html-texture", "./sprites", "./render-target", "./mesh", "./depth-stencil", "./scissor", "./dynamic-texture"] as const;
 
@@ -49,8 +50,8 @@ describe("babylon-lite-gl build output", () => {
             expect(existsSync(resolve(DIST, file)), `missing dist/${file}`).toBe(true);
         }
 
-        // The emitted manifest is the scoped npm name exposing EXACTLY one public
-        // export — the barrel. The former sub-entries must NOT be published anymore.
+        // The emitted manifest is the scoped npm name exposing EXACTLY the web barrel
+        // and the native entry. The former sub-entries must NOT be published anymore.
         const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown>; dependencies?: Record<string, string> };
         expect(pkg.name).toBe("@babylonjs/lite-gl");
 
@@ -59,7 +60,7 @@ describe("babylon-lite-gl build output", () => {
         const sourceDependencies = (JSON.parse(readFileSync(resolve(PACKAGE_DIR, "package.json"), "utf-8")) as { dependencies?: Record<string, string> }).dependencies;
         expect(sourceDependencies?.["text-shaper"]).toBeDefined();
         expect(pkg.dependencies).toEqual(sourceDependencies);
-        expect(Object.keys(pkg.exports ?? {})).toEqual(["."]);
+        expect(Object.keys(pkg.exports ?? {})).toEqual([".", "./native"]);
         for (const subpath of REMOVED_SUBPATHS) {
             expect(pkg.exports?.[subpath], `exports["${subpath}"] must no longer be published`).toBeUndefined();
         }
@@ -229,5 +230,33 @@ describe("babylon-lite-gl build output", () => {
         expect(existsSync(typesTarget), `exports["."] types -> ${barrel!.types} missing on disk`).toBe(true);
         const resolved = (await import(pathToFileURL(importTarget).href)) as Record<string, unknown>;
         expect(typeof resolved.createGLEngine, `exports["."] should expose createGLEngine`).toBe("function");
+
+        // ── The Babylon Native entry, resolved through the same exports map ──
+        const nativeEntry = distPkg.exports["./native"];
+        expect(nativeEntry).toEqual({ import: "./native/index.js", types: "./native/index.d.ts" });
+        const nativeTypes = resolve(DIST, nativeEntry!.types!);
+        const nativeDtsResult = typecheckDts(nativeTypes);
+        if (nativeDtsResult.status !== 0) {
+            throw new Error(`dist/native/index.d.ts has TypeScript errors:\n${nativeDtsResult.stdout ?? ""}${nativeDtsResult.stderr ?? ""}`);
+        }
+
+        // Importing the native entry must not touch the native runtime; it is only
+        // required once an engine is created.
+        expect((globalThis as { _native?: unknown })._native).toBeUndefined();
+        const nativeMod = (await import(pathToFileURL(resolve(DIST, nativeEntry!.import!)).href)) as Record<string, unknown>;
+        expect(() => (nativeMod.createNativeEngine as () => unknown)()).toThrow(/requires the Babylon Native runtime/);
+
+        // The two entries are disjoint module graphs: a web bundle carries no native
+        // code and a native bundle carries no WebGL code.
+        const graph = async (entry: string) =>
+            Object.keys(
+                (await bundle({ entryPoints: [resolve(DIST, entry)], bundle: true, format: "esm", platform: "neutral", write: false, metafile: true, logLevel: "silent" })).metafile
+                    .inputs
+            ).map((input) => input.replace(/\\/g, "/"));
+        const webInputs = await graph(barrel!.import!);
+        const nativeInputs = await graph(nativeEntry!.import!);
+        expect(webInputs.filter((input) => input.includes("/dist/native/"))).toEqual([]);
+        expect(nativeInputs.length).toBeGreaterThan(1);
+        expect(nativeInputs.filter((input) => !input.includes("/dist/native/"))).toEqual([]);
     }, 300_000);
 });

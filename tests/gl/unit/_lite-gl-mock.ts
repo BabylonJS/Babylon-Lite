@@ -151,6 +151,8 @@ export function createMockGL(): MockGL {
         UNSIGNED_INT: 0x1405,
         // ──── framebuffer / renderbuffer (render targets) ────────────────
         FRAMEBUFFER: 0x8d40,
+        READ_FRAMEBUFFER: 0x8ca8,
+        DRAW_FRAMEBUFFER: 0x8ca9,
         RENDERBUFFER: 0x8d41,
         COLOR_ATTACHMENT0: 0x8ce0,
         DEPTH_ATTACHMENT: 0x8d00,
@@ -410,6 +412,12 @@ export function createMockGL(): MockGL {
         uniform1fv: (loc: object, value: unknown): void => {
             rec("uniform1fv", loc, value);
         },
+        uniform2fv: (loc: object, value: unknown): void => {
+            rec("uniform2fv", loc, value);
+        },
+        uniform3fv: (loc: object, value: unknown): void => {
+            rec("uniform3fv", loc, value);
+        },
         uniform4fv: (loc: object, value: unknown): void => {
             rec("uniform4fv", loc, value);
         },
@@ -426,6 +434,9 @@ export function createMockGL(): MockGL {
         },
         bindFramebuffer: (target: number, f: object | null): void => {
             rec("bindFramebuffer", target, f);
+        },
+        blitFramebuffer: (...args: unknown[]): void => {
+            rec("blitFramebuffer", ...args);
         },
         framebufferTexture2D: (...args: unknown[]): void => {
             rec("framebufferTexture2D", ...args);

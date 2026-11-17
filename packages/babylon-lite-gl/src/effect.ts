@@ -554,6 +554,30 @@ export function setEffectFloatArray(effect: GLEffect, name: string, array: Float
     engine.gl.uniform1fv(loc, array);
 }
 
+/** `gl.uniform2fv` — an array of `vec2`s. Not value-cached. */
+export function setEffectFloatArray2(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
+    if (engine._isLost || !effect.isReady) {
+        return;
+    }
+    const location = effect.uniformLocations[name];
+    if (location !== null && location !== undefined) {
+        engine.gl.uniform2fv(location, array);
+    }
+}
+
+/** `gl.uniform3fv` — an array of `vec3`s. Not value-cached. */
+export function setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
+    if (engine._isLost || !effect.isReady) {
+        return;
+    }
+    const location = effect.uniformLocations[name];
+    if (location !== null && location !== undefined) {
+        engine.gl.uniform3fv(location, array);
+    }
+}
+
 /** `gl.uniform4fv` — an array of `vec4`s (`Effect.setFloatArray4` / `setArray4`).
  *  Not value-cached. */
 export function setEffectFloatArray4(effect: GLEffect, name: string, array: Float32Array | number[]): void {

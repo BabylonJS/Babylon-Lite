@@ -440,6 +440,16 @@ export function getRenderHeight(engine: GLEngineContext): number {
     return engine.canvas.height;
 }
 
+/** Number of live sampled textures managed by the context. */
+export function getTextureCount(engine: GLEngineContext): number {
+    return engine._textures.size;
+}
+
+/** Current drawing target, or null for the canvas framebuffer. */
+export function getCurrentRenderTarget(engine: GLEngineContext): GLRenderTarget | null {
+    return engine._currentRenderTarget;
+}
+
 /** Current hardware-scaling factor — drawing-buffer = clientSize × dpr / level. */
 export function getHardwareScalingLevel(engine: GLEngineContext): number {
     return engine._hsl;

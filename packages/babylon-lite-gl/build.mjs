@@ -1,13 +1,15 @@
 // Plain-`tsc` build for @babylonjs/lite-gl — no bundler (see docs/gl/architecture/00-lite-gl.md for rationale).
 //
 // `tsc` (driven by tsconfig.json: `outDir: dist`, `stripInternal`) emits one
-// `.js` + `.d.ts` per source module straight into `dist/`, mirroring `src/`.
+// `.js` + `.d.ts` per source module straight into `dist/`, mirroring `src/`
+// (the Babylon Native backend in `src/native/` lands in `dist/native/`).
 // Every relative import in `src` already carries an explicit `.js` extension, so
 // the emitted JS is runnable native ESM — no resolver or bundler required.
 //
 // `tsc` does not emit a publish manifest, so after compiling we write the
 // publish-ready `dist/package.json` (the scoped `@babylonjs/lite-gl` name with
-// the public `exports` map) and copy the README. The GL npm pipeline publishes
+// the public `exports` map: the web entry `.` and the native entry `./native`)
+// and copy the README. The GL npm pipeline publishes
 // the `dist/` folder directly (`npm publish ./packages/babylon-lite-gl/dist`),
 // so the manifest must live inside `dist/`.
 //
@@ -75,6 +77,7 @@ const manifest = {
     ...(runtimeDependencies ? { dependencies: runtimeDependencies } : {}),
     exports: {
         ".": { import: "./index.js", types: "./index.d.ts" },
+        "./native": { import: "./native/index.js", types: "./native/index.d.ts" },
     },
     ...(provenance ? { babylonLiteRelease: provenance } : {}),
 };

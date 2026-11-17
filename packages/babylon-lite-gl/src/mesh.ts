@@ -547,8 +547,10 @@ export function bindMeshVao(vao: GLMeshVao): void {
  *
  * @param vao - The mesh VAO to draw.
  * @param instanceCount - Instance count for instanced draws. Default 0 (non-instanced).
+ * @param indexStart - First index in the retained mesh.
+ * @param indexCount - Number of indices; defaults to the complete mesh.
  */
-export function drawMesh(vao: GLMeshVao, instanceCount = 0): void {
+export function drawMesh(vao: GLMeshVao, instanceCount = 0, indexStart = 0, indexCount = vao._indexBuffer.count): void {
     const engine = vao._engine;
     if (engine._isLost || engine._disposed || vao._disposed) {
         return;
@@ -562,9 +564,9 @@ export function drawMesh(vao: GLMeshVao, instanceCount = 0): void {
     const gl = engine.gl;
     const type = ib.is32Bits ? UNSIGNED_INT : UNSIGNED_SHORT;
     if (instanceCount > 0) {
-        gl.drawElementsInstanced(TRIANGLES, ib.count, type, 0, instanceCount);
+        gl.drawElementsInstanced(TRIANGLES, indexCount, type, indexStart * (ib.is32Bits ? 4 : 2), instanceCount);
     } else {
-        gl.drawElements(TRIANGLES, ib.count, type, 0);
+        gl.drawElements(TRIANGLES, indexCount, type, indexStart * (ib.is32Bits ? 4 : 2));
     }
 }
 

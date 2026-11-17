@@ -10,6 +10,7 @@ import {
     readRenderTargetPixels,
     readRenderTargetPixelsToBuffer,
     resizeRenderTarget,
+    presentRenderTarget,
 } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { setEffectTexture } from "../../../packages/babylon-lite-gl/src/effect";
@@ -54,6 +55,25 @@ function lastCall(mock: MockGL, name: string): MockCall | undefined {
 }
 
 describe("lite-gl render-target: createRenderTarget", () => {
+    it("presents a retained image and leaves framebuffer bindings coherent", () => {
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        bindRenderTarget(target);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(callsNamed(mock, "blitFramebuffer")[0]?.args).toEqual([0, 0, 256, 128, 0, 0, 800, 600, gl.COLOR_BUFFER_BIT, gl.NEAREST]);
+        expect(lastCall(mock, "bindFramebuffer")?.args).toEqual([gl.READ_FRAMEBUFFER, null]);
+        expect(engine._state.boundFramebuffer).toBeNull();
+        expect(mock.count("clear")).toBe(0);
+        mock.clear();
+        bindRenderTarget(target);
+        expect(lastCall(mock, "bindFramebuffer")?.args).toEqual([gl.FRAMEBUFFER, target._framebuffer]);
+        disposeRenderTarget(target);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(engine);
+    });
     it("creates one FBO, attaches the color texture at COLOR_ATTACHMENT0, validates completeness, and registers in _renderTargets", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
