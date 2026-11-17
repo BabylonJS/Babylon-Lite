@@ -28,6 +28,8 @@ interface CurveSource {
     readonly endTime: number;
 }
 
+type MutableSamplerBuffers = { -readonly [K in "input" | "output"]: AnimationSampler[K] };
+
 function getSources(group: AnimationGroup): CurveSource[] {
     const gltf = group._gltfMixer;
     if (gltf) {
@@ -164,5 +166,7 @@ export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number,
             write(key.value, offset);
         }
     }
-    Object.assign(source.sampler, { input, output });
+    const sampler = source.sampler as MutableSamplerBuffers;
+    sampler.input = input;
+    sampler.output = output;
 }
