@@ -127,12 +127,14 @@ describe("animation curve editing", () => {
     it("uses edited keys with the property blending mixer", () => {
         const { manager, target, group } = propertyGroup();
         enablePropertyAnimationBlending(manager);
+        group.weight = 0.5;
+        updateAnimationManager(manager, 0);
         setAnimationTrackKeys(group, 0, [
             { time: 0, value: [2] },
             { time: 1, value: [6] },
         ]);
         updateAnimationManager(manager, 500);
-        expect(target.value).toBeCloseTo(4);
+        expect(target.value).toBeCloseTo(2);
     });
 
     it("rejects invalid edits atomically and reports unsupported groups", () => {
