@@ -2856,10 +2856,8 @@
             function renderSceneCardImage(s, priorityAttrs) {
                 return (
                     '<img src="' +
-                    expBasePath() +
-                    '/thumbnails/scene' +
-                    s.id +
-                    '.jpg" onerror="this.style.display=\'none\'" alt="' +
+                    escapeAttr(s.thumbnailUrl ?? expBasePath() + "/thumbnails/scene" + s.id + ".jpg") +
+                    '" onerror="this.style.display=\'none\'" alt="' +
                     s.name +
                     '"' +
                     priorityAttrs +

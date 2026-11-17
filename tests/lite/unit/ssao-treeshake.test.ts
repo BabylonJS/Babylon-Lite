@@ -1,8 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { build } from "esbuild";
 import { resolve } from "node:path";
+import { build as buildVite } from "vite";
+import { wgslMinifyPlugin } from "../../../scripts/wgsl-minify-plugin";
 
 describe("SSAO root-entry opt-in", () => {
+    it.each([false, true])("retains orthographic SSAO math only with the camera enabler (%s)", async (orthographic) => {
+        const source = `import {createSsaoTask${orthographic ? ",enableOrthographicCamera" : ""}} from ${JSON.stringify(resolve("packages/babylon-lite/src/index.ts"))};
+globalThis.usedExport=[createSsaoTask${orthographic ? ",enableOrthographicCamera" : ""}];`;
+        const result = await buildVite({
+            configFile: false,
+            logLevel: "silent",
+            plugins: [
+                wgslMinifyPlugin(),
+                {
+                    name: "ssao-projection-test",
+                    resolveId: (id) => (id === "\0ssao-projection-entry" ? id : undefined),
+                    load: (id) => (id === "\0ssao-projection-entry" ? source : undefined),
+                },
+            ],
+            build: {
+                write: false,
+                minify: "terser",
+                rollupOptions: { input: "\0ssao-projection-entry", external: [/\.wasm$/, /\?worker&inline$/] },
+            },
+        });
+        const outputs = Array.isArray(result) ? result : [result];
+        const code = outputs
+            .flatMap((output) => ("output" in output ? output.output : []))
+            .map((chunk) => (chunk.type === "chunk" ? chunk.code : ""))
+            .join("\n");
+        expect(code.includes("fn aoViewScale")).toBe(orthographic);
+        expect(code.includes("fn aoProjectedRadius")).toBe(orthographic);
+        expect(code.includes("fn deviceDepth")).toBe(orthographic);
+        expect(code.includes("SSAO requires finite, ordered camera projection bounds.")).toBe(orthographic);
+    });
     it.each(["createRenderTask", "createSceneContext", "enablePbrSsao"])("isolates pass lifetime and projection hooks behind dynamic PBR (%s)", async (name) => {
         const result = await build({
             stdin: {

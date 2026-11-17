@@ -8,7 +8,7 @@
  */
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(212);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene212-gltf-dispersion");
@@ -17,9 +17,6 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 212 skipped via skipParity in scene-config.json");
 
 test("Scene 212 — DispersionTest matches Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 212, force: true });
-
     await page.goto("/scene212.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);

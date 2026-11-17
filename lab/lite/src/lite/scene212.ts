@@ -6,13 +6,25 @@
 // Static camera (no auto-rotation) for a deterministic golden.
 
 import {
-    addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, setPbrSkybox,
-    createSceneContext, createSolidTexture2D, getFrameGraph, loadEnvironment, loadGltf,
-    onBeforeRender, registerScene, startEngine,
+    addToScene,
+    attachControl,
+    createArcRotateCamera,
+    createBox,
+    createEngine,
+    createPbrMaterial,
+    setPbrSkybox,
+    createSceneContext,
+    createSolidTexture2D,
+    getFrameGraph,
+    loadEnvironment,
+    loadGltf,
+    onBeforeRender,
+    registerScene,
+    startEngine,
     type RenderTask,
 } from "babylon-lite";
 
-const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/DispersionTest/glTF-Binary/DispersionTest.glb";
+const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/791bc28c21ed1571e50dc510f64335861b417f6c/Models/DispersionTest/glTF-Binary/DispersionTest.glb";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Fixed face-on camera pose (mirrored exactly in src/bjs/scene212.ts) so both

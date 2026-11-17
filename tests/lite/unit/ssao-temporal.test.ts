@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
 import { getViewMatrix } from "../../../packages/babylon-lite/src/camera/camera.js";
+import { disableOrthographicCamera, enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
@@ -265,6 +266,29 @@ describe("default SSAO reconstruction and history lifecycle", () => {
             expect(Math.abs(data[88 + column]! - w)).toBeLessThanOrEqual(1e-5 * Math.max(1, Math.abs(w)));
             expect(data[92 + column]).toBe(inverseVP[column * 4 + 3]);
         }
+    });
+    it("reprojects orthographic view depth rather than constant clip W and resets projection changes", () => {
+        const f = fixture();
+        enableOrthographicCamera(f.camera, { halfHeight: 1 });
+        f.params.orthographic = true;
+        f.frame();
+        f.frame();
+        const data = f.history().data;
+        const z = 12;
+        const d = (f.camera.farPlane - z) / (f.camera.farPlane - f.camera.nearPlane);
+        const previousZ = (data[90]! * d + data[91]!) / (data[94]! * d + data[95]!);
+        expect(previousZ).toBeCloseTo(z, 3);
+        expect(f.history().data[48]).toBe(0);
+        f.camera.ortho!.left = 0;
+        f.camera.ortho!.right = 2;
+        f.params.offsetX = 1;
+        expect(f.frame()).toBe(0);
+        expect(f.frame()).toBe(1);
+        disableOrthographicCamera(f.camera);
+        f.params.orthographic = false;
+        f.params.offsetX = 0;
+        expect(f.frame()).toBe(0);
+        expect(f.frame()).toBe(1);
     });
     it("captures the velocity/depth contract and keeps it through live toggles", () => {
         const velocity = velocityTarget();

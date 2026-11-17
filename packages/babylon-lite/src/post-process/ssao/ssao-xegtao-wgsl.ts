@@ -1,15 +1,14 @@
 /** Temporal filtering for XeGTAO, adapted from the DiligentFX reconstruction stages. */
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
-import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL, ssaoNormalWGSL } from "./ssao-wgsl.js";
+import { SSAO_PARAMS_WGSL, ssaoParamsWGSL, ssaoDepthBindingWGSL, ssaoNormalWGSL } from "./ssao-wgsl.js";
+import { _orthoProjector } from "../../camera/camera.js";
 
 export const XEGTAO_FULLSCREEN_WGSL = wgsl`@vertex fn fullscreen(@builtin(vertex_index) index:u32)->@builtin(position) vec4f{
 let uv=vec2f(f32((index<<1u)&2u),f32(index&2u));
 return vec4f(uv*vec2f(2,-2)+vec2f(-1,1),0,1);
 }`;
 
-const COMMON = wgsl`${SSAO_PARAMS_WGSL}
-${XEGTAO_FULLSCREEN_WGSL}
-fn dGeom(a:vec3f,b:vec3f,n:vec3f)->f32{return clamp(1.0-abs(dot(b-a,n))*(10.0/(1.0+a.z)),0.0,1.0);}
+const RECONSTRUCTION_HELPERS = wgsl`fn dGeom(a:vec3f,b:vec3f,n:vec3f)->f32{return clamp(1.0-abs(dot(b-a,n))*(10.0/(1.0+a.z)),0.0,1.0);}
 // Geometry history is RG32Uint: exact device-depth bits, then an octahedral world normal in two snorm16.
 fn geometryNormalBits(n:vec3f)->u32{
 var e=n.xy/max(abs(n.x)+abs(n.y)+abs(n.z),1e-20);
@@ -24,16 +23,26 @@ let fold=max(-n.z,0.0);n.x+=select(fold,-fold,n.x>=0.0);n.y+=select(fold,-fold,n
 return normalize(n);
 }
 `;
+const COMMON = wgsl`${SSAO_PARAMS_WGSL}
+${XEGTAO_FULLSCREEN_WGSL}
+${RECONSTRUCTION_HELPERS}`;
+
+function commonWGSL(): WgslSource {
+    return wgsl`${ssaoParamsWGSL()}
+${XEGTAO_FULLSCREEN_WGSL}
+${RECONSTRUCTION_HELPERS}`;
+}
 
 /**
  * @internal Temporal camera state. `tolerance.x` is the relative tolerance of supplied previous
  * depth and `tolerance.y` the relative tolerance of supplied motion, matching the velocity format.
- * `dot(reprojectW,v)/dot(inverseW,v)` is the static previous view depth of current NDC `v`.
+ * `dot(reprojectW,v)/dot(inverseW,v)` is the static previous view depth of current NDC `v`,
+ * for both perspective and orthographic projections.
  */
 export const SSAO_TEMPORAL_PARAMS_WGSL = wgsl`struct Temporal{invView:mat4x4f,previousView:mat4x4f,previousVP:mat4x4f,control:vec4f,invVP:mat4x4f,previousInvVP:mat4x4f,tolerance:vec4f,reprojectW:vec4f,inverseW:vec4f}`;
 
 export function xegtaoClosestMotionWGSL(kind: "depth" | "float"): WgslSource {
-    return wgsl`${COMMON}
+    return wgsl`${_orthoProjector ? commonWGSL() : COMMON}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var velocity:texture_2d<f32>;
 @fragment fn main(@builtin(position) pixel:vec4f)->@location(0) vec2f{
@@ -48,7 +57,7 @@ return -2.0*textureLoad(velocity,q,0).xy;
 }
 
 export function xegtaoTemporalWGSL(kind: "depth" | "float"): WgslSource {
-    return wgsl`${COMMON}
+    return wgsl`${_orthoProjector ? commonWGSL() : COMMON}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var currentAO:texture_2d<f32>;
 @group(0) @binding(3) var velocity:texture_2d<f32>;
@@ -154,7 +163,7 @@ return Output(value,count,depth);
 }
 
 export function xegtaoTransportWGSL(kind: "depth" | "float", declarations: WgslSource = wgsl``, beforeSearch: WgslSource = wgsl``): WgslSource {
-    return wgsl`${COMMON}
+    return wgsl`${_orthoProjector ? commonWGSL() : COMMON}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var normalInput:texture_2d<f32>;
 @group(0) @binding(3) var velocity:texture_2d<f32>;
@@ -197,30 +206,36 @@ let receiverVelocity=textureLoad(velocity,p,0);
 let receiverOldUv=uv+receiverVelocity.xy*vec2f(1,-1);
 let normal=normalize((t.invView*vec4f(aoNormal(p),0)).xyz);
 let movingReceiver=length((receiverOldUv-cameraUv)*vec2f(ao.size))>0.05+length(receiverVelocity.xy*vec2f(ao.size))*t.tolerance.y||
-(t.control.w!=0.0&&abs(receiverVelocity.z-receiverClip.w)>max(1e-4,abs(receiverClip.w)*t.tolerance.x));
+(t.control.w!=0.0&&abs(receiverVelocity.z-${_orthoProjector ? "aoClipDepth(receiverClip)" : "receiverClip.w"})>max(1e-4,abs(${_orthoProjector ? "aoClipDepth(receiverClip)" : "receiverClip.w"})*t.tolerance.x));
 var previousReceiver=receiver;
 if(movingReceiver){
 if(any(receiverOldUv<vec2f(0))||any(receiverOldUv>vec2f(1))){return vec4f(0);}
 var oldDepth=0.0;
 if(t.control.w!=0.0){
 if(!(receiverVelocity.z>0.0)){return vec4f(0);}
-oldDepth=ao.depthUnpack.y-ao.depthUnpack.x/receiverVelocity.z;
+oldDepth=${_orthoProjector ? "deviceDepth(receiverVelocity.z)" : "ao.depthUnpack.y-ao.depthUnpack.x/receiverVelocity.z"};
 }else{oldDepth=previousDeviceDepth(receiverOldUv,normal);}
 if(oldDepth<=0.0){return vec4f(0);}
 previousReceiver=previousWorld(receiverOldUv,oldDepth);
 }
 let receiverShift=receiver-previousReceiver;
 let physicalRadius=ao.radius*ao.radiusMultiplier;
-let physicalProjected=physicalRadius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth));
+${
+    _orthoProjector
+        ? wgsl`let physicalAxes=aoProjectedRadius(physicalRadius,dZ(depth));
+let physicalProjected=max(physicalAxes.x,physicalAxes.y);
+let projectionScale=physicalAxes/physicalProjected;`
+        : wgsl`let physicalProjected=physicalRadius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth));`
+}
 let vacated=currentVisibility>=0.999;
 let radius=physicalRadius*select(1.0,2.0,vacated);
-let projected=min(radius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth)),256.0);
+let projected=min(${_orthoProjector ? "physicalProjected*select(1.0,2.0,vacated)" : "radius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth))"},256.0);
 ${beforeSearch}
 var displacement=vec3f(0);var total=0.0;var staticWeight=0.0;
 for(var ring=1;ring<=3;ring++){
 let ringRadius=projected*f32(ring)/3.0;
 for(var direction=0;direction<12;direction++){
-let angle=f32(direction)*0.5235987755982988;let offset=ringRadius*vec2f(cos(angle),sin(angle));
+let angle=f32(direction)*0.5235987755982988;let offset=ringRadius*vec2f(cos(angle),sin(angle))${_orthoProjector ? "*projectionScale" : ""};
 let q=aoClamp(vec2i(pixel.xy+offset),ao.size);let sampledDepth=aoRawDepth(q);
 if(sampledDepth<=0.0){continue;}
 let sampleUv=(vec2f(q)+0.5)*ao.invSize;let position=world(sampleUv,sampledDepth);
@@ -241,14 +256,14 @@ if(any(oldUv<vec2f(0))||any(oldUv>vec2f(1))){continue;}
 var oldDepth=0.0;
 if(t.control.w!=0.0){
 if(!(supplied.z>0.0)){continue;}
-oldDepth=ao.depthUnpack.y-ao.depthUnpack.x/supplied.z;
+oldDepth=${_orthoProjector ? "deviceDepth(supplied.z)" : "ao.depthUnpack.y-ao.depthUnpack.x/supplied.z"};
 }else{
 let sampleNormal=normalize((t.invView*vec4f(aoNormal(q),0)).xyz);
 oldDepth=previousDeviceDepth(oldUv,sampleNormal);
 }
 if(oldDepth<=0.0){continue;}
 let shift=position-previousWorld(oldUv,oldDepth);
-let projectedShift=length((oldUv-sampleCameraUv)*ao.tanHalfFov*2.0)*dZ(sampledDepth);
+let projectedShift=length((oldUv-sampleCameraUv)*ao.tanHalfFov*2.0)*${_orthoProjector ? "aoViewScale(dZ(sampledDepth))" : "dZ(sampledDepth)"};
 if(length(shift)>min(radius*0.1,projectedShift*2.0)){continue;}
 displacement+=shift*weight;total+=weight;
 }}
@@ -283,7 +298,7 @@ return Output(sum.r/count,sum.g/count);
 }
 
 function reconstructionBindings(kind: "depth" | "float"): WgslSource {
-    return wgsl`${COMMON}
+    return wgsl`${_orthoProjector ? commonWGSL() : COMMON}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var normalInput:texture_2d<f32>;
 @group(0) @binding(3) var temporalCounts:texture_2d<f32>;

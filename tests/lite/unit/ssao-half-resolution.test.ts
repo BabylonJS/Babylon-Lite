@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
+import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
@@ -81,6 +82,39 @@ function fixture(width = 339, height = 225, temporal: SsaoTaskConfig["temporal"]
 }
 
 describe("unified half-resolution SSAO", () => {
+    it.each([false, true])("rebuilds perspective-only GPU owners when orthographic projection is enabled later (Half: %s)", (half) => {
+        const f = fixture(339, 225, true);
+        if (half) {
+            enableSsaoHalfResolution(f.task);
+        }
+        f.task.execute!();
+        const original = f.task._gpu!;
+        original.orthographicProjection = false;
+        enableOrthographicCamera(f.task.camera, { halfHeight: 2 });
+        f.task.execute!();
+        expect(f.task._gpu).not.toBe(original);
+        expect(f.task._gpu!.orthographicProjection).toBe(true);
+        const replacement = f.task._gpu;
+        f.task.execute!();
+        expect(f.task._gpu).toBe(replacement);
+        f.task.dispose();
+    });
+    it("uses the same orthographic projection for reduced estimation and full-size reconstruction", () => {
+        const f = fixture(339, 225, true);
+        enableOrthographicCamera(f.task.camera, { left: -2, right: 6, bottom: -3, top: 1 });
+        enableSsaoHalfResolution(f.task);
+        f.task.execute!();
+        const reduced = f.task._gpu!.data;
+        expect(reduced[24]).toBe(1);
+        expect(Array.from(reduced.subarray(6, 12))).toEqual([4, 2, 8, -4, -2, 1]);
+        const full = vi
+            .mocked(f.device.queue.writeBuffer)
+            .mock.calls.map((call) => call[2])
+            .find((data) => data instanceof Float32Array && data[24] === 1 && data[2] === Math.fround(1 / 339)) as Float32Array;
+        expect(full).toBeDefined();
+        expect(Array.from(full.subarray(4, 12))).toEqual(Array.from(reduced.subarray(4, 12)));
+        f.task.dispose();
+    });
     it.each([true, false])("reduces working/history textures and upsamples after filtering (temporal=%s)", (temporal) => {
         const f = fixture();
         const settings = enableSsaoHalfResolution(f.task);

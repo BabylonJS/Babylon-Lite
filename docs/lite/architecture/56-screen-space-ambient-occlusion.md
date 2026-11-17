@@ -5,15 +5,60 @@
 
 ## Purpose
 
-Provide an opt-in WebGPU AO buffer computed from a perspective camera's depth
+Provide an opt-in WebGPU AO buffer computed from a perspective or orthographic camera's depth
 attachment and optional signed surface normals, with spatial/temporal
 reconstruction enabled by default. XeGTAO is the sole estimator.
-No existing Babylon scene, golden, or ceiling changes.
+Existing scenes retain their rendering, goldens and ceilings.
 
 `createSsaoTask` constructs the complete production pipeline. Reconstruction is
 not a second feature that callers must enable: low/medium spatial sampling and
 Half rendering depend on it for usable noise levels. Explicit spatial-only
 operation remains available for diagnostics or an alternative consumer filter.
+
+Orthographic cameras use the same Full/Half pipelines, including reconstructed
+normals, temporal history, object-motion transport and optional motion pruning.
+For reverse-Z projection entries `P10`, `P14`, unpack view depth as
+`(deviceDepth - P14) / P10` instead of `P14 / (deviceDepth - P10)`.
+View XY is `(uv * ndcMul + ndcAdd)` without multiplication by depth;
+`ndcAdd` includes the off-center translation `(-P12/P0, -P13/P5)`.
+Viewing rays are parallel `(0,0,-1)` and projected radii/pixel footprints do
+not scale with view depth. The 176-byte uniform layout remains unchanged:
+`extra.x` selects orthographic math, `extra.y` retains intensity, and the other
+two lanes remain reserved. Shared depth conversion helpers also handle vector
+normal-reconstruction inputs and conversion of previous view depth back to
+device depth. Temporal static-depth coefficients use row 2 of
+`previousView * inverse(currentVP)`, not previous clip W (which is always 1
+for an orthographic camera). Projection mode, scale and off-center changes
+invalidate history before reusing reprojection state.
+
+Explicit orthographic bounds need not match the target aspect ratio.
+`aoProjectedRadius(radius,z)` returns
+`radius / (aoViewScale(z) * abs(ao.pixelViewSize))` on both axes.
+Estimator slices retain their view-space direction `(cos(phi),sin(phi),0)`;
+their pixel offset is `(cos(phi),-sin(phi)) * projectedRadius`, and their
+minimum step is `1.3 / length(pixelOffset)`. The small-footprint visibility
+bias uses the maximum projected axis. Transport likewise searches an ellipse,
+using the maximum projected axis as its conservative motion-pruning bound
+and returned physical-radius bound. Its 256-pixel search cap scales both
+axes uniformly, preserving the ellipse's aspect ratio. Projection scales
+are computed once per receiver, outside the sampling loops.
+
+Orthographic code is retained only when `enableOrthographicCamera` is imported.
+Consumers read the camera module's existing nullable `_orthoProjector` seam,
+so perspective-only builds eliminate orthographic CPU
+branches and shader expressions. Shader factories select the original shared
+perspective constants or lazily generated orthographic-capable constants after
+camera setup, never at module evaluation. GPU owners record this capability:
+enabling an orthographic camera after initial rendering replaces an older
+perspective-only owner (including the Half adapter and temporal history) once.
+No new SSAO enabler or public camera API is required.
+
+Pass-specific PBR plugin fragments retain the original material signature's
+fragment ID even when selecting a filtered plugin set. An empty selection
+contributes an ID-only fragment, keeping alpha-test dependencies valid without
+sampling AO in geometry or shadow passes. Both aliases are created once when
+the immutable pass signature is registered, not allocated again for each
+shader composition.
 
 `depthTexture` directly borrows a single-sample **depth attachment**, including
 `geometry.geometryDepthTexture` from `createGeometryRendererTask` or an existing
@@ -60,11 +105,7 @@ Choose the separate post-process API when the desired effect is a **final-color
 multiply**, including direct/specular/emissive contributions in the source:
 
 ```ts
-const ao = createScreenSpaceAmbientOcclusionPostProcessTask(
-    { sourceTexture: litColor, depthTexture, camera, composition: "multiply" },
-    engine,
-    scene
-);
+const ao = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: litColor, depthTexture, camera, composition: "multiply" }, engine, scene);
 ```
 
 Schedule that task after the source color/depth producer. These are alternatives,
@@ -191,12 +232,12 @@ Intensity keeps its existing unit gain, resolved as
 Zero remains neutral, and no negative visibility enters history. No direct light,
 specular, emissive, or material base-color adjustment is introduced.
 
-Perspective projection and full-target viewports are supported initially.
+Perspective and orthographic projections with full-target viewports are supported.
 The initial SSAO pipeline supports left-handed builds only. The right-handed
 geometry normal attachment has a different Z convention; construction in a
 `babylon-lite-rh` build fails explicitly rather than feeding it to this estimator.
-Orthographic and partial-viewport cameras fail explicitly instead of applying
-perspective mathematics to unsupported input. MSAA depth must first pass through
+Partial-viewport cameras fail explicitly instead of applying full-target
+mathematics to unsupported input. MSAA depth must first pass through
 the existing `createDepthResolveTask`. Normal input must match source dimensions;
 signed unit view normals are the default, or world normals transformed by view
 rotation. Missing normals use shared nine-tap depth reconstruction in estimation,
@@ -304,8 +345,8 @@ final source row/column; one-dimensional and small targets remain valid.
 Uniform layout: 176 bytes. The first 96 bytes match the native GTAO constants:
 size(u32x2), reciprocal size, depth unpack, tan half-FOV, NDC multiply/add,
 per-pixel view scale, radius/falloff, radius multiplier/padding/final power/blur
-beta, sample power/thin compensation/mip offset/noise index. Next: one reserved
-zero, intensity, two reserved zero padding values (four f32); then view matrix. Supplied/world normal
+beta, sample power/thin compensation/mip offset/noise index. Next: the orthographic
+flag, intensity, two reserved zero padding values (four f32); then view matrix. Supplied/world normal
 selection is specialized with pipeline overrides, not branched per frame.
 Offsets are explicit typed data, never parsed from generated WGSL.
 
@@ -984,7 +1025,7 @@ Receiver motion below 0.05 pixels may skip this reconstruction as numerical
 stationary motion, but must never disable the occluder search: that former gate
 made a visible line between pinned and bending vertices on the skinned beam.
 For exact-depth velocity, also compare previous material depth with the previous
-camera-only clip W; a difference exceeding `max(1e-4, abs(clipW)*tolerance.x)` is
+camera-only view depth; a difference exceeding `max(1e-4, abs(viewDepth)*tolerance.x)` is
 receiver motion even when screen-space XY is zero. This prevents depth-only movement from
 placing transported history on the current rather than previous receiver plane.
 The optional motion mask uses the same previous-depth discrepancy test as
@@ -1190,6 +1231,11 @@ commit URL through `thumbnailUrl` in `demos-config.json`. The standalone gallery
 lab Demos tab, and `/pages/` development preview HTML-escape this optional override
 and preserve their existing local JPG paths for demos without one. New gallery
 images belong in Assets, not in Lite's visual regression baseline locations.
+Scene 355 likewise uses an immutable Assets JPEG through `thumbnailUrl` in
+`scene-config.json`. The shared scene-card renderer uses this escaped override
+across the source, bundle, performance and compatibility grids; scenes without
+an override retain their experience-relative local JPG path. Its parity-reference
+PNG remains separate and unchanged.
 The **Direct light** toggle adds a directional light to demonstrate that AO
 does not attenuate direct illumination. Its runtime intensity changes use
 `setLightIntensity` so the shared light UBO is invalidated. It has no visible

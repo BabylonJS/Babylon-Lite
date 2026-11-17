@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
+import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
-import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
+import type { SsaoGpu, SsaoGpuParameters } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
 
 const gpuCalls = vi.hoisted(() => ({
     create: vi.fn(),
@@ -253,5 +254,24 @@ describe("SSAO task boundary and lifecycle", () => {
         f.camera.viewport = undefined;
         f.camera.fov = NaN;
         expect(() => task.execute!()).toThrow("FOV");
+    });
+    it("accepts off-center orthographic cameras without requiring a perspective FOV", () => {
+        const f = fixture();
+        enableOrthographicCamera(f.camera, { left: -2, right: 6, bottom: -3, top: 1 });
+        f.camera.fov = NaN;
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
+        task.execute!();
+        const params = gpuCalls.write.mock.calls.at(-1)![1] as SsaoGpuParameters;
+        expect(params.orthographic).toBe(true);
+        expect(params.tanX).toBeCloseTo(4);
+        expect(params.tanY).toBeCloseTo(2);
+        expect(params.offsetX).toBeCloseTo(2);
+        expect(params.offsetY).toBeCloseTo(-1);
+        for (const z of [f.camera.nearPlane, 3, f.camera.farPlane]) {
+            const d = z * params.depthAdd - params.depthMultiply;
+            expect((d + params.depthMultiply) / params.depthAdd).toBeCloseTo(z);
+        }
+        f.camera.ortho!.right = -2;
+        expect(() => task.execute!()).toThrow("projection bounds");
     });
 });

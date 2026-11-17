@@ -5,7 +5,8 @@ import { bindSsaoGpuSources, createSsaoGpu, executeSsaoGpu, writeSsaoGpuParamete
 import type { SsaoGpu } from "./ssao-gpu.js";
 import { ssaoHalfUpsampleWGSL } from "./ssao-half-wgsl.js";
 import { getSsaoTemporalEntry } from "./ssao-temporal.js";
-import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL, ssaoDepthNormalWGSL } from "./ssao-wgsl.js";
+import { SSAO_PARAMS_WGSL, ssaoParamsWGSL, ssaoDepthBindingWGSL, ssaoDepthNormalWGSL } from "./ssao-wgsl.js";
+import { _orthoProjector } from "../../camera/camera.js";
 
 /** Half-resolution geometry inputs, estimation and temporal reconstruction, with full-size output. */
 export interface SsaoHalfResolutionSettings {
@@ -86,7 +87,7 @@ function createPipeline(
     const prepareLayout = device.createBindGroupLayout({ entries });
     // One pass samples every reduced input from the same full-size pixel and writes linear
     // depth mip 0, so the reduced owner skips its own linearizing copy.
-    const code = wgsl`${SSAO_PARAMS_WGSL}
+    const code = wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 ${ssaoDepthBindingWGSL("depth", 1)}
 @group(0) @binding(4) var outDepth:texture_storage_2d<r32float,write>;
 @group(0) @binding(5) var outNormal:texture_storage_2d<${normalFormat},write>;
@@ -226,7 +227,14 @@ export function enableSsaoHalfResolution(task: SsaoTask): SsaoHalfResolutionSett
             }
             if (!active) {
                 discard();
-                if (!gpu || gpu.kind !== "depth" || gpu.device !== device || gpu.width !== width || gpu.height !== height) {
+                if (
+                    !gpu ||
+                    gpu.kind !== "depth" ||
+                    gpu.device !== device ||
+                    gpu.width !== width ||
+                    gpu.height !== height ||
+                    (_orthoProjector && task.camera.ortho && !gpu.orthographicProjection)
+                ) {
                     gpu = createSsaoGpu(device, width, height, "depth", normal !== null, worldNormals);
                 }
                 bindSsaoGpuSources(gpu, depth, normal);
@@ -244,7 +252,8 @@ export function enableSsaoHalfResolution(task: SsaoTask): SsaoHalfResolutionSett
                 state.width !== width ||
                 state.height !== height ||
                 state.sourceNormalFormat !== normalFormat ||
-                state.velocityFormat !== velocityFormat
+                state.velocityFormat !== velocityFormat ||
+                (_orthoProjector && task.camera.ortho && !state.gpu.orthographicProjection)
             ) {
                 discard();
                 state = createPipeline(device, width, height, normalFormat, velocityFormat, worldNormals);

@@ -6,11 +6,21 @@ import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/re
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { createIblFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment.js";
 import * as PbrBinding from "../../../packages/babylon-lite/src/material/pbr/pbr-binding-decorator.js";
-import { PBR_HAS_ALPHA_BLEND, PBR2_HAS_REFRACTION, PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
+import {
+    PBR_HAS_ALPHA_BLEND,
+    PBR_HAS_ALPHA_TEST,
+    PBR2_HAS_REFRACTION,
+    PBR2_NO_COLOR_OUTPUT,
+    PBR2_ESM_SHADOW_OUTPUT,
+} from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
+import { pbrExt as alphaTest } from "../../../packages/babylon-lite/src/material/pbr/fragments/alpha-test-fragment.js";
+import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer.js";
+import type { ShaderTemplate } from "../../../packages/babylon-lite/src/shader/fragment-types.js";
 import { enableDynamicPbrBindings } from "../../../packages/babylon-lite/src/material/plugin/dynamic-pbr-bindings.js";
 import type { MaterialPlugin, PluginTextureBinding } from "../../../packages/babylon-lite/src/material/plugin/material-plugin.js";
 import { isPbrIblColorPass, selectPbrPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-passes.js";
 import { registerPbrPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-bridge.js";
+import { registerPbrVertexPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-vertex-bridge.js";
 import type { PbrExt, _PbrFragCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
 import { enablePbrSsao } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-pbr.js";
@@ -30,9 +40,9 @@ const install = vi.spyOn(PbrBinding, "installPbrBindingDecorator");
 enableDynamicPbrBindings();
 const decorate = install.mock.calls[0]![0];
 
-function pluginBridge(): PbrExt {
+function pluginBridge(vertex = false): PbrExt {
     let extension: PbrExt | undefined;
-    registerPbrPlugins((value) => (extension = value));
+    (vertex ? registerPbrVertexPlugins : registerPbrPlugins)((value) => (extension = value));
     return extension!;
 }
 
@@ -264,6 +274,40 @@ describe("PBR SSAO scope and ownership", () => {
         const identity = scoped._pi;
         bridge.detect!(scoped);
         expect(scoped._pi).toBe(identity);
+    });
+
+    it.each([
+        [false, false],
+        [true, false],
+        [false, true],
+        [true, true],
+    ])("composes alpha-tested color and non-color SSAO passes (ordinary plugin: %s, vertex bridge: %s)", async (ordinary, vertex) => {
+        const f = fixture();
+        if (ordinary) {
+            f.material.plugins = [{ name: "alpha-modifier", getCustomCode: () => ({ CUSTOM_FRAGMENT_MAIN_BEGIN: wgsl`alpha *= 0.5;` }) }];
+        }
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const bridge = pluginBridge(vertex);
+        bridge.detect!(f.material);
+        const template: ShaderTemplate = {
+            _vertexTemplate: wgsl``,
+            _fragmentTemplate: wgsl`/*SV*/\n/*AT*/`,
+            _baseMeshUboFields: [],
+            _baseVertexAttributes: [],
+            _baseVaryings: [],
+        };
+        for (const ibl of [false, true]) {
+            for (const features2 of [0, PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT, 1 << 21]) {
+                const context = { _pi: f.material._pi, _features: PBR_HAS_ALPHA_TEST, _features2: features2, _hasIbl: ibl } as _PbrFragCtx;
+                const plugin = bridge.frag!(context)!;
+                const shader = composeShader(template, [alphaTest.frag!(context)!, plugin]);
+                expect(shader._fragmentWGSL).toContain("discard;");
+                expect(shader._fragmentWGSL.includes("ssaoDiffuseVisibility")).toBe(ibl && features2 === 0);
+                if (ordinary) {
+                    expect(shader._fragmentWGSL.indexOf("alpha *= 0.5")).toBeLessThan(shader._fragmentWGSL.indexOf("discard"));
+                }
+            }
+        }
     });
 
     it("rejects mismatched cameras and attachment conflicts without changing materials", async () => {
