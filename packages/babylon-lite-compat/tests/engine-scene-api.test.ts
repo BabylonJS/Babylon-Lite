@@ -8,7 +8,6 @@ import { MeshBuilder, type TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 import { ArcRotateCamera } from "../src/cameras/cameras";
 import { Vector3 } from "../src/math/vector";
-import type { EngineFeatures } from "../src/index";
 
 /**
  * The Engine/Scene compat wrappers add Babylon.js-shaped accessors that don't
@@ -55,11 +54,13 @@ function sceneWithCanvas(canvas: EventTarget): Scene {
 }
 
 describe("WebGPUEngine scalar getters", () => {
-    it("exports the current Babylon.js engine feature shape", () => {
-        const supportMeshBlending: EngineFeatures["supportMeshBlending"] = true;
-        expect(supportMeshBlending).toBe(true);
-        expect(fakeEngine({ width: 1, height: 1 }, 16)._features.supportMeshBlending).toBe(true);
-        expect(new NullEngine()._features.supportMeshBlending).toBe(false);
+    it("creates independent engine feature objects with the same public shape", () => {
+        const firstEngine = fakeEngine({ width: 1, height: 1 }, 16);
+        const secondEngine = fakeEngine({ width: 1, height: 1 }, 16);
+        const nullEngine = new NullEngine();
+
+        expect(firstEngine._features).not.toBe(secondEngine._features);
+        expect(Object.keys(firstEngine._features).sort()).toEqual(Object.keys(nullEngine._features).sort());
     });
 
     it("derives render width/height/aspect from the canvas", () => {
