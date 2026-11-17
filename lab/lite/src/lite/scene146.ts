@@ -191,9 +191,10 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    const dataset = canvas.dataset;
+    dataset.drawCalls = String(engine.drawCallCount);
+    dataset.initMs = String(performance.now() - __initStart);
+    dataset.ready = "true";
 }
 
 main().catch((err) => {

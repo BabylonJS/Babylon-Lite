@@ -138,9 +138,9 @@ export interface Mesh extends SceneNode {
      *  Consumers that need a loaded model's box in its ROOT frame must compose it with the node
      *  world-at-load matrix themselves.
      *
-     *  A consumer MAY overwrite these with a wider hand-computed box (e.g. a thin-instance prototype
-     *  publishing the union of all its placements onto an identity-world mesh) — the contract is only that
-     *  the box is stated in the frame `worldMatrix` maps out of. */
+     *  A consumer MAY supply conservative custom bounds enclosing the prototype geometry (for example
+     *  to cover vertex deformation), but MUST NOT replace them with the union of thin-instance placements.
+     *  Shadow fitting derives aggregate instance bounds without changing this geometry-local box. */
     boundMin?: [number, number, number];
     boundMax?: [number, number, number];
     /** Skeleton GPU data (skeletal animation). Type-only — no module dependency. */

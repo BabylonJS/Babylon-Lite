@@ -27,6 +27,14 @@ export function _getShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator): re
     return shadowTaskInputs?.get(shadowGenerator);
 }
 
+/** @internal Reload source casters, never a renderer's temporary deformation substitutes. */
+export function _preloadRegisteredShadowCasters(shadowGenerator: ShadowGenerator): void {
+    const casterMeshes = shadowTaskInputs?.get(shadowGenerator);
+    if (casterMeshes && !shadowGenerator._preloadPending) {
+        setShadowTaskCasterMeshes(shadowGenerator, casterMeshes);
+    }
+}
+
 /**
  * Cap the cascades a caster mesh renders into: the mesh casts only into cascade layers `0..maxCascade`
  * (0 = the nearest). Lets a scene keep small casters out of the far cascades, where their shadows are
