@@ -72,8 +72,8 @@ export const PAGE_FLAG_PINNED = 0x2;
 export const PAGE_FLAG_FAILED = 0x4;
 export const PAGE_FLAG_UPLOADING = 0x8;
 
-const F32_SCRATCH = new Float32Array(1);
-const U32_SCRATCH = new Uint32Array(F32_SCRATCH.buffer);
+const F32_SCRATCH = /* @__PURE__ */ new Float32Array(1);
+const U32_SCRATCH = /* @__PURE__ */ new Uint32Array(F32_SCRATCH.buffer);
 
 /** Reinterpret a float32 as its u32 bit pattern (the WGSL `bitcast<u32>` a shader
  *  reverses with `bitcast<f32>`). */

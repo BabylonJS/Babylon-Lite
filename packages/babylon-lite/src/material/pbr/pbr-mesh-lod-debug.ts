@@ -10,8 +10,8 @@
 import type { MeshLoDDebugView } from "../../mesh-lod/mesh-lod.js";
 import type { MeshLoDPageState } from "../../mesh-lod/mesh-lod-runtime.js";
 
-const CONE_F32 = new Float32Array(1);
-const CONE_U32 = new Uint32Array(CONE_F32.buffer);
+const CONE_F32 = /* @__PURE__ */ new Float32Array(1);
+const CONE_U32 = /* @__PURE__ */ new Uint32Array(CONE_F32.buffer);
 
 /** Shader `debugMode` code (0 = off). Mirrored by the WGSL fragment branch. */
 export function meshLoDDebugModeCode(view: MeshLoDDebugView): number {
