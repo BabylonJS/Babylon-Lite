@@ -105,7 +105,7 @@ function createWebGpuEngineFeatures(): EngineFeatures {
         needTypeSuffixInShaderConstants: true,
         supportMSAA: true,
         supportSSAO2: true,
-        supportIBLShadows: true,
+        supportIBLShadows: false,
         supportMeshBlending: true,
         supportExtendedTextureFormats: true,
         supportSwitchCaseInShader: true,

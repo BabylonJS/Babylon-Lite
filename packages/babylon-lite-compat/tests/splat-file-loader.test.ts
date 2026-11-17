@@ -19,6 +19,7 @@ import { createTransformNode, loadSOG, loadSPZ, loadSplat } from "babylon-lite";
 import type { GaussianSplattingMesh as LiteGaussianSplattingMesh } from "babylon-lite";
 
 import { LiteCompatError } from "../src/error";
+import { WebGPUEngine } from "../src/engine/engine";
 import { SPLATFileLoader, RegisterSPLATFileLoader } from "../src/loading/splat-file-loader";
 import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import { TransformNode } from "../src/meshes/meshes";
@@ -238,6 +239,12 @@ describe("SPLATFileLoader", () => {
     it("accepts the BJS flipY default and rejects the unsupported override", () => {
         expect(() => new SPLATFileLoader({ flipY: false })).not.toThrow();
         expect(() => new SPLATFileLoader({ flipY: true })).toThrow(/flipY/);
+    });
+
+    it("does not advertise the unsupported IBL-shadow texture path to the splat loader", () => {
+        const engine = new WebGPUEngine({ width: 1, height: 1 } as unknown as ConstructorParameters<typeof WebGPUEngine>[0]);
+
+        expect(() => new SPLATFileLoader({ needsRotationScaleTextures: engine._features.supportIBLShadows })).not.toThrow();
     });
 
     it("uses only SceneLoader plugin options when creating a plugin", () => {
