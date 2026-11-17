@@ -13,15 +13,19 @@ import type { AnimationClip, GltfAnimationData } from "../../../packages/babylon
 function propertyGroup() {
     const manager = createAnimationManager();
     const target = { value: 0 };
-    const clip = createPropertyAnimationClip("test", [
-        {
-            path: "value",
-            keys: [
-                { time: 0, value: 0 },
-                { time: 1, value: 10 },
-            ],
-        },
-    ]);
+    const clip = createPropertyAnimationClip(
+        "test",
+        [
+            {
+                path: "value",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ],
+        { frameRate: 30 }
+    );
     return { manager, target, clip, group: createPropertyAnimationGroup(manager, target, clip, { loop: false }) };
 }
 
@@ -44,10 +48,10 @@ describe("animation curve editing", () => {
         updateAnimationManager(manager, 250);
         expect(target.value).toBeCloseTo(5);
         expect(secondTarget.value).toBeCloseTo(8);
-        goToFrame(group, 30);
+        goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBeCloseTo(8);
         setAnimationTrackKeys(group, 0, [{ time: 0, value: [7] }]);
-        goToFrame(group, 30);
+        goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBe(7);
     });
 
@@ -82,7 +86,7 @@ describe("animation curve editing", () => {
         ]);
         expect(Array.from(buffer)).toEqual([0, 1, 0, 0, 0, 10, 0, 0]);
         expect(getAnimationGroupTracks(other!)[0]!.keys[1]!.value).toEqual([10, 0, 0]);
-        goToFrame(group!, 30);
+        goToFrame(group!, group!.frameRate! / 2);
         expect(target.position.x).toBeCloseTo(4);
     });
 
@@ -91,6 +95,7 @@ describe("animation curve editing", () => {
         const clip: AnimationClip = {
             name: "curves",
             duration: 1,
+            frameRate: 48,
             samplers: [
                 { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 1, 2, 0]), interpolation: INTERP_CUBICSPLINE },
                 { input: new Float32Array([0, 1]), output: new Float32Array([0, 1, 2, 3]), interpolation: 0 },
@@ -119,7 +124,7 @@ describe("animation curve editing", () => {
             { time: 1, value: [7], inTangent: [8], outTangent: [9] },
         ]);
         expect(Array.from(clip.samplers[0]!.output)).toEqual([5, 4, 6, 8, 7, 9]);
-        goToFrame(group, 30);
+        goToFrame(group, group.frameRate! / 2);
         expect(pointerValue).toBeCloseTo(5.25);
         expect(() => setAnimationTrackKeys(group, 0, [{ time: 0, value: [0] }])).toThrow();
     });
