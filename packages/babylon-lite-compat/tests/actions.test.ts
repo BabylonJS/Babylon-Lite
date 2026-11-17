@@ -41,6 +41,15 @@ describe("Actions", () => {
         expect(target.material.alpha).toBe(0.5);
     });
 
+    it("SetValueAction ignores property paths that reach an object prototype", () => {
+        const manager = new ActionManager();
+        for (const path of ["__proto__.polluted", "constructor.prototype.polluted"]) {
+            manager.registerAction(new SetValueAction(ActionManagerTriggers.OnPickTrigger, {}, path, true));
+        }
+        manager.processTrigger(ActionManagerTriggers.OnPickTrigger);
+        expect(Object.prototype).not.toHaveProperty("polluted");
+    });
+
     it("IncrementValueAction adds to a numeric property", () => {
         const target = { count: 10 };
         const manager = new ActionManager();
