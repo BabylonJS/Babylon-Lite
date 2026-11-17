@@ -155,5 +155,9 @@ describe("animation curve editing", () => {
         }
         expect(() => setAnimationTrackKeys(group, 3, [{ time: 0, value: [1] }])).toThrow();
         expect(() => getAnimationGroupTracks({ ...group, _propertyMixer: undefined })).toThrow(/does not expose/);
+        const propertyMixer = group._propertyMixer!;
+        const usdLikeGroup = { ...group, _propertyMixer: [propertyMixer[0], propertyMixer[1], propertyMixer[2], propertyMixer[3], 0] as const };
+        expect(() => getAnimationGroupTracks(usdLikeGroup)).toThrow(/USD animation groups/);
+        expect(() => setAnimationTrackKeys(usdLikeGroup, 0, [{ time: 0, value: [1] }])).toThrow(/USD animation groups/);
     });
 });

@@ -46,14 +46,11 @@ glTF groups expose clip channels via internal `_gltfMixer`; resolve channel samp
 indices in target order, infer component count from output length / key count /
 cubic multiplier, and identify quaternions from the channel. Property groups use
 `_propertyMixer` runtime tracks, which directly retain their samplers and stride.
-Groups with neither representation, including USD's independent controller, are
-unsupported. Replacing the two arrays on the existing sampler preserves references
-held by controllers and both weighted mixers. No clip or controller reconstruction
-is necessary and no runtime playback module imports the editor.
-The error-rewrite build plugin leaves this optional module's errors inline: it
-neither renumbers existing errors nor adds editor messages to the global decoder
-table used by applications that never use the editor. `decodeError` returns these
-ordinary errors' messages unchanged.
+Groups with neither representation and USD groups (identified by their authored
+start-time mixer marker) are unsupported. Replacing the two arrays on the existing
+sampler preserves references held by controllers and both weighted mixers. No clip
+or controller reconstruction is necessary and no runtime playback module imports
+the editor.
 
 ## Pipeline Configuration / Shader Logic
 None.

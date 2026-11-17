@@ -53,6 +53,9 @@ function getSources(group: AnimationGroup): CurveSource[] {
     }
     const property = group._propertyMixer;
     if (property) {
+        if (property[4] !== undefined) {
+            throw new Error("USD animation groups do not expose editable keyframe samplers");
+        }
         return property[0].map((track, index) => {
             const target = group.targetedAnimations[index];
             if (!target) {

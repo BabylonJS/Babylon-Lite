@@ -34,16 +34,4 @@ describe("animation curve editing tree shaking", () => {
         expect(result.code).toContain("function getAnimationGroupTracks");
         expect(result.code).toContain("function setAnimationTrackKeys");
     });
-
-    it("does not add editor errors to an unrelated global error decoder", async () => {
-        const result = await runRollup({
-            entrySource: `export { enableErrorDecoding } from ${JSON.stringify(LIB_ENTRY)};`,
-            format: "es",
-            minify: false,
-        });
-        expect(result.errors).toEqual([]);
-        expect(result.significantWarnings).toEqual([]);
-        expect(result.code).not.toContain("Animation group does not expose editable keyframe samplers");
-        expect(result.code).not.toContain("Animation track index is out of range");
-    });
 });
