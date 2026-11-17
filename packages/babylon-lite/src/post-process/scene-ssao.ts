@@ -23,6 +23,12 @@ export interface SceneSsaoPipelineOptions {
     targetTexture?: RenderTarget;
     /** Optional single-sample resolve destination for a multisample targetTexture. */
     resolveTexture?: RenderTarget;
+    /**
+     * Format of the intermediate depth texture allocated to resolve multisampled scene depth (MSAA only).
+     * Defaults to `"depth32float"`, which copies the sampled depth without another quantization step
+     * (`depth24plus` is not guaranteed to use less memory: WebGPU may back it with 32-bit float depth).
+     */
+    depthResolveFormat?: "depth24plus" | "depth32float";
 }
 
 /** Native scene-output ambient-occlusion controller used by API adapters. */
@@ -53,6 +59,7 @@ interface SceneSsaoPipelineState {
     _sceneDispose: (() => void) | null;
     _targetTexture?: RenderTarget;
     _resolveTexture?: RenderTarget;
+    _depthResolveFormat: "depth24plus" | "depth32float";
 }
 
 interface SceneWithSsao extends SceneContext {
@@ -73,6 +80,10 @@ function pipelineState(pipeline: SceneSsaoPipeline): SceneSsaoPipelineState {
 export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engine: EngineContext, scene: SceneContext, camera: Camera): SceneSsaoPipeline {
     if (options.resolveTexture && !options.targetTexture) {
         throw new Error("SceneSsaoPipeline resolveTexture requires an explicit targetTexture.");
+    }
+    const depthResolveFormat = options.depthResolveFormat ?? "depth32float";
+    if (depthResolveFormat !== "depth32float" && depthResolveFormat !== "depth24plus") {
+        throw new Error(`SceneSsaoPipeline depthResolveFormat must be "depth24plus" or "depth32float".`);
     }
     const pipeline: SceneSsaoPipeline = {
         name: options.name ?? "scene-ssao",
@@ -100,6 +111,7 @@ export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engin
         _sceneDispose: null,
         _targetTexture: options.targetTexture,
         _resolveTexture: options.resolveTexture,
+        _depthResolveFormat: depthResolveFormat,
     };
     (_pipelineStates ??= new WeakMap()).set(pipeline, state);
     return pipeline;
@@ -244,7 +256,9 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
 
     let depth = config.depth ?? baseRt;
     if (multisampled) {
-        depth = createRenderTarget({ lbl: `${pipeline.name}-depth`, dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+        // Depth-only on purpose: the resolve pass writes only depth and AO only samples it, so a stencil aspect
+        // would just require stencil load/store ops on the resolve pass.
+        depth = createRenderTarget({ lbl: `${pipeline.name}-depth`, dFormat: state._depthResolveFormat, samples: 1, size: surface });
         state._ownedTargets.push(depth);
         state._depthResolveTask = createDepthResolveTask({ name: `${pipeline.name}-depth-resolve`, sourceTexture: baseRt, targetTexture: depth }, engine, scene);
         state._tasks.push(state._depthResolveTask);

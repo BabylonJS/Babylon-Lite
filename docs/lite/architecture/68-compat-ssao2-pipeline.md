@@ -20,6 +20,7 @@ export interface SceneSsaoPipelineOptions {
     fadeEnd?: number;
     targetTexture?: RenderTarget;
     resolveTexture?: RenderTarget;
+    depthResolveFormat?: "depth24plus" | "depth32float";
 }
 
 export interface SceneSsaoPipeline {
@@ -58,7 +59,7 @@ The controller locates the scene's default render task by finding the render tas
 1. The existing scene render task retains its surface-relative MSAA color/depth target `M1`.
 2. `scene-source`: surface-relative single-sample color target `C`.
 3. The existing scene render task resolves color from `M1` into `C`.
-4. `scene-depth`: surface-relative single-sample depth target `D`.
+4. `scene-depth`: surface-relative single-sample depth target `D` without a stencil aspect, `depthResolveFormat` (default `depth32float`). The resolve pass writes only depth and SSAO samples only depth, so the pass needs no stencil operations; the scene's own depth/stencil target `M1` is unchanged.
 5. Existing depth-resolve task copies sample zero from `M1` depth into `D`.
 6. `scene-output-msaa`: surface-relative MSAA color target `M2`.
 7. Native SSAO reads `C` and `D`, composites into `M2`, and resolves `M2` into `scRT`.
@@ -141,6 +142,7 @@ Estimator-specific Babylon.js controls without a native semantic (`samples`, `ep
 - Post-process resolve validation: sampled-input alias rejection before allocation, sample count, format, dimensions, and live swapchain resolve view.
 - SSAO composition: `base` appears in the uniform contract; explicit caller-owned color/resolve targets survive detach.
 - Overlay selection: last active MSAA resolver wins; disabled/execution-disabled/single-sample tasks are ignored.
+- MSAA depth resolve: the intermediate depth target uses the default `depth32float` or the `depth24plus` override, the resolve pass and pipeline target that stencil-free format (also after reattach), the option is inert without MSAA, and unsupported formats are rejected at construction.
 - Scene pipeline: no-MSAA and MSAA task topology, producer order, default-target capture/restore, camera gate changes, transmission composition in both attachment orders, registered-scene incremental build, rollback, detach/reattach fresh resources, and idempotent disposal.
 - Compat: stable lazy manager identity, transactional constructor registration, add/attach/detach/dispose forwarding, Babylon.js defaults and property mappings, warning-once unsupported settings, and inert headless construction.
 
