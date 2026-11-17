@@ -596,4 +596,18 @@ describe("the compat animation fallback", () => {
         scene._tick(500);
         expect(Object.prototype).not.toHaveProperty("polluted");
     });
+
+    it("keeps native-eligible tracks through a prototype path off the native binding", () => {
+        const scene = new Scene(new NullEngine());
+        const shared = { opacity: 0 };
+        const animation = new Animation("pollute", "__proto__.opacity", 10);
+        animation.setKeys([
+            { frame: 0, value: 1 },
+            { frame: 10, value: 2 },
+        ]);
+        const animatable = scene.beginDirectAnimation(Object.create(shared), [animation], 0, 10, false);
+        expect(animatable._lite).toBeUndefined();
+        scene._tick(500);
+        expect(shared.opacity).toBe(0);
+    });
 });

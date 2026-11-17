@@ -925,8 +925,8 @@ function trackInterpolation(keys: readonly IAnimationKey[]): PropertyAnimationIn
 }
 
 function supportsNativeBinding(target: unknown, path: string, stride: number): boolean {
-    const parts = path.split(".");
-    if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+    const parts = splitSafePropertyPath(path);
+    if (!parts || parts.some((part) => part.length === 0)) {
         return false;
     }
     let owner: unknown = target;
