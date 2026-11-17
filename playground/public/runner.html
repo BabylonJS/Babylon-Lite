@@ -50,8 +50,9 @@
         <script type="module">
             const parent = window.parent;
 
+            // The playground host is always same-origin; never send output to, or accept code from, other origins.
             function post(message) {
-                parent.postMessage(message, "*");
+                parent.postMessage(message, location.origin);
             }
 
             // Forward console output to the playground console panel.
@@ -109,6 +110,9 @@
             }
 
             window.addEventListener("message", async (event) => {
+                if (event.origin !== location.origin || event.source !== parent) {
+                    return;
+                }
                 const message = event.data;
                 if (!message) {
                     return;

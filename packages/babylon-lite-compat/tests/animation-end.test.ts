@@ -583,3 +583,17 @@ describe("scene._tick when a scene is disposed during the advance", () => {
         expect(scene.animatables).toHaveLength(0);
     });
 });
+
+describe("the compat animation fallback", () => {
+    it("does not write through property paths that reach an object prototype", () => {
+        const scene = new Scene(new NullEngine());
+        const animation = new Animation("pollute", "__proto__.polluted", 10);
+        animation.setKeys([
+            { frame: 0, value: 1, interpolation: 1 },
+            { frame: 10, value: 2 },
+        ]);
+        scene.beginDirectAnimation({}, [animation], 0, 10, false);
+        scene._tick(500);
+        expect(Object.prototype).not.toHaveProperty("polluted");
+    });
+});

@@ -9,6 +9,8 @@
  * itself is fully implemented and testable.
  */
 
+import { splitSafePropertyPath } from "../misc/property-path.js";
+
 /** Babylon.js `ActionManager` trigger constants (subset). */
 export const ActionManagerTriggers = {
     NothingTrigger: 0,
@@ -221,7 +223,10 @@ function getByPath(target: Record<string, unknown>, path: string): unknown {
 }
 
 function setByPath(target: Record<string, unknown>, path: string, value: unknown): void {
-    const parts = path.split(".");
+    const parts = splitSafePropertyPath(path);
+    if (!parts) {
+        return;
+    }
     let current: Record<string, unknown> = target;
     for (let i = 0; i < parts.length - 1; i++) {
         current = current[parts[i]!] as Record<string, unknown>;

@@ -23,6 +23,7 @@ import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineCont
 
 import type { IEasingFunction } from "./easing.js";
 import { Observable } from "../misc/observable.js";
+import { splitSafePropertyPath } from "../misc/property-path.js";
 import { unsupported } from "../error.js";
 
 /** Structural vector/quaternion value accepted by Babylon.js animation keys. */
@@ -302,7 +303,10 @@ function snapshotValue(value: AnimValue): AnimValue {
 
 /** @internal Assign an animated value to `target` following a dotted property path (e.g. `"position.x"`). */
 function applyAnimatedValue(target: unknown, path: string, value: AnimationValue): void {
-    const parts = path.split(".");
+    const parts = splitSafePropertyPath(path);
+    if (!parts) {
+        return;
+    }
     let obj = target as Record<string, unknown>;
     for (let i = 0; i < parts.length - 1; i++) {
         const next = obj[parts[i]!];
