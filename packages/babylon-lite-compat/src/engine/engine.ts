@@ -56,6 +56,103 @@ function setLastCreatedEngine(engine: AbstractEngine): void {
     lastCreatedEngine = engine;
 }
 
+/** Babylon.js `EngineFeatures` capability shape. */
+export interface EngineFeatures {
+    forceBitmapOverHTMLImageElement: boolean;
+    supportRenderAndCopyToLodForFloatTextures: boolean;
+    supportDepthStencilTexture: boolean;
+    supportShadowSamplers: boolean;
+    uniformBufferHardCheckMatrix: boolean;
+    allowTexturePrefiltering: boolean;
+    trackUbosInFrame: boolean;
+    checkUbosContentBeforeUpload: boolean;
+    supportCSM: boolean;
+    basisNeedsPOT: boolean;
+    support3DTextures: boolean;
+    needTypeSuffixInShaderConstants: boolean;
+    supportMSAA: boolean;
+    supportSSAO2: boolean;
+    supportIBLShadows: boolean;
+    supportMeshBlending: boolean;
+    supportExtendedTextureFormats: boolean;
+    supportSwitchCaseInShader: boolean;
+    supportSyncTextureRead: boolean;
+    needsInvertingBitmap: boolean;
+    useUBOBindingCache: boolean;
+    needShaderCodeInlining: boolean;
+    needToAlwaysBindUniformBuffers: boolean;
+    supportRenderPasses: boolean;
+    supportSpriteInstancing: boolean;
+    forceVertexBufferStrideAndOffsetMultiple4Bytes: boolean;
+    // Babylon.js publishes this underscore-prefixed field as part of EngineFeatures.
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal
+    _checkNonFloatVertexBuffersDontRecreatePipelineContext: boolean;
+}
+
+function createWebGpuEngineFeatures(): EngineFeatures {
+    return {
+        forceBitmapOverHTMLImageElement: true,
+        supportRenderAndCopyToLodForFloatTextures: true,
+        supportDepthStencilTexture: true,
+        supportShadowSamplers: true,
+        uniformBufferHardCheckMatrix: false,
+        allowTexturePrefiltering: true,
+        trackUbosInFrame: true,
+        checkUbosContentBeforeUpload: true,
+        supportCSM: true,
+        basisNeedsPOT: false,
+        support3DTextures: true,
+        needTypeSuffixInShaderConstants: true,
+        supportMSAA: true,
+        supportSSAO2: true,
+        supportIBLShadows: true,
+        supportMeshBlending: true,
+        supportExtendedTextureFormats: true,
+        supportSwitchCaseInShader: true,
+        supportSyncTextureRead: false,
+        needsInvertingBitmap: false,
+        useUBOBindingCache: false,
+        needShaderCodeInlining: true,
+        needToAlwaysBindUniformBuffers: true,
+        supportRenderPasses: true,
+        supportSpriteInstancing: true,
+        forceVertexBufferStrideAndOffsetMultiple4Bytes: true,
+        _checkNonFloatVertexBuffersDontRecreatePipelineContext: true,
+    };
+}
+
+function createNullEngineFeatures(): EngineFeatures {
+    return {
+        forceBitmapOverHTMLImageElement: false,
+        supportRenderAndCopyToLodForFloatTextures: false,
+        supportDepthStencilTexture: false,
+        supportShadowSamplers: false,
+        uniformBufferHardCheckMatrix: false,
+        allowTexturePrefiltering: false,
+        trackUbosInFrame: false,
+        checkUbosContentBeforeUpload: false,
+        supportCSM: false,
+        basisNeedsPOT: false,
+        support3DTextures: false,
+        needTypeSuffixInShaderConstants: false,
+        supportMSAA: false,
+        supportSSAO2: false,
+        supportIBLShadows: false,
+        supportMeshBlending: false,
+        supportExtendedTextureFormats: false,
+        supportSwitchCaseInShader: false,
+        supportSyncTextureRead: false,
+        needsInvertingBitmap: false,
+        useUBOBindingCache: false,
+        needShaderCodeInlining: false,
+        needToAlwaysBindUniformBuffers: false,
+        supportRenderPasses: true,
+        supportSpriteInstancing: false,
+        forceVertexBufferStrideAndOffsetMultiple4Bytes: false,
+        _checkNonFloatVertexBuffersDontRecreatePipelineContext: false,
+    };
+}
+
 /** Babylon.js `AbstractEngineOptions` subset accepted by the compat engine. */
 export interface AbstractEngineOptions extends LiteEngineOptions {
     antialias?: boolean;
@@ -106,6 +203,11 @@ export abstract class AbstractEngine {
 
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
+
+    /** Babylon.js engine capability flags for Lite's WebGPU backend. */
+    // Babylon.js publishes this underscore-prefixed property on AbstractEngine.
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal
+    public _features: EngineFeatures = createWebGpuEngineFeatures();
 
     /**
      * @internal Whether this engine has no GPU device (a {@link NullEngine}). Headless
@@ -685,6 +787,7 @@ export class NullEngine extends WebGPUEngine {
     public constructor() {
         super(NULL_CANVAS);
         this._headless = true;
+        this._features = createNullEngineFeatures();
         // Back the headless engine with Lite's real device-less engine context. No GPU
         // device to acquire — usable immediately, no `initAsync()` needed.
         this._lite = createNullEngine();

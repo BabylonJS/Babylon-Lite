@@ -8,6 +8,7 @@ import { MeshBuilder, type TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 import { ArcRotateCamera } from "../src/cameras/cameras";
 import { Vector3 } from "../src/math/vector";
+import type { EngineFeatures } from "../src/index";
 
 /**
  * The Engine/Scene compat wrappers add Babylon.js-shaped accessors that don't
@@ -41,8 +42,7 @@ function fakeScene(): Scene {
 
 /** A WebGPUEngine instance with just the fields the tested getters read. */
 function fakeEngine(canvas: { width: number; height: number }, deltaMs: number): WebGPUEngine {
-    const engine = Object.create(WebGPUEngine.prototype) as WebGPUEngine & { _canvas: unknown; _lastDeltaMs: number; _lite: unknown };
-    (engine as unknown as { _canvas: unknown })._canvas = canvas;
+    const engine = new WebGPUEngine(canvas as unknown as ConstructorParameters<typeof WebGPUEngine>[0]) as WebGPUEngine & { _lastDeltaMs: number; _lite: unknown };
     engine._lastDeltaMs = deltaMs;
     (engine as unknown as { _lite: unknown })._lite = { msaaSamples: 4 };
     return engine;
@@ -55,6 +55,13 @@ function sceneWithCanvas(canvas: EventTarget): Scene {
 }
 
 describe("WebGPUEngine scalar getters", () => {
+    it("exports the current Babylon.js engine feature shape", () => {
+        const supportMeshBlending: EngineFeatures["supportMeshBlending"] = true;
+        expect(supportMeshBlending).toBe(true);
+        expect(fakeEngine({ width: 1, height: 1 }, 16)._features.supportMeshBlending).toBe(true);
+        expect(new NullEngine()._features.supportMeshBlending).toBe(false);
+    });
+
     it("derives render width/height/aspect from the canvas", () => {
         const engine = fakeEngine({ width: 800, height: 600 }, 16);
         expect(engine.getRenderWidth()).toBe(800);
