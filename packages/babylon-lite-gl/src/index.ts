@@ -11,6 +11,13 @@
 // so a consumer that imports only the symbols it needs tree-shakes everything
 // else (sprites, html-texture, …) away.
 
+// ─── Backend-neutral contract ────────────────────────────────────────
+// The generic contract (`GLFamily`, `GLOps`, `GLKit`) is published at
+// `@babylonjs/lite-gl/family`; this entry adds the WebGL2 mapping and keeps the
+// shared descriptors importable alongside the operations that take them.
+export type { GLEffectOptions, GLViewport, GLClearOptions } from "./family.js";
+export type { WebGLFamily, WebGLHostOps } from "./web-family.js";
+
 // ─── Engine / context ────────────────────────────────────────────────
 export {
     createGLEngine,
@@ -68,13 +75,13 @@ export {
     setEffectFloatArray4,
     setEffectIntArray,
 } from "./effect.js";
-export type { GLEffectOptions, GLEffect } from "./effect.js";
+export type { GLEffect } from "./effect.js";
 export { waitForEffect } from "./effect-ready.js";
 export type { GLEffectWaitOptions } from "./effect-ready.js";
 
 // ─── Effect renderer (fullscreen quad) ───────────────────────────────
 export { createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, disposeEffectWrapper } from "./effect-renderer.js";
-export type { GLEffectWrapperOptions, GLEffectWrapper, GLViewport } from "./effect-renderer.js";
+export type { GLEffectWrapperOptions, GLEffectWrapper } from "./effect-renderer.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export {
@@ -160,7 +167,7 @@ export type { GLBlendState } from "./blend.js";
 
 // ─── Depth / stencil / color-mask / clear ────────────────────────────
 export { setDepthState, setCullState, setStencilState, setStencilOpSeparate, setColorMask, clearEngine, generateRenderTargetStencil } from "./depth-stencil.js";
-export type { GLDepthState, GLStencilState, GLStencilOpState, GLClearOptions } from "./depth-stencil.js";
+export type { GLDepthState, GLStencilState, GLStencilOpState } from "./depth-stencil.js";
 
 // ─── Scissor ─────────────────────────────────────────────────────────
 export { setScissor, disableScissor } from "./scissor.js";

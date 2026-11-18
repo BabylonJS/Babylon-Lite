@@ -128,7 +128,10 @@ blend modes, the sprite renderer, and HTML-element textures. The package is
 `sideEffects: false`, so a bundler tree-shakes away whichever features you don't
 use. A separate, **experimental and temporary** `@babylonjs/lite-gl/native` entry targets Babylon Native (see
 [below](#babylon-native-babylonjslite-glnative)); the two entries share no
-modules, so importing one never bundles the other.
+modules, so importing one never bundles the other. The type-only
+`@babylonjs/lite-gl/family` entry describes the operations both backends share,
+so code can be written once for either backend
+([below](#shared-code-for-both-backends-babylonjslite-glfamily)).
 
 ### Core API (`@babylonjs/lite-gl`)
 
@@ -264,10 +267,10 @@ closed by lite-gl.
 The same function-based style, encoded into the Babylon Native engine protocol
 (protocol 9) instead of a `WebGL2RenderingContext`. The native runtime is read
 only when `createNativeEngine()` is called, never at import time. For the
-composition subset it implements, the entry uses the web entry's `GL*` type
-names, function signatures, and options, so shared rendering code can select
-either entry with a build-time alias. Engine creation, frames, and borrowed host
-textures are native-specific.
+operations it implements, the entry uses the web entry's `GL*` type names and
+options; `NativeGLFamily` records where its signatures are narrower than the
+web backend's. Engine creation, frames, and borrowed host textures are
+native-specific.
 
 ```ts
 import { createNativeEngine, beginFrame, endFrame, createEffect, setEffectFloat, createVertexBuffer, createIndexBuffer, createMeshVao, drawMesh } from "@babylonjs/lite-gl/native";
@@ -309,6 +312,36 @@ endFrame(engine);
 
 The ownership and device-reset contract is documented in
 `docs/gl/architecture/03-native-lite-gl.md`.
+
+### Shared code for both backends (`@babylonjs/lite-gl/family`)
+
+The `family` entry is types only and needs no DOM library. `GLOps<F>` describes
+every backend-neutral operation over a backend family `F` (`WebGLFamily` from
+the web entry, `NativeGLFamily` from the native entry). Shared code names the
+operations it uses as a `GLKit`, and each composition root fills the kit with
+direct references to one backend's functions, so bundles keep only those
+functions:
+
+```ts
+import type { GLFamily, GLKit } from "@babylonjs/lite-gl/family";
+
+type QuadOps = "useEffect" | "setEffectTexture" | "drawMesh";
+function drawLayer<F extends GLFamily>(gl: GLKit<F, QuadOps>, effect: F["effect"], mesh: F["meshVao"], layer: F["texture"]) {
+    gl.useEffect(effect);
+    gl.setEffectTexture(effect, "layer", layer);
+    gl.drawMesh(mesh);
+}
+
+// Browser root; a native root imports the same names from "@babylonjs/lite-gl/native" with NativeGLFamily.
+import { useEffect, setEffectTexture, drawMesh, type WebGLFamily } from "@babylonjs/lite-gl";
+const webKit: GLKit<WebGLFamily, QuadOps> = { useEffect, setEffectTexture, drawMesh };
+```
+
+Each backend keeps its own signatures: for example the native `drawMesh` is
+non-instanced and its `setEffectTexture` does not accept `null`. Engine creation
+and host interop such as `createGLEngine` or `wrapNativeTexture` are
+backend-specific and listed in `WebGLHostOps` / `NativeGLHostOps`. See
+`docs/gl/architecture/04-backend-family.md`.
 
 ## Demos
 

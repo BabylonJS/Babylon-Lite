@@ -1,27 +1,6 @@
 import type { GLEngineContext } from "./context.js";
 import { getRenderHeight, getRenderWidth } from "./context.js";
-
-/** Pixel-space viewport rectangle passed to `setViewport`. */
-export interface GLViewport {
-    /** Lower-left X origin in physical pixels. */
-    x: number;
-    /** Lower-left Y origin in physical pixels. */
-    y: number;
-    /** Width in physical pixels. */
-    w: number;
-    /** Height in physical pixels. */
-    h: number;
-}
-
-/** Options for {@link clearEngine}. */
-export interface GLClearOptions {
-    /** When set, clears the color buffer to this RGBA color (alpha default 1). */
-    color?: { r: number; g: number; b: number; a?: number };
-    /** Clear the depth buffer. */
-    depth?: boolean;
-    /** Clear the stencil buffer. */
-    stencil?: boolean;
-}
+import type { GLClearOptions, GLViewport } from "../family.js";
 
 /** Blend presets shared with Lite GL: disabled, additive, combine and premultiplied. */
 export type GLBlendMode = 0 | 1 | 2 | 7;

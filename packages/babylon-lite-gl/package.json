@@ -33,6 +33,10 @@
         "./native": {
             "import": "./src/native/index.ts",
             "types": "./src/native/index.ts"
+        },
+        "./family": {
+            "import": "./src/family.ts",
+            "types": "./src/family.ts"
         }
     },
     "files": [
@@ -53,6 +57,10 @@
             "./native": {
                 "import": "./dist/native/index.js",
                 "types": "./dist/native/index.d.ts"
+            },
+            "./family": {
+                "import": "./dist/family.js",
+                "types": "./dist/family.d.ts"
             }
         }
     },

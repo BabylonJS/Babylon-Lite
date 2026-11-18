@@ -8,8 +8,8 @@
 //
 // `tsc` does not emit a publish manifest, so after compiling we write the
 // publish-ready `dist/package.json` (the scoped `@babylonjs/lite-gl` name with
-// the public `exports` map: the web entry `.` and the native entry `./native`)
-// and copy the README. The GL npm pipeline publishes
+// the public `exports` map: the web entry `.`, the native entry `./native` and
+// the browser-free contract entry `./family`) and copy the README. The GL npm pipeline publishes
 // the `dist/` folder directly (`npm publish ./packages/babylon-lite-gl/dist`),
 // so the manifest must live inside `dist/`.
 //
@@ -78,6 +78,7 @@ const manifest = {
     exports: {
         ".": { import: "./index.js", types: "./index.d.ts" },
         "./native": { import: "./native/index.js", types: "./native/index.d.ts" },
+        "./family": { import: "./family.js", types: "./family.d.ts" },
     },
     ...(provenance ? { babylonLiteRelease: provenance } : {}),
 };

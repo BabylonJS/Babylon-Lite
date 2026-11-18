@@ -1,17 +1,7 @@
+import type { GLEffectOptions } from "../family.js";
 import type { GLEngineContext } from "./context.js";
 import type { NativeHandle } from "./runtime.js";
 import type { GLTexture } from "./texture.js";
-
-/** GLSL ES 3.00 program inputs, matching Lite GL's effect descriptor. */
-export interface GLEffectOptions {
-    name: string;
-    vertexSource: string;
-    fragmentSource: string;
-    uniformNames: readonly string[];
-    samplerNames: readonly string[];
-    attributeNames?: readonly string[];
-    defines?: string;
-}
 
 /** Native shader program and its retained upload state. */
 export interface GLEffect {

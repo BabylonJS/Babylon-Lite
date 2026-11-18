@@ -16,25 +16,24 @@ const NODE = process.execPath;
 const BUILD_SCRIPT = resolve(PACKAGE_DIR, "build.mjs");
 const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 
-// The package ships two public entries: the WebGL2 barrel (".") and the Babylon
-// Native backend ("./native"). The former per-feature sub-entries (`/sprites`,
+// The package ships three public entries: the WebGL2 barrel ("."), the Babylon
+// Native backend ("./native") and the browser-free backend contract ("./family").
+// The former per-feature sub-entries (`/sprites`,
 // `/mesh`, …) were collapsed into the barrel; their modules still emit as internal
 // `dist/*.js` + `.d.ts` (the barrel imports them) but are NOT public `exports`.
 const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture", "texture-source"] as const;
 const REMOVED_SUBPATHS = ["./html-texture", "./sprites", "./render-target", "./mesh", "./depth-stencil", "./scissor", "./dynamic-texture"] as const;
+const BROWSER_LIB = "es2022,dom,dom.iterable";
+const HOST_NEUTRAL_LIB = "es2022";
 
-function typecheckDts(dts: string) {
+function typecheckDts(dts: string, lib: string) {
     // `--ignoreConfig` is required under TypeScript 6: passing a file on the
     // command line while a tsconfig.json exists in cwd is otherwise an error
     // (TS5112). WebGPU types are not needed here (WebGL package).
-    return spawnSync(
-        NODE,
-        [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--lib", "es2022,dom,dom.iterable", dts],
-        {
-            cwd: PACKAGE_DIR,
-            encoding: "utf-8",
-        }
-    );
+    return spawnSync(NODE, [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--lib", lib, dts], {
+        cwd: PACKAGE_DIR,
+        encoding: "utf-8",
+    });
 }
 
 describe("babylon-lite-gl build output", () => {
@@ -50,8 +49,8 @@ describe("babylon-lite-gl build output", () => {
             expect(existsSync(resolve(DIST, file)), `missing dist/${file}`).toBe(true);
         }
 
-        // The emitted manifest is the scoped npm name exposing EXACTLY the web barrel
-        // and the native entry. The former sub-entries must NOT be published anymore.
+        // The emitted manifest is the scoped npm name exposing EXACTLY the web barrel,
+        // the native entry and the contract entry. The former sub-entries must NOT be published anymore.
         const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown>; dependencies?: Record<string, string> };
         expect(pkg.name).toBe("@babylonjs/lite-gl");
 
@@ -60,7 +59,7 @@ describe("babylon-lite-gl build output", () => {
         const sourceDependencies = (JSON.parse(readFileSync(resolve(PACKAGE_DIR, "package.json"), "utf-8")) as { dependencies?: Record<string, string> }).dependencies;
         expect(sourceDependencies?.["text-shaper"]).toBeDefined();
         expect(pkg.dependencies).toEqual(sourceDependencies);
-        expect(Object.keys(pkg.exports ?? {})).toEqual([".", "./native"]);
+        expect(Object.keys(pkg.exports ?? {})).toEqual([".", "./native", "./family"]);
         for (const subpath of REMOVED_SUBPATHS) {
             expect(pkg.exports?.[subpath], `exports["${subpath}"] must no longer be published`).toBeUndefined();
         }
@@ -90,7 +89,7 @@ describe("babylon-lite-gl build output", () => {
         // catching any internal-only types leaking into the public surface. index.d.ts
         // transitively references the internal module declarations, so this also proves
         // the emitted declaration graph resolves on disk.
-        const dtsResult = typecheckDts(resolve(DIST, "index.d.ts"));
+        const dtsResult = typecheckDts(resolve(DIST, "index.d.ts"), BROWSER_LIB);
         if (dtsResult.status !== 0) {
             throw new Error(`dist/index.d.ts has TypeScript errors:\n${dtsResult.stdout ?? ""}${dtsResult.stderr ?? ""}`);
         }
@@ -235,10 +234,22 @@ describe("babylon-lite-gl build output", () => {
         const nativeEntry = distPkg.exports["./native"];
         expect(nativeEntry).toEqual({ import: "./native/index.js", types: "./native/index.d.ts" });
         const nativeTypes = resolve(DIST, nativeEntry!.types!);
-        const nativeDtsResult = typecheckDts(nativeTypes);
+        // Native and contract consumers have no browser host, so their declarations
+        // must resolve without the DOM library.
+        const nativeDtsResult = typecheckDts(nativeTypes, HOST_NEUTRAL_LIB);
         if (nativeDtsResult.status !== 0) {
             throw new Error(`dist/native/index.d.ts has TypeScript errors:\n${nativeDtsResult.stdout ?? ""}${nativeDtsResult.stderr ?? ""}`);
         }
+
+        // ── The backend contract entry: types only, browser-free ─────────────
+        const familyEntry = distPkg.exports["./family"];
+        expect(familyEntry).toEqual({ import: "./family.js", types: "./family.d.ts" });
+        const familyDtsResult = typecheckDts(resolve(DIST, familyEntry!.types!), HOST_NEUTRAL_LIB);
+        if (familyDtsResult.status !== 0) {
+            throw new Error(`dist/family.d.ts has TypeScript errors:\n${familyDtsResult.stdout ?? ""}${familyDtsResult.stderr ?? ""}`);
+        }
+        const familyMod = (await import(pathToFileURL(resolve(DIST, familyEntry!.import!)).href)) as Record<string, unknown>;
+        expect(Object.keys(familyMod), "the contract entry must carry no runtime exports").toEqual([]);
 
         // Importing the native entry must not touch the native runtime; it is only
         // required once an engine is created.

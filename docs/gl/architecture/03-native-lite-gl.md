@@ -23,28 +23,35 @@ exports both:
 ```json
 {
     ".": { "import": "./index.js", "types": "./index.d.ts" },
-    "./native": { "import": "./native/index.js", "types": "./native/index.d.ts" }
+    "./native": { "import": "./native/index.js", "types": "./native/index.d.ts" },
+    "./family": { "import": "./family.js", "types": "./family.d.ts" }
 }
 ```
 
-The two entries are independent module graphs. The web barrel never imports
+The two backend entries are independent module graphs. The web barrel never imports
 `native/`, and `native/` never imports the WebGL modules, so each consumer's
-bundle contains only the backend it imports. Neither entry has import-time
+bundle contains only the backend it imports. `native/` imports only the
+type-only backend contract (`../family.ts`), which emits no runtime code and
+references no DOM type. Neither entry has import-time
 side effects: the native runtime (`globalThis._native`) is read only when an
 engine is created. Relative imports keep explicit `.js` extensions, so the
 emitted files are runnable ESM without a bundler.
 
-A host selects a backend at build time (for example with a bundler alias) and
-calls the matching standalone functions. Platform selection is a build concern;
-there are no `ThinEngine`, `ThinTexture`, or `Effect` lookalikes.
+Shared consumer code is written once against the backend family
+(`04-backend-family.md`): it receives a `GLKit` of the operations it uses, and
+each composition root fills the kit with direct references to one backend's
+exported functions. There are no build aliases, runtime facades, or
+`ThinEngine`, `ThinTexture`, or `Effect` lookalikes.
 
-For the composition subset it implements, the native entry follows the web
-entry's API: the same `GL*` type names (`GLEngineContext`, `GLEffect`,
-`GLTexture`, `GLRenderTarget`, `GLMeshVao`, …), function signatures, and option
-objects, including the receiver rule: operations on an existing resource take
-the resource first and derive its engine from it. Code written against that subset of `@babylonjs/lite-gl` compiles
-against `@babylonjs/lite-gl/native` without an adapter. Engine creation,
-frame bracketing, and borrowed host textures are native-specific additions.
+The native entry implements a subset of the backend-neutral operations, with
+the same `GL*` type names (`GLEngineContext`, `GLEffect`, `GLTexture`,
+`GLRenderTarget`, `GLMeshVao`, …) and option objects, including the receiver
+rule: operations on an existing resource take the resource first and derive
+its engine from it. `NativeGLFamily` records where its signatures are narrower
+than the web backend's, such as non-instanced draws, immutable vertex buffers,
+RGBA8 raw uploads and samplers that cannot be unbound with `null`.
+`NativeGLHostOps` lists the native-specific engine creation and borrowed host
+texture operations.
 
 ## 2. Contract
 
@@ -163,8 +170,11 @@ validation tags, unchanged-state elision, shared uniform values, vertex-array
 reuse, borrowed versus owned texture disposal, target replacement, pixel
 viewports, clear options, `#version` handling, unsupported raw formats, and
 rendering state after a native reset. Package-output tests (`tests/gl/build/`) check the
-built `./native` export, its trimmed declarations, import without a native
-runtime, and that the web and native entries tree-shake independently.
+built `./native` export, that its trimmed declarations type-check without the
+DOM library, import without a native runtime, and that the web and native
+entries tree-shake independently. The backend-family conformance test
+(`tests/gl/unit/gl-family-conformance.test.ts`, `04-backend-family.md` §4)
+checks every native export against `GLOps<NativeGLFamily>` or `NativeGLHostOps`.
 
 This repository does not yet render the backend on a real Babylon Native host;
 hosts validate rendering against a matching Babylon Native build.

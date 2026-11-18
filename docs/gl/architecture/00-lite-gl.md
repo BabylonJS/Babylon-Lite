@@ -1608,8 +1608,9 @@ The application's `onContextLost` callback may e.g. hide the canvas.
 
 ## 5. Tree-shaking & packaging
 
-`package.json` (the web barrel plus the separate Babylon Native entry of
-`03-native-lite-gl.md`, built with plain `tsc`):
+`package.json` (the web barrel, the separate Babylon Native entry of
+`03-native-lite-gl.md` and the type-only backend contract of
+`04-backend-family.md`, built with plain `tsc`):
 
 ```json
 {
@@ -1621,14 +1622,16 @@ The application's `onContextLost` callback may e.g. hide the canvas.
     "sideEffects": false,
     "exports": {
         ".": { "import": "./src/index.ts", "types": "./src/index.ts" },
-        "./native": { "import": "./src/native/index.ts", "types": "./src/native/index.ts" }
+        "./native": { "import": "./src/native/index.ts", "types": "./src/native/index.ts" },
+        "./family": { "import": "./src/family.ts", "types": "./src/family.ts" }
     },
     "publishConfig": {
         "main": "./dist/index.js",
         "types": "./dist/index.d.ts",
         "exports": {
             ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
-            "./native": { "import": "./dist/native/index.js", "types": "./dist/native/index.d.ts" }
+            "./native": { "import": "./dist/native/index.js", "types": "./dist/native/index.d.ts" },
+            "./family": { "import": "./dist/family.js", "types": "./dist/family.d.ts" }
         }
     },
     "files": ["dist"],
@@ -1659,6 +1662,9 @@ Tree-shaking guarantees:
   to typed-array literals (the quad geometry) which bundlers treat as pure.
 - The web barrel and `src/native/` share no modules, so a web bundle contains no
   native code and a native bundle contains no WebGL code.
+- The backend contract (`family.ts`, `web-family.ts`, `native/family.ts`) is
+  types only and emits empty modules, so composing a kit adds no runtime code
+  beyond the functions the composition root references.
 - The loss/restore registries (`_effects`, `_textures`) ARE retained whenever
   `createEffect` or `createRawTexture` is referenced, because the constructors
   push into them. This is unavoidable: it's the cost of context restore. Total
@@ -2013,6 +2019,9 @@ ship coverage in all the layers it touches before merge:
 
 - **unit** tests for the new functions / cache behaviour (mock GL);
 - **build** assertions whenever it adds or changes a public export, plus a per-scene **bundle-size ceiling** (`maxRawKB`) for any new GL lab scene;
+- a **backend family** update whenever it adds, removes or changes an exported
+  function: classify it in `GLOps` or a host-ops interface and update both
+  uber-kits (`04-backend-family.md` §4, `packages/babylon-lite-gl/AGENTS.md`);
 - a **parity** scene that renders the feature through BOTH lite-gl AND a Babylon
   `ThinEngine` reference, then pixel-diffs them (the exact method proven by the
   NeonBrush migration — ref page vs lite page → `gl.readPixels` → `compareImages`);
@@ -2212,12 +2221,15 @@ As-built layout:
 
 ```
 packages/babylon-lite-gl/
-    package.json            scoped @babylonjs/lite-gl, "." (the barrel) + "./native" entries
+    AGENTS.md               contributor rule: exports, backend family and uber-kits change together
+    package.json            scoped @babylonjs/lite-gl, "." (the barrel) + "./native" + "./family" entries
     tsconfig.json
     build.mjs               plain tsc emit (stripInternal) + writes dist/package.json
     README.md
     src/
         index.ts            re-exports (core API + blend)
+        family.ts           type-only backend contract: GLFamily, GLOps, GLKit (04-backend-family.md)
+        web-family.ts       WebGLFamily + WebGLHostOps
         context.ts          createGLEngine/disposeGLEngine/resizeGLEngine, lost/restored handlers, registries
         state.ts            GLState types
         render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
@@ -2233,7 +2245,7 @@ packages/babylon-lite-gl/
         native/             Babylon Native backend for @babylonjs/lite-gl/native (03-native-lite-gl.md)
 
 tests/gl/                   four-layer harness (mirrors tests/lite/), tsconfig.json
-    unit/                   vitest mock-GL — _lite-gl-mock.ts, {blend,cache,html-texture,render-loop,sprites,render-target}.test.ts
+    unit/                   vitest mock-GL — _lite-gl-mock.ts, {blend,cache,html-texture,render-loop,sprites,render-target}.test.ts, gl-family-{conformance,consumer}.test.ts
     build/                  public-api.test.ts (built dist + trimmed .d.ts)
     parity/                 Playwright pixel-diff vs Babylon ThinEngine — compare-utils.ts, gl-parity.spec.ts
     perf/                   gl-perf-raf.spec.ts (frame cost) + gl-perf-regression.spec.ts (vs Babylon ref)
