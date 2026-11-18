@@ -111,8 +111,8 @@ const CACHE_DIR = join(ROOT, ".freeciv-cache");
  * pinned original resolution (1158×737, ~0.8 MB) — never committed here.
  */
 const MERCATOR_ASSETS_REVISION = "5e80e4a45dbfa30cae8f37c732ad10671b29b5f3";
-const MERCATOR_URL = `https://raw.githubusercontent.com/BabylonJS/Assets/${MERCATOR_ASSETS_REVISION}/textures/lite/mercator-1569.png`;
-const MERCATOR_SHA256 = "5c1b84a3cf38b86d823edfc3144d0a6a158fc72fe60c167ce1afb7c126350291";
+export const MERCATOR_URL = `https://raw.githubusercontent.com/BabylonJS/Assets/${MERCATOR_ASSETS_REVISION}/textures/lite/mercator-1569.png`;
+export const MERCATOR_SHA256 = "5c1b84a3cf38b86d823edfc3144d0a6a158fc72fe60c167ce1afb7c126350291";
 const MERCATOR_DEST = join(OUT_DIR, "mercator-1569.png");
 const MERCATOR_LICENSE = join(OUT_DIR, "mercator-1569.LICENSE.txt");
 const MERCATOR_LICENSE_TEXT = `Gerardus Mercator — World Map (Nova et Aucta Orbis Terrae Descriptio), 1569.

@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchFreeciv } from "../../../scripts/fetch-freeciv";
-
-const MERCATOR_URL = "https://raw.githubusercontent.com/BabylonJS/Assets/5e80e4a45dbfa30cae8f37c732ad10671b29b5f3/textures/lite/mercator-1569.png";
-const MERCATOR_SHA256 = "5c1b84a3cf38b86d823edfc3144d0a6a158fc72fe60c167ce1afb7c126350291";
+import { fetchFreeciv, MERCATOR_SHA256, MERCATOR_URL } from "../../../scripts/fetch-freeciv";
 
 const mocks = vi.hoisted(() => ({
     exists: vi.fn(),
