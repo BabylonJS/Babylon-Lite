@@ -35,6 +35,39 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes typed animation curve snapshots and editing from the root", () => {
+        const probePath = resolve(BUILD_DIR, "animation-curve.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getAnimationGroupTracks, setAnimationTrackKeys, type AnimationGroup, type AnimationCurveTrack, type AnimationCurveKey } from "./index.js";
+declare const group: AnimationGroup;
+const tracks: readonly AnimationCurveTrack[] = getAnimationGroupTracks(group);
+const interpolation: string = tracks[0]!.interpolation;
+const key: AnimationCurveKey = { time: 0, value: [1], inTangent: [0], outTangent: [0] };
+setAnimationTrackKeys(group, 0, [key]);
+// @ts-expect-error Snapshots are readonly.
+tracks[0]!.keys[0]!.value[0] = 4;
+// @ts-expect-error Time is required.
+setAnimationTrackKeys(group, 0, [{ value: [1] }]);
+// @ts-expect-error Internal mixer state is not public.
+group._propertyMixer;
+// @ts-expect-error Interpolation strings intentionally remain open for future modes.
+const closed: "linear" | "step" | "cubicSpline" = tracks[0]!.interpolation;
+void [interpolation, closed];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes texture readback through root APIs without native handles", () => {
         const probePath = resolve(BUILD_DIR, "texture-readback.probe.ts");
         try {
