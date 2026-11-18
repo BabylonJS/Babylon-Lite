@@ -22,7 +22,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -107,10 +107,12 @@ const CACHE_DIR = join(ROOT, ".freeciv-cache");
 /**
  * Decorative background: Gerardus Mercator's 1569 world map, used as a subdued
  * "old atlas" backdrop behind the iso map. Published 1569 (author d. 1594), so
- * it is in the public domain worldwide. Fetched from Wikimedia Commons at the
- * pinned original resolution (1158×737, ~0.8 MB) — never committed to git.
+ * it is in the public domain worldwide. Mirrored in BabylonJS/Assets at the
+ * pinned original resolution (1158×737, ~0.8 MB) — never committed here.
  */
-const MERCATOR_URL = "https://upload.wikimedia.org/wikipedia/commons/b/b2/Mercator_1569.png";
+const MERCATOR_ASSETS_REVISION = "5e80e4a45dbfa30cae8f37c732ad10671b29b5f3";
+const MERCATOR_URL = `https://raw.githubusercontent.com/BabylonJS/Assets/${MERCATOR_ASSETS_REVISION}/textures/lite/mercator-1569.png`;
+const MERCATOR_SHA256 = "5c1b84a3cf38b86d823edfc3144d0a6a158fc72fe60c167ce1afb7c126350291";
 const MERCATOR_DEST = join(OUT_DIR, "mercator-1569.png");
 const MERCATOR_LICENSE = join(OUT_DIR, "mercator-1569.LICENSE.txt");
 const MERCATOR_LICENSE_TEXT = `Gerardus Mercator — World Map (Nova et Aucta Orbis Terrae Descriptio), 1569.
@@ -119,7 +121,8 @@ Public domain. Published 1569; author Gerardus Mercator died 1594, so the work
 is in the public domain in its country of origin and in the United States.
 
 Source: https://commons.wikimedia.org/wiki/File:Mercator_1569.png
-File:   ${MERCATOR_URL}
+Mirror: ${MERCATOR_URL}
+SHA-256: ${MERCATOR_SHA256}
 
 Fetched at build time as a decorative backdrop for the Freeciv demo; not
 committed to this repository.
@@ -200,16 +203,28 @@ export async function fetchFreeciv(): Promise<void> {
 
 /** Fetch the public-domain Mercator 1569 backdrop (idempotent). */
 async function fetchMercator(): Promise<void> {
-    if (existsSync(MERCATOR_DEST) && existsSync(MERCATOR_LICENSE)) return;
-    console.log("Fetching Mercator 1569 backdrop (public domain) from Wikimedia Commons …");
-    const res = await fetch(MERCATOR_URL);
+    if (existsSync(MERCATOR_DEST) && existsSync(MERCATOR_LICENSE) && createHash("sha256").update(readFileSync(MERCATOR_DEST)).digest("hex") === MERCATOR_SHA256) {
+        return;
+    }
+    console.log("Fetching Mercator 1569 backdrop (public domain) from BabylonJS/Assets …");
+    const res = await fetch(MERCATOR_URL, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) {
         throw new Error(`Download failed for Mercator backdrop: HTTP ${res.status} ${res.statusText}`);
     }
     const bytes = Buffer.from(await res.arrayBuffer());
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (sha256 !== MERCATOR_SHA256) {
+        throw new Error(`Integrity check failed for Mercator backdrop: expected ${MERCATOR_SHA256}, received ${sha256}`);
+    }
     mkdirSync(OUT_DIR, { recursive: true });
-    writeFileSync(MERCATOR_DEST, bytes);
-    writeFileSync(MERCATOR_LICENSE, MERCATOR_LICENSE_TEXT);
+    const temp = `${MERCATOR_DEST}.${process.pid}.tmp`;
+    try {
+        writeFileSync(temp, bytes);
+        renameSync(temp, MERCATOR_DEST);
+        writeFileSync(MERCATOR_LICENSE, MERCATOR_LICENSE_TEXT);
+    } finally {
+        rmSync(temp, { force: true });
+    }
     console.log(`Done. Mercator backdrop (${(bytes.length / 1048576).toFixed(1)} MB) → lab/public/freeciv/mercator-1569.png`);
 }
 
