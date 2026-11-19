@@ -814,7 +814,8 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get emissiveColor(): Color3 {
-        return readColor3(this._lite._emissiveColor);
+        const color = this._lite._emissiveColor;
+        return color ? readColor3(color) : this._lite.emissiveTexture ? Color3.White() : Color3.Black();
     }
     public set emissiveColor(value: Color3) {
         setPbrEmissive(this._lite, [value.r, value.g, value.b]);

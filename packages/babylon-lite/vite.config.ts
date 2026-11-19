@@ -548,6 +548,8 @@ export function enumerateLibEntries(): Record<string, string> {
             if (
                 key.startsWith("accessibility/") ||
                 key.startsWith("post-process/ssao") ||
+                key === "post-process/glow" ||
+                key.startsWith("material/glow/") ||
                 key === "frame-graph/enable-geometry-velocity" ||
                 key.startsWith("material/geometry-deformation") ||
                 key.startsWith("material/pbr/pbr-geometry-velocity") ||

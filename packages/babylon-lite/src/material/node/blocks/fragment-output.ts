@@ -5,29 +5,27 @@
  *  scaffold can emit `return finalColor;`.
  */
 
-import type { BlockEmitter } from "../node-types.js";
+import type { BlockEmitter, NodeExpr, NodeValueType } from "../node-types.js";
 import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "FragmentOutputBlock",
     stage: "fragment",
     emit(block, _outputName, stage, state, ctx) {
+        const input = (name: string, type: NodeValueType): NodeExpr | null => (block.inputs.get(name)?.source ? ctx.cast(ctx.resolve(block, name, stage, state), type) : null);
         // rgba takes precedence; otherwise combine rgb + a.
-        const rgbaConn = block.inputs.get("rgba");
-        let finalVec4;
-        if (rgbaConn && rgbaConn.source) {
-            const v = ctx.resolve(block, "rgba", stage, state);
-            finalVec4 = ctx.cast(v, "vec4f");
-        } else {
-            const rgbConn = block.inputs.get("rgb");
-            const aConn = block.inputs.get("a");
-            const rgb = rgbConn && rgbConn.source ? ctx.cast(ctx.resolve(block, "rgb", stage, state), "vec3f") : { expr: "vec3<f32>(0.0, 0.0, 0.0)", type: "vec3f" as const };
-            const a = aConn && aConn.source ? ctx.cast(ctx.resolve(block, "a", stage, state), "f32") : { expr: "1.0", type: "f32" as const };
-            finalVec4 = { expr: wgsl`vec4<f32>(${rgb.expr}, ${a.expr})`, type: "vec4f" as const };
-        }
+        const rgba = input("rgba", "vec4f");
+        const rgb = rgba ? null : input("rgb", "vec3f");
+        // As in Babylon.js, the glow input (its `additionalColor`) belongs to the material: its uniforms and textures
+        // are part of the material's layout and inputs even though only a glow pass outputs it, with `a` when connected.
+        const glow = input("glow", "vec3f");
+        const a = rgba && !glow ? null : input("a", "f32");
         const t = ctx.temp(state, "frag");
-        state.fragment.body.push(wgsl`let ${t} = ${finalVec4.expr};`);
+        state.fragment.body.push(wgsl`let ${t} = ${rgba ? rgba.expr : wgsl`vec4<f32>(${rgb ? rgb.expr : "vec3<f32>(0.0, 0.0, 0.0)"}, ${a ? a.expr : "1.0"})`};`);
         state.fragment.body.push(wgsl`_NME_FRAG_OUTPUT_ = ${t};`);
+        if (glow) {
+            state._glowOutput = [glow, a];
+        }
         return { expr: t, type: "vec4f" };
     },
 };

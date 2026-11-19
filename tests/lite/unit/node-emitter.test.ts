@@ -205,6 +205,41 @@ describe("NodeMaterial emitter core", () => {
         expect(result.fragmentWgsl).toMatch(/\(nodeU\.color\)\.xyz/);
     });
 
+    it("captures the FragmentOutput glow input and its alpha as material uniforms", async () => {
+        const uniform = (id: number, name: string, type: number) => ({ customType: "BABYLON.InputBlock", id, name, mode: 0, type, inputs: [], outputs: [{ name: "output" }] });
+        const emit = async (inputs: Record<string, number>) => {
+            const graph = parseNodeMaterialSource({
+                blocks: [
+                    uniform(1, "base", 0x8),
+                    uniform(2, "glowColor", 0x10),
+                    uniform(3, "alpha", 0x1),
+                    uniform(4, "color", 0x10),
+                    {
+                        customType: "BABYLON.FragmentOutputBlock",
+                        id: 5,
+                        name: "out",
+                        inputs: Object.entries(inputs).map(([name, targetBlockId]) => ({ name, targetBlockId, targetConnectionName: "output" })),
+                        outputs: [],
+                    },
+                ],
+                outputNodes: [5],
+            });
+            return emitGraph(graph, await loadGraphEmitters(graph), 5, null).state;
+        };
+        const glowing = await emit({ rgb: 1, a: 3, glow: 2 });
+        const [glow, alpha] = glowing._glowOutput!;
+        expect(glow).toMatchObject({ type: "vec3f" });
+        expect(glow.expr).toMatch(/\(nodeU\.glowColor\)\.xyz/);
+        expect(alpha?.expr).toContain("nodeU.alpha");
+        expect(glowing.nodeUboFields.map((field) => field._name)).toEqual(expect.arrayContaining(["base", "glowColor", "alpha"]));
+        // rgba ignores `a` unless the glow output needs it.
+        const rgba = await emit({ rgba: 4, a: 3 });
+        expect(rgba._glowOutput).toBeUndefined();
+        expect(rgba.nodeUboFields.map((field) => field._name)).not.toContain("alpha");
+        expect((await emit({ rgba: 4, a: 3, glow: 2 }))._glowOutput![1]?.expr).toContain("nodeU.alpha");
+        expect((await emit({ rgb: 1, glow: 2 }))._glowOutput![1]).toBeNull();
+    });
+
     it("exposes NodeMaterial fragment coordinate depth in logical standard-Z space", async () => {
         const graph = parseNodeMaterialSource({
             blocks: [

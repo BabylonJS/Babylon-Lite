@@ -117,6 +117,11 @@ export abstract class AbstractScene {
         }
     }
 
+    /** @internal Resolve a canonical mesh wrapper without reconciling or searching scene.meshes. */
+    public _getMeshWrapper(liteKey: object): TransformNode | undefined {
+        return this._meshWrappers.get(liteKey);
+    }
+
     /** @internal Register a camera so it appears in `scene.cameras`. */
     public _registerCamera(camera: Camera): void {
         if (!this._cameras.includes(camera)) {
