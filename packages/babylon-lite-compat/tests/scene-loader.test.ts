@@ -232,8 +232,11 @@ describe("AssetContainer.addAllToScene", () => {
             new Scene(new NullEngine())
         );
 
+        expect(container.meshes).toHaveLength(1);
+        const collectionReadCount = children.mock.calls.length;
+
         expect(container.animationGroups[0]!.targetedAnimations).toHaveLength(2);
-        expect(children).toHaveBeenCalledTimes(3);
+        expect(children).toHaveBeenCalledTimes(collectionReadCount);
     });
 
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {

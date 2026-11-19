@@ -130,8 +130,8 @@ export class AssetContainer {
     /**
      * Flat list of the loaded meshes as canonical, stable-identity compat `Mesh`
      * handles (`__root__` at index 0, matching Babylon.js). Repeated reads return
-     * the same wrapper objects, and — once the container is added to a scene — the
-     * same handles `scene.meshes` exposes.
+     * a snapshot from the first hierarchy walk with the same wrapper objects, and —
+     * once the container is added to a scene — the same handles `scene.meshes` exposes.
      */
     public get meshes(): Mesh[] {
         return this._collectMeshes();
