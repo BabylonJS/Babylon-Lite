@@ -3,6 +3,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import { buildRenderTarget, createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
@@ -15,6 +16,10 @@ import { getViewProjectionMatrix } from "../../../packages/babylon-lite/src/came
 import { packMat4IntoF32 } from "../../../packages/babylon-lite/src/math/pack-mat4-into-f32";
 import { SCENE_UBO_BYTES } from "../../../packages/babylon-lite/src/shader/scene-uniforms-size";
 import { parseNodeMaterialFromSnippet } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { _invalidateSceneUboCaches } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
+import type { GlowMaterialContext } from "../../../packages/babylon-lite/src/material/glow/glow-material";
+import { createGlowDraw, drawGlowMaterial, updateGlowDraw } from "../../../packages/babylon-lite/src/material/glow/glow-material";
+import { readGlowSurface } from "../../../packages/babylon-lite/src/material/glow/glow-source";
 
 function fixture(samples = 1) {
     const pass = {
@@ -41,7 +46,7 @@ function fixture(samples = 1) {
     const begin = vi.fn((_descriptor: GPURenderPassDescriptor) => Object.assign({} as GPURenderPassEncoder, pass));
     const textures: GPUTexture[] = [];
     const device = Object.assign({} as GPUDevice, {
-        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => Object.assign({} as GPUBuffer, { size: descriptor.size, destroy: vi.fn() })),
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => Object.assign({} as GPUBuffer, { size: descriptor.size, label: descriptor.label, destroy: vi.fn() })),
         createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
             const texture = Object.assign({} as GPUTexture, {
                 format: descriptor.format,
@@ -101,6 +106,43 @@ function drawUploads(device: GPUDevice): Float32Array[] {
         .filter((data): data is Float32Array => data instanceof Float32Array && data.length === 48);
 }
 
+/** A frame without any draw, measured rather than assumed: its returned work and its render passes. Each draw adds one. */
+function emptyFrame(samples = 1): { work: number; passes: number } {
+    const f = fixture(samples);
+    const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+    task.record();
+    const work = task.execute!();
+    const passes = f.begin.mock.calls.length;
+    task.dispose();
+    return { work, passes };
+}
+
+/** Emissive-map and second blur-level sizes for an explicit `mainTextureRatio`. */
+function mapSizes(size: { width: number; height: number }, ratio: number): [number, number][] {
+    const map: [number, number] = [Math.floor(size.width * ratio), Math.floor(size.height * ratio)];
+    return [map, [map[0] >> 1, map[1] >> 1]];
+}
+
+function materialContext(f: ReturnType<typeof fixture>): GlowMaterialContext {
+    return {
+        engine: f.engine,
+        scene: f.scene,
+        format: "rgba8unorm",
+        variants: new Map(),
+        programs: new Map(),
+        targetTexture: null,
+        frame: 1,
+        skeleton: null,
+        morph: null,
+        instances: null,
+        syncInstances: null,
+        updateInstances: null,
+        node: null,
+        loading: null,
+        disposed: false,
+    };
+}
+
 describe("GlowPostProcessTask", () => {
     it("renders black opaque occluders and preserves borrowed MSAA color/depth ownership", async () => {
         const f = fixture(4);
@@ -123,8 +165,10 @@ describe("GlowPostProcessTask", () => {
         );
         await task._preload!();
         task.record();
-        expect(task.execute!()).toBe(7);
-        expect(f.begin).toHaveBeenCalledTimes(6);
+        const empty = emptyFrame(4);
+        // One more unit of work per drawn mesh than an empty frame, without extra render passes.
+        expect(task.execute!()).toBe(empty.work + 2);
+        expect(f.begin).toHaveBeenCalledTimes(empty.passes);
         expect(task.outputTexture).toBe(f.target);
         expect(task.resolveTexture).toBe(f.screen);
         expect(f.target._colorTexture).toBe(sourceColor);
@@ -148,20 +192,24 @@ describe("GlowPostProcessTask", () => {
 
     it("chains both blur levels and changes kernels without replacing sampled textures", () => {
         const f = fixture();
-        const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+        const ratio = 0.5;
+        const task = createGlowPostProcessTask({ targetTexture: f.target, mainTextureRatio: ratio }, f.engine, f.scene);
         task.record();
+        const blurPipelines = () =>
+            f.device.createRenderPipeline.mock.calls.map(([descriptor]) => descriptor.label ?? "").filter((label) => label.startsWith(`${task.name}-blur-`));
+        const recorded = blurPipelines();
         const views = task.blurredTextures.map((target) => target._colorView);
         const allocations = f.device.createTexture.mock.calls.length;
         const pipelines = f.device.createRenderPipeline.mock.calls.length;
         task.blurKernelSize = 64;
         task.execute!();
         expect(f.device.createTexture).toHaveBeenCalledTimes(allocations);
-        expect(f.device.createRenderPipeline).toHaveBeenCalledTimes(pipelines + 4);
+        // Each blur pass rebuilds its own pipeline once for the new kernel; nothing else recompiles.
+        expect(recorded.length).toBeGreaterThan(0);
+        expect(blurPipelines().slice(recorded.length).sort()).toEqual([...recorded].sort());
+        expect(f.device.createRenderPipeline).toHaveBeenCalledTimes(pipelines + recorded.length);
         expect(task.blurredTextures.map((target) => target._colorView)).toEqual(views);
-        expect(task.blurredTextures.map((target) => [target._width, target._height])).toEqual([
-            [32, 16],
-            [16, 8],
-        ]);
+        expect(task.blurredTextures.map((target) => [target._width, target._height])).toEqual(mapSizes(f.size, ratio));
         const groups = f.device.createBindGroup.mock.calls.map(([descriptor]) => descriptor);
         const thirdBlur = groups.find((descriptor) => descriptor.label === "glow-blur-2-bind-group")!;
         expect([...thirdBlur.entries].find((entry) => entry.binding === 1)?.resource).toBe(task.blurredTextures[0]._colorView);
@@ -174,17 +222,18 @@ describe("GlowPostProcessTask", () => {
         const second = f.mesh(createStandardMaterial());
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         task.record();
-        expect(task.execute!()).toBe(7);
+        const empty = emptyFrame();
+        expect(task.execute!()).toBe(empty.work + 2);
         task.includedOnlyMeshes.add(first);
-        expect(task.execute!()).toBe(6);
+        expect(task.execute!()).toBe(empty.work + 1);
         task.excludedMeshes.add(first);
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(empty.work);
         task.includedOnlyMeshes.clear();
         task.excludedMeshes.clear();
         task.excludeByDefault = true;
         expect(task.execute!()).toBe(0);
         task.includedOnlyMeshes.add(second);
-        expect(task.execute!()).toBe(6);
+        expect(task.execute!()).toBe(empty.work + 1);
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });
@@ -227,7 +276,7 @@ describe("GlowPostProcessTask", () => {
         expect(f.begin).not.toHaveBeenCalled();
         expect(selector).not.toHaveBeenCalled();
         task.isEnabled = true;
-        expect(task.execute!()).toBe(6);
+        expect(task.execute!()).toBe(emptyFrame().work + 1);
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });
@@ -256,7 +305,8 @@ describe("GlowPostProcessTask", () => {
 
     it("resizes its intermediates without rebuilding the caller's final target", () => {
         const f = fixture();
-        const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+        const ratio = 0.5;
+        const task = createGlowPostProcessTask({ targetTexture: f.target, mainTextureRatio: ratio }, f.engine, f.scene);
         task.record();
         f.size.width = 128;
         f.size.height = 64;
@@ -265,11 +315,9 @@ describe("GlowPostProcessTask", () => {
         task.record();
         expect(f.target._colorTexture).toBe(color);
         expect(color.destroy).not.toHaveBeenCalled();
-        expect([task.emissiveTexture._width, task.emissiveTexture._height]).toEqual([64, 32]);
-        expect(task.blurredTextures.map((value) => [value._width, value._height])).toEqual([
-            [64, 32],
-            [32, 16],
-        ]);
+        const [map, small] = mapSizes(f.size, ratio);
+        expect([task.emissiveTexture._width, task.emissiveTexture._height]).toEqual(map);
+        expect(task.blurredTextures.map((value) => [value._width, value._height])).toEqual([map, small]);
         task.dispose();
         expect(color.destroy).not.toHaveBeenCalled();
     });
@@ -279,12 +327,13 @@ describe("GlowPostProcessTask", () => {
         const mesh = f.mesh(createStandardMaterial());
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         task.record();
-        expect(task.execute!()).toBe(6);
+        const empty = emptyFrame();
+        expect(task.execute!()).toBe(empty.work + 1);
         task._removeMesh!(mesh);
         f.scene.meshes.length = 0;
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(empty.work);
         f.scene.meshes.push(mesh);
-        expect(task.execute!()).toBe(6);
+        expect(task.execute!()).toBe(empty.work + 1);
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });
@@ -315,10 +364,11 @@ describe("GlowPostProcessTask", () => {
         task.execute!();
         expect(drawUploads(f.device)).toHaveLength(3);
         expect(f.device.createRenderBundleEncoder).toHaveBeenCalledOnce();
+        const empty = emptyFrame();
         Object.assign(first, { visible: false });
-        expect(task.execute!()).toBe(6);
+        expect(task.execute!()).toBe(empty.work + 1);
         Object.assign(first, { visible: true });
-        expect(task.execute!()).toBe(7);
+        expect(task.execute!()).toBe(empty.work + 2);
         expect(f.device.createRenderBundleEncoder).toHaveBeenCalledTimes(3);
         expect(drawUploads(f.device)).toHaveLength(3);
         expect(f.device.createBuffer.mock.calls.filter(([descriptor]) => descriptor.label === "glow-draw")).toHaveLength(2);
@@ -328,21 +378,22 @@ describe("GlowPostProcessTask", () => {
 
     it("skips blur and merge only while an empty black map cannot change the destination", () => {
         const f = fixture();
+        const empty = emptyFrame();
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         task.record();
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(empty.work);
         expect(task.execute!()).toBe(0);
-        expect(f.begin).toHaveBeenCalledTimes(6);
+        expect(f.begin).toHaveBeenCalledTimes(empty.passes);
         task.neutralColor = { r: 0, g: 0, b: 0, a: 0.5 };
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(empty.work);
         expect(task.execute!()).toBe(0);
         task.neutralColor = { r: 0.1, g: 0, b: 0, a: 0.5 };
-        expect(task.execute!()).toBe(5);
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(empty.work);
+        expect(task.execute!()).toBe(empty.work);
         const combine = createGlowPostProcessTask({ targetTexture: f.target, alphaBlendingMode: 2 }, f.engine, f.scene);
         combine.record();
-        expect(combine.execute!()).toBe(5);
-        expect(combine.execute!()).toBe(5);
+        expect(combine.execute!()).toBe(empty.work);
+        expect(combine.execute!()).toBe(empty.work);
         task.dispose();
         combine.dispose();
     });
@@ -377,7 +428,7 @@ describe("GlowPostProcessTask", () => {
         f.mesh(cutout);
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         task.record();
-        expect(task.execute!()).toBe(8);
+        expect(task.execute!()).toBe(emptyFrame().work + 3);
         const groups = f.device.createBindGroup.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => descriptor.label === "glow-draw");
         expect(groups.map((descriptor) => [...descriptor.entries].length)).toEqual([1, 1, 3]);
         const fragments = f.device.createShaderModule.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => descriptor.label === "glow-fragment");
@@ -391,7 +442,7 @@ describe("GlowPostProcessTask", () => {
         Object.assign(f.mesh(createStandardMaterial()), { morphTargets: {} });
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         task.record();
-        expect(task.execute!()).toBe(5);
+        expect(task.execute!()).toBe(emptyFrame().work);
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });
@@ -457,6 +508,105 @@ describe("GlowPostProcessTask", () => {
         f.scene._renderableVersion++;
         task.execute!();
         expect([nodeGroups(), f.device.createRenderBundleEncoder.mock.calls.length]).toEqual([groups + 2, bundles + 1]);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("rewrites its scene uniforms when a scene-uniform writer invalidates the scene caches", () => {
+        const f = fixture();
+        f.mesh(createStandardMaterial());
+        const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+        f.scene._frameGraph._tasks.push(task);
+        task.record();
+        const sceneUploads = () => f.device.queue.writeBuffer.mock.calls.filter(([, , data]) => data instanceof Float32Array && data.length === SCENE_UBO_BYTES / 4).length;
+        task.execute!();
+        const uploads = sceneUploads();
+        task.execute!();
+        expect(sceneUploads()).toBe(uploads);
+        // Environment rotation/blur, clip planes and the procedural sky change scene uniforms outside the change key.
+        _invalidateSceneUboCaches(f.scene);
+        task.execute!();
+        expect(sceneUploads()).toBe(uploads + 1);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("restores the material's emissive texture once the texture selector is removed", () => {
+        const f = fixture();
+        f.mesh(createPbrMaterial({ emissiveTexture: f.texture() }));
+        const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+        task.record();
+        const drawEntries = () => [...f.device.createBindGroup.mock.calls.filter(([descriptor]) => descriptor.label === "glow-draw").at(-1)![0].entries].length;
+        task.execute!();
+        const textured = drawEntries();
+        task.customEmissiveTextureSelector = () => null;
+        task.execute!();
+        expect(drawEntries()).toBeLessThan(textured);
+        task.customEmissiveTextureSelector = undefined;
+        task.execute!();
+        expect(drawEntries()).toBe(textured);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("draws a single instance again once a draw's thin-instance input is gone", async () => {
+        const f = fixture();
+        const context = materialContext(f);
+        const node = await import("../../../packages/babylon-lite/src/material/glow/glow-node");
+        context.node = node;
+        const glowing = await parseNodeMaterialFromSnippet(f.engine, "", { json: nodeGraph(true) });
+        await node.prepareGlowNode(context, glowing);
+        const encoder = Object.assign({} as GPURenderBundleEncoder, f.bundle);
+        for (const material of [createStandardMaterial(), glowing]) {
+            const mesh = f.mesh(material);
+            const draw = createGlowDraw(context, mesh);
+            readGlowSurface(material, draw.surface);
+            // As left by earlier frames whose thin-instance count used indirect arguments.
+            draw.indirect = draw.instances = {} as GPUBuffer;
+            expect(updateGlowDraw(context, draw, true, draw.surface.color)).toBe(1);
+            expect([draw.indirect, draw.instances]).toEqual([null, null]);
+            drawGlowMaterial(context, draw, encoder);
+        }
+        expect(f.bundle.drawIndexedIndirect).not.toHaveBeenCalled();
+        expect(f.bundle.drawIndexed.mock.calls.map((call) => call[1] ?? 1)).toEqual([1, 1]);
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("does not publish a NodeMaterial glow program prepared after disposal", async () => {
+        const f = fixture();
+        f.mesh(await parseNodeMaterialFromSnippet(f.engine, "", { json: nodeGraph(true) }));
+        const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
+        const preparing = task._preload!();
+        task.dispose();
+        await preparing;
+        expect(f.device.createBuffer.mock.calls.filter(([descriptor]) => descriptor.label === "glow-node-ubo")).toHaveLength(0);
+    });
+
+    it("binds lights relative to a camera override under floating origin for NodeMaterial glow programs", async () => {
+        const f = fixture();
+        const origins: unknown[] = [];
+        Object.assign(f.engine, {
+            useFloatingOrigin: true,
+            _makePackMeshWorld: () => (data: Float32Array, world: Float32Array, offset: number) => packMat4IntoF32(data, world, offset),
+            _applyLightFoOffset: (_data: Float32Array, scene: SceneContext) => void origins.push(scene.camera),
+        });
+        f.mesh(await parseNodeMaterialFromSnippet(f.engine, "", { json: nodeGraph(true) }));
+        const override = createArcRotateCamera(0, 1, 8, { x: 0, y: 0, z: 0 });
+        const task = createGlowPostProcessTask({ targetTexture: f.target, camera: override }, f.engine, f.scene);
+        await task._preload!();
+        task.record();
+        const boundLights = () => {
+            const groups = f.device.createBindGroup.mock.calls.map(([descriptor]) => [...descriptor.entries]);
+            const scene = groups.filter((entries) => entries.length === 2 && (entries[0]!.resource as GPUBufferBinding).buffer.size === SCENE_UBO_BYTES).at(-1)!;
+            return (scene[1]!.resource as GPUBufferBinding).buffer.label;
+        };
+        task.execute!();
+        expect(boundLights()).toBe("glow-lights");
+        expect(origins.at(-1)).toBe(override);
+        // Without an override the scene camera's shared lights already have the right origin.
+        task.camera = null;
+        task.execute!();
+        expect(boundLights()).not.toBe("glow-lights");
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });

@@ -82,6 +82,8 @@ export interface GlowMaterialContext {
     node: typeof GlowNode | null;
     /** Helpers requested by a mesh introduced after preparation. */
     loading: Promise<void> | null;
+    /** Set by task disposal: late asynchronous preparation must not allocate or publish resources. */
+    disposed: boolean;
 }
 
 /** @internal One draw's material view, uniforms, and borrowed source resources. */
@@ -584,6 +586,10 @@ export function updateGlowDraw(
             draw.instances = instances._gpuBuffer;
             rebind = true;
         }
+    } else if (draw.indirect || draw.instances) {
+        // Thin instances were removed: the draw must not keep the previous instance count.
+        draw.indirect = draw.instances = null;
+        rebind = true;
     }
     if (draw.pipeline !== variant.pipeline) {
         draw.pipeline = variant.pipeline;

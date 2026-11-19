@@ -41,12 +41,13 @@ export interface GlowNodeDraw {
 
 /** @internal Compile a material's glow program once per task; shadow receivers first load their sampling code. */
 export async function prepareGlowNode(context: GlowMaterialContext, material: NodeMaterial): Promise<void> {
-    if (context.programs.has(material)) {
+    if (context.disposed || context.programs.has(material)) {
         return;
     }
     const state = material._state;
     const shadows = state.shadowLights.length ? await (await import("../node/node-shadow-emitter.js")).prepareNodeShadowEmitter(state.shadowLights) : undefined;
-    if (context.programs.has(material)) {
+    // The task may have been disposed, or another call may have compiled this program, while the emitter loaded.
+    if (context.disposed || context.programs.has(material)) {
         return;
     }
     const [color, alpha] = state._glowOutput!;
@@ -246,6 +247,10 @@ export function updateGlowNodeDraw(
             draw.instances = instances._gpuBuffer;
             rebind = true;
         }
+    } else if (draw.indirect || draw.instances) {
+        // No instance input (removed thin instances, or a program without them): draw a single instance.
+        draw.indirect = draw.instances = null;
+        rebind = true;
     }
     return +rebind;
 }

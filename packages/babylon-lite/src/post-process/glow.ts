@@ -15,7 +15,8 @@ import type { Mat4Storage } from "../math/types.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { ensureSceneLightState } from "../render/scene-lights-ubo.js";
+import { ensureSceneLightState, getLightsUboSize, _writeTaskLightsData } from "../render/scene-lights-ubo.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import type { GlowColor } from "../material/glow/glow-source.js";
@@ -142,6 +143,7 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
         updateInstances: null,
         node: null,
         loading: null,
+        disposed: false,
     };
     const draws = new Map<Mesh, GlowMaterialDraw>();
     const retained: GlowMaterialDraw[] = [];
@@ -160,6 +162,12 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
     const sceneKey: unknown[] = [];
     let sceneBuffer: GPUBuffer | null = null;
     let sceneGroup: GPUBindGroup | null = null;
+    // Shared scene lights, the lights bound in the scene group, and task-owned lights relative to a camera override.
+    let sceneLights: GPUBuffer | null = null;
+    let boundLights: GPUBuffer | null = null;
+    let ownLights: GPUBuffer | null = null;
+    let ownLightsData: Float32Array | null = null;
+    let appliedTextureSelector = config.customEmissiveTextureSelector;
     let device: GPUDevice | null = null;
     let aspect = 1;
     let frame = 0;
@@ -257,6 +265,8 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
         excludedMeshes: new Set(),
         customEmissiveColorSelector: config.customEmissiveColorSelector,
         customEmissiveTextureSelector: config.customEmissiveTextureSelector,
+        // Scene-uniform writers that bypass the change key (environment rotation/blur, clip plane, sky) reset it.
+        _sceneUboCacheKey: sceneKey,
         async _preload(): Promise<void> {
             await preloadGlowMaterials(context, task.meshes ?? scene.meshes);
         },
@@ -294,17 +304,14 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
                 // Programs prepared before the first recording already belong to the current device.
                 context.node?.disposeGlowNodePrograms(context, engine._device);
                 sceneBuffer?.destroy();
+                ownLights?.destroy();
+                ownLights = ownLightsData = null;
                 device = engine._device;
                 sceneBuffer = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
             }
-            const lights = ensureSceneLightState(engine, scene);
-            sceneGroup = device.createBindGroup({
-                layout: getSceneBindGroupLayout(engine),
-                entries: [
-                    { binding: 0, resource: { buffer: sceneBuffer! } },
-                    { binding: 1, resource: { buffer: lights._buffer } },
-                ],
-            });
+            // The scene group binds these lights, or task-owned ones, on the next execution.
+            sceneLights = ensureSceneLightState(engine, scene)._buffer;
+            boundLights = null;
             buildRenderTarget(emissive, engine);
             context.targetTexture = emissive._colorTexture;
             color.view = emissive._colorView!;
@@ -350,6 +357,39 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
                 renderableVersion = scene._renderableVersion;
                 epoch++;
             }
+            const textureSelector = task.customEmissiveTextureSelector;
+            if (textureSelector !== appliedTextureSelector) {
+                // Surfaces cache the selected texture: a replaced or removed selector must not leave its overrides.
+                appliedTextureSelector = textureSelector;
+                epoch++;
+            }
+            // Under floating origin, positional lights must share a camera override's origin, as mesh worlds and the
+            // view do. Only NodeMaterial glow programs read them; the shared buffer follows the scene camera.
+            let lights = sceneLights!;
+            if (floating && camera !== scene.camera && context.programs.size) {
+                const floats = getLightsUboSize() / 4;
+                if (ownLightsData?.length !== floats) {
+                    const previous = ownLights;
+                    retireGpuResources(engine, () => previous?.destroy());
+                    ownLightsData = new F32(floats);
+                    ownLights = createEmptyUniformBuffer(engine, floats * 4, `${name}-lights`);
+                }
+                _writeTaskLightsData(engine, ownLightsData, cameraScene);
+                engine._device.queue.writeBuffer(ownLights!, 0, ownLightsData as Float32Array<ArrayBuffer>);
+                lights = ownLights!;
+            }
+            if (lights !== boundLights) {
+                boundLights = lights;
+                sceneGroup = engine._device.createBindGroup({
+                    layout: getSceneBindGroupLayout(engine),
+                    entries: [
+                        { binding: 0, resource: { buffer: sceneBuffer! } },
+                        { binding: 1, resource: { buffer: lights } },
+                    ],
+                });
+                // The recorded bundle binds the previous scene group.
+                bundleEpoch = -1;
+            }
             context.frame = ++frame;
             opaque.length = 0;
             tested.length = 0;
@@ -357,7 +397,6 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             const custom = task.meshes;
             const excluded = task.excludedMeshes;
             const colorSelector = task.customEmissiveColorSelector;
-            const textureSelector = task.customEmissiveTextureSelector;
             const neutral = task.neutralColor;
             let rebound = false;
             for (const mesh of custom ?? scene.meshes) {
@@ -490,6 +529,7 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
                 return;
             }
             disposed = true;
+            context.disposed = true;
             for (const draw of draws.values()) {
                 disposeGlowDraw(context, draw);
             }
@@ -506,6 +546,8 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             sceneBuffer?.destroy();
             sceneBuffer = null;
             sceneGroup = null;
+            ownLights?.destroy();
+            ownLights = ownLightsData = sceneLights = boundLights = null;
             for (const blur of blurs) {
                 blur.dispose();
             }

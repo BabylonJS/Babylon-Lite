@@ -3,6 +3,8 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { GlowMaterialContext } from "../../../packages/babylon-lite/src/material/glow/glow-material";
+import type { GltfFeature, GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature";
+import type { GltfMeshData } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf";
 import { bothBuilds, resetBuild, SRC } from "./right-handed-builds";
 
 afterEach(resetBuild);
@@ -14,6 +16,15 @@ describe("right-handed glow material", () => {
             const { readGlowSurface } = await import(`${SRC}material/glow/glow-source`);
             const { createStandardMaterial } = await import(`${SRC}material/standard/create-standard-material`);
             const { createPbrMaterial } = await import(`${SRC}material/pbr/pbr-material`);
+            // The loader's primitive feature owns the winding and topology bits: let it encode them.
+            const primitive = (await import(`${SRC}loader-gltf/gltf-feature-primitive`)).default as GltfFeature;
+            const encode = (mesh: Mesh, mode?: number): Promise<void> =>
+                primitive.applyMesh!(
+                    // An identity world under the glTF root has a positive determinant: a mirrored node.
+                    { _primitive: { mode }, _worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) } as unknown as GltfMeshData,
+                    mesh,
+                    {} as GltfLoadCtx
+                );
             const pipelines: GPURenderPipelineDescriptor[] = [];
             const device = Object.assign({} as GPUDevice, {
                 createBuffer: () => ({}) as GPUBuffer,
@@ -43,26 +54,25 @@ describe("right-handed glow material", () => {
                 updateInstances: null,
                 node: null,
                 loading: null,
+                disposed: false,
             };
             const mesh = Object.assign({} as Mesh, {
                 material: createStandardMaterial(),
                 worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
                 _gpu: {},
-                _primitiveFeatures: 0,
             });
             const draw = createGlowDraw(context, mesh);
             readGlowSurface(mesh.material, draw.surface);
             updateGlowDraw(context, draw, true, draw.surface.color);
-            mesh._primitiveFeatures = 1 << 11;
+            await encode(mesh);
             updateGlowDraw(context, draw, true, draw.surface.color);
-            // A mirrored glTF line primitive, as pre-encoded by the loader's primitive feature.
+            // A mirrored glTF line primitive (LINES mode).
             const lines = Object.assign({} as Mesh, {
                 material: createPbrMaterial({}),
                 worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
                 _gpu: {},
-                _primitiveFeatures: (1 << 11) | (2 << 12),
-                _primitive: { topology: "line-list", frontFace: "cw" },
             });
+            await encode(lines, 1);
             const lineDraw = createGlowDraw(context, lines);
             readGlowSurface(lines.material, lineDraw.surface);
             updateGlowDraw(context, lineDraw, true, lineDraw.surface.color);
