@@ -1,4 +1,5 @@
 import type { AnimationGroup, TargetedAnimation } from "./animation-group.js";
+import type { AnimationEasing } from "./easing.js";
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_ROTATION } from "./types.js";
 import type { AnimationSampler } from "./types.js";
 
@@ -15,6 +16,8 @@ export interface AnimationCurveTrack {
     readonly target: TargetedAnimation;
     /** Current sampler mode (`linear`, `step`, or `cubicSpline`). */
     readonly interpolation: string;
+    /** Property track's segment-progress transform, shared with playback. Ignored for STEP; undefined for glTF and non-eased tracks. */
+    readonly easing?: AnimationEasing;
     readonly componentCount: number;
     readonly quaternion: boolean;
     readonly keys: readonly AnimationCurveKey[];
@@ -23,6 +26,7 @@ export interface AnimationCurveTrack {
 interface CurveSource {
     readonly target: TargetedAnimation;
     readonly sampler: AnimationSampler;
+    readonly easing?: AnimationEasing;
     readonly componentCount: number;
     readonly quaternion: boolean;
     readonly endTime: number;
@@ -61,7 +65,7 @@ function getSources(group: AnimationGroup): CurveSource[] {
             if (!target) {
                 throw new Error("Animation group has an invalid property track");
             }
-            return { target, sampler: track.sampler, componentCount: track.stride, quaternion: track.quaternion, endTime: property[3] };
+            return { target, sampler: track.sampler, easing: track.easing, componentCount: track.stride, quaternion: track.quaternion, endTime: property[3] };
         });
     }
     throw new Error("Animation group does not expose editable keyframe samplers");
@@ -96,7 +100,7 @@ function validateSource(source: CurveSource): void {
 export function getAnimationGroupTracks(group: AnimationGroup): readonly AnimationCurveTrack[] {
     return getSources(group).map((source) => {
         validateSource(source);
-        const { sampler, componentCount, target, quaternion } = source;
+        const { sampler, easing, componentCount, target, quaternion } = source;
         const cubic = sampler.interpolation === INTERP_CUBICSPLINE;
         const stride = componentCount * (cubic ? 3 : 1);
         const keys = Array.from(sampler.input, (time, index): AnimationCurveKey => {
@@ -111,7 +115,7 @@ export function getAnimationGroupTracks(group: AnimationGroup): readonly Animati
             }
             return { time, value: Array.from(sampler.output.subarray(offset, offset + stride)) };
         });
-        return { target, interpolation: interpolationName(sampler), componentCount, quaternion, keys };
+        return { target, interpolation: interpolationName(sampler), easing, componentCount, quaternion, keys };
     });
 }
 

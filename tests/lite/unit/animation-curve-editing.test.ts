@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getAnimationGroupTracks, setAnimationTrackKeys } from "../../../packages/babylon-lite/src/animation/animation-curve-editing";
 import { createAnimationGroups, goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
+import { quadraticEase } from "../../../packages/babylon-lite/src/animation/easing";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
 import { INTERP_CUBICSPLINE, PATH_POINTER, PATH_WEIGHTS } from "../../../packages/babylon-lite/src/animation/types";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
@@ -36,6 +37,7 @@ describe("animation curve editing", () => {
         const second = createPropertyAnimationGroup(manager, secondTarget, clip, { loop: false, fromTime: 0.25, toTime: 0.75 });
         const snapshot = getAnimationGroupTracks(group);
         expect(snapshot[0]).toMatchObject({ target: { target, path: "value" }, interpolation: "linear", componentCount: 1, quaternion: false });
+        expect(snapshot[0]!.easing).toBeUndefined();
         (snapshot[0]!.keys[0]!.value as number[])[0] = 100;
         expect(getAnimationGroupTracks(group)[0]!.keys[0]!.value).toEqual([0]);
         setAnimationTrackKeys(group, 0, [
@@ -53,6 +55,69 @@ describe("animation curve editing", () => {
         setAnimationTrackKeys(group, 0, [{ time: 0, value: [7] }]);
         goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBe(7);
+    });
+
+    it.each([
+        { name: "built-in", easing: quadraticEase, midpoint: 4 },
+        { name: "custom overshooting", easing: (gradient: number) => 3 * gradient, midpoint: 14 },
+    ])("exposes $name easing for segment evaluation and preserves it after key edits", ({ easing, midpoint }) => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("eased", [
+            {
+                path: "value",
+                easing,
+                keys: [
+                    { time: 0, value: -10 },
+                    { time: 2, value: 2 },
+                    { time: 4, value: 10 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        const track = getAnimationGroupTracks(group)[0]!;
+        expect(track.easing).toBe(easing);
+        const start = track.keys[1]!;
+        const end = track.keys[2]!;
+        const progress = (3 - start.time) / (end.time - start.time);
+        const value = start.value[0]! + track.easing!(progress) * (end.value[0]! - start.value[0]!);
+        expect(value).toBe(midpoint);
+        goToFrame(group, 3 * group.frameRate!);
+        expect(target.value).toBeCloseTo(value);
+        setAnimationTrackKeys(group, 0, [
+            { time: 0, value: [0] },
+            { time: 4, value: [8] },
+        ]);
+        expect(getAnimationGroupTracks(group)[0]!.easing).toBe(easing);
+        goToFrame(group, 2 * group.frameRate!);
+        expect(target.value).toBeCloseTo(8 * easing(0.5));
+    });
+
+    it("exposes STEP easing without invoking it during snapshots, holds, or playback", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const easing = (): number => {
+            throw new Error("STEP must not evaluate easing");
+        };
+        const clip = createPropertyAnimationClip("step", [
+            {
+                path: "value",
+                interpolation: "step",
+                easing,
+                keys: [
+                    { time: 0, value: 2 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        expect(getAnimationGroupTracks(group)[0]).toMatchObject({ interpolation: "step", easing });
+        goToFrame(group, 0);
+        expect(target.value).toBe(2);
+        goToFrame(group, group.frameRate! / 2);
+        expect(target.value).toBe(2);
+        goToFrame(group, group.frameRate!);
+        expect(target.value).toBe(10);
     });
 
     it("edits real parsed glTF data without mutating aliased accessors", () => {
@@ -80,6 +145,7 @@ describe("animation curve editing", () => {
         expect(data).not.toBeNull();
         const [group, other] = createAnimationGroups(data!);
         expect(getAnimationGroupTracks(group!)[0]).toMatchObject({ target: { targetName: "node", path: "translation" }, componentCount: 3 });
+        expect(getAnimationGroupTracks(group!)[0]!.easing).toBeUndefined();
         setAnimationTrackKeys(group!, 0, [
             { time: 0, value: [2, 0, 0] },
             { time: 1, value: [6, 0, 0] },

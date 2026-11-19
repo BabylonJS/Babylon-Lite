@@ -40,21 +40,27 @@ describe("build/index.d.ts", () => {
         try {
             writeFileSync(
                 probePath,
-                `import { getAnimationGroupTracks, setAnimationTrackKeys, type AnimationGroup, type AnimationCurveTrack, type AnimationCurveKey } from "./index.js";
+                `import { getAnimationGroupTracks, setAnimationTrackKeys, type AnimationGroup, type AnimationCurveTrack, type AnimationCurveKey, type AnimationEasing } from "./index.js";
 declare const group: AnimationGroup;
 const tracks: readonly AnimationCurveTrack[] = getAnimationGroupTracks(group);
 const interpolation: string = tracks[0]!.interpolation;
+const easing: AnimationEasing | undefined = tracks[0]!.easing;
+const gradient: number = easing ? easing(0.5) : 0.5;
 const key: AnimationCurveKey = { time: 0, value: [1], inTangent: [0], outTangent: [0] };
 setAnimationTrackKeys(group, 0, [key]);
 // @ts-expect-error Snapshots are readonly.
 tracks[0]!.keys[0]!.value[0] = 4;
+// @ts-expect-error Tracks do not always have easing.
+const requiredEasing: AnimationEasing = tracks[0]!.easing;
+// @ts-expect-error Easing metadata is readonly.
+tracks[0]!.easing = (value: number) => value;
 // @ts-expect-error Time is required.
 setAnimationTrackKeys(group, 0, [{ value: [1] }]);
 // @ts-expect-error Internal mixer state is not public.
 group._propertyMixer;
 // @ts-expect-error Interpolation strings intentionally remain open for future modes.
 const closed: "linear" | "step" | "cubicSpline" = tracks[0]!.interpolation;
-void [interpolation, closed];
+void [interpolation, gradient, requiredEasing, closed];
 `
             );
             const result = spawnSync(

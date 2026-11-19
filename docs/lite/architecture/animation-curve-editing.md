@@ -17,6 +17,7 @@ interface AnimationCurveKey {
 interface AnimationCurveTrack {
     readonly target: TargetedAnimation;
     readonly interpolation: string;
+    readonly easing?: AnimationEasing;
     readonly componentCount: number;
     readonly quaternion: boolean;
     readonly keys: readonly AnimationCurveKey[];
@@ -28,7 +29,19 @@ function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: 
 Tracks follow `group.targetedAnimations` order. Keys and component arrays returned
 by the getter are detached snapshots. Times are seconds, values and cubic tangents
 are sampler-space components; tangent units are value per second. Quaternion
-values are xyzw. Easing on property tracks remains in effect but is not edited.
+values are xyzw. `AnimationEasing` is the root-exported callback type
+`(gradient: number) => number`. `easing` exposes the same callback reference used
+by the property runtime track, without invoking or wrapping it. It is `undefined`
+for glTF and non-eased property tracks. Key/component arrays are detached; callback
+closure state is not cloned.
+
+To draw or insert values on an eased property track, transform segment-local
+normalized progress with `track.easing` before linear component interpolation or
+quaternion slerp. Do not clamp the transformed progress: callbacks may overshoot.
+STEP interpolation ignores easing, even when a callback is present. Property
+playback rounds the requested time to Float32 before segment selection, holds the
+first/last key outside the key range, and does not invoke easing in those holds or
+on single-key tracks. Easing remains in effect after key edits but is not edited.
 
 The setter atomically replaces a sampler's keys (including insertion/deletion).
 At least one key is required. Times must be finite, nonnegative, strictly increasing
@@ -45,7 +58,9 @@ mutating unrelated samplers that alias glTF buffer storage.
 glTF groups expose clip channels via internal `_gltfMixer`; resolve channel sampler
 indices in target order, infer component count from output length / key count /
 cubic multiplier, and identify quaternions from the channel. Property groups use
-`_propertyMixer` runtime tracks, which directly retain their samplers and stride.
+`_propertyMixer` runtime tracks, which directly retain their samplers, stride, and
+optional easing callback. The getter copies that callback reference into the
+snapshot; it does not recover easing from interpolation or mutate playback state.
 Groups with neither representation and USD groups (identified by their authored
 start-time mixer marker) are unsupported. Replacing the two arrays on the existing
 sampler preserves references held by controllers and both weighted mixers. No clip
@@ -67,12 +82,16 @@ translation, rotation, scale, morph weights, pointer channels, and manual proper
 tracks use the same component values as the corresponding runtime samplers.
 
 ## Dependencies
-Only animation group/types (type imports) and numeric interpolation/path constants.
+Only animation group/easing types (type imports) and numeric interpolation/path constants.
 
 ## Test Specification
 Cover property and glTF runtime playback after replacement, shared clips and
 overlapping source buffers, cubic tangents, morph/pointer arity, validation,
-unsupported groups, insertion/deletion, and snapshot isolation. Bundle tests
+unsupported groups, insertion/deletion, and snapshot isolation. Verify built-in
+and custom easing callbacks retain identity and match runtime segment evaluation,
+including overshoot, post-edit evaluation, STEP ignoring easing, and undefined
+easing for glTF/non-eased tracks. The emitted root API must type the callback as
+optional and readonly. Bundle tests
 compare ordinary animation consumers with and without unused editor imports and
 check an explicitly used editor is retained.
 
