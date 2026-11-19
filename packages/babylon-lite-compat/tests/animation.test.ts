@@ -5,7 +5,8 @@ import { QuadraticEase } from "../src/animations/easing";
 import type { IAnimationKey, IEasingFunction } from "../src/index";
 import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
-import type { AnimationGroup as LiteAnimationGroup } from "babylon-lite";
+import { createAnimationManager, createPropertyAnimationClip, createPropertyAnimationGroup } from "babylon-lite";
+import type { AnimationCurveTrack, AnimationGroup as LiteAnimationGroup } from "babylon-lite";
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 describe("Animation", () => {
@@ -370,38 +371,69 @@ describe("AnimationGroup", () => {
 
     it("keeps colliding manual property names out of glTF path translation", () => {
         const target = { weights: 0, pointer: 0 };
-        const lite = {
-            name: "manual",
-            duration: 1,
-            frameRate: 60,
-            isPlaying: false,
-            currentTime: 0,
-            targetedAnimations: [
-                { target, path: "weights" },
-                { target, path: "pointer" },
-            ],
-            speedRatio: 1,
-            loopAnimation: true,
-            weight: 1,
-            _stopped: false,
-            _propertyMixer: [
-                [
-                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
-                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 2]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+        const clip = createPropertyAnimationClip("manual", [
+            {
+                path: "weights",
+                keys: [
+                    { frame: 0, value: 0 },
+                    { frame: 60, value: 1 },
                 ],
-                60,
-                0,
-                1,
-            ],
-        } as unknown as LiteAnimationGroup;
+            },
+            {
+                path: "pointer",
+                keys: [
+                    { frame: 0, value: 0 },
+                    { frame: 60, value: 2 },
+                ],
+            },
+        ]);
+        const lite = createPropertyAnimationGroup(createAnimationManager(), target, clip, { loop: false });
 
         const animations = AnimationGroup._fromLite(lite, {} as never).targetedAnimations.map((targeted) => targeted.animation);
         expect(animations.map((animation) => animation.targetProperty)).toEqual(["weights", "pointer"]);
         animations[0]!.setKeys([
-            { frame: 60, value: 3 },
             { frame: 0, value: 1 },
+            { frame: 30, value: 3 },
+            { frame: 60, value: 5 },
         ]);
-        expect(animations[0]!.evaluate(30)).toBe(2);
+        animations[1]!.setKeys([
+            { frame: 0, value: 2 },
+            { frame: 60, value: 6 },
+        ]);
+        expect(animations[0]!.getKeys()).toHaveLength(3);
+        expect(animations[0]!.evaluate(30)).toBe(3);
+        expect(animations[1]!.evaluate(30)).toBe(4);
+    });
+
+    it("returns detached loaded array values and tangents", () => {
+        const track = {
+            source: "gltf",
+            target: { path: "custom", target: {} },
+            interpolation: "cubicSpline",
+            componentCount: 4,
+            quaternion: false,
+            sharedSampler: false,
+            keys: [
+                {
+                    time: 0,
+                    value: [1, 2, 3, 4],
+                    inTangent: [5, 6, 7, 8],
+                    outTangent: [9, 10, 11, 12],
+                },
+            ],
+        } satisfies AnimationCurveTrack;
+        const animation = Animation._fromLiteTrack({ name: "loaded", frameRate: 60 } as LiteAnimationGroup, 0, track);
+        const snapshot = animation.getKeys()[0]!;
+
+        (snapshot.value as number[])[0] = 100;
+        (snapshot.inTangent as number[])[0] = 200;
+        (snapshot.outTangent as number[])[0] = 300;
+
+        expect(animation.getKeys()[0]).toMatchObject({
+            value: [1, 2, 3, 4],
+            inTangent: [5 / 60, 6 / 60, 7 / 60, 8 / 60],
+            outTangent: [9 / 60, 10 / 60, 11 / 60, 12 / 60],
+        });
     });
 
     it("rejects loaded per-key easing without mutating snapshots", () => {

@@ -136,7 +136,7 @@ export class Animation {
     }
 
     public getKeys(): IAnimationKey[] {
-        return this._liteTrack ? this._keys.map(cloneAnimationKey) : this._keys;
+        return this._liteTrack ? this._keys.map(cloneLoadedAnimationKey) : this._keys;
     }
 
     /** @internal Build a Babylon.js animation over one Lite sampler (or one morph-weight component). */
@@ -232,10 +232,22 @@ export class Animation {
 }
 
 function cloneLoadedAnimationValue(value: AnimationValue): AnimationValue {
-    return typeof value === "number" || Array.isArray(value) ? value : value.clone();
+    return typeof value === "number" ? value : Array.isArray(value) ? value.slice() : value.clone();
 }
 
 function cloneAnimationKey(key: IAnimationKey): IAnimationKey {
+    return {
+        frame: key.frame,
+        value: typeof key.value === "number" || Array.isArray(key.value) ? key.value : key.value.clone(),
+        inTangent: key.inTangent === undefined || typeof key.inTangent === "number" || Array.isArray(key.inTangent) ? key.inTangent : key.inTangent.clone(),
+        outTangent: key.outTangent === undefined || typeof key.outTangent === "number" || Array.isArray(key.outTangent) ? key.outTangent : key.outTangent.clone(),
+        interpolation: key.interpolation,
+        lockedTangent: key.lockedTangent,
+        easingFunction: key.easingFunction,
+    };
+}
+
+function cloneLoadedAnimationKey(key: IAnimationKey): IAnimationKey {
     return {
         frame: key.frame,
         value: cloneLoadedAnimationValue(key.value),

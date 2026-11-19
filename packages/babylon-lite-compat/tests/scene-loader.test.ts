@@ -28,12 +28,12 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
-import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, EngineContext, Mesh as LiteMesh } from "babylon-lite";
 import { INTERP_LINEAR, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
-import { AssetContainer } from "../src/loading/scene-loader";
+import { AssetContainer, LoadAssetContainerAsync } from "../src/loading/scene-loader";
 import { PBRMaterial } from "../src/materials/materials";
 import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
@@ -64,6 +64,99 @@ function captureThrown(callback: () => void): { threw: boolean; value: unknown }
     } catch (value) {
         return { threw: true, value };
     }
+}
+
+function makeLoaderEngine(): EngineContext {
+    const device = {
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const storage = new ArrayBuffer(Number(descriptor.size));
+            return {
+                destroy: vi.fn(),
+                getMappedRange: vi.fn(() => storage),
+                unmap: vi.fn(),
+            } as unknown as GPUBuffer;
+        }),
+        createSampler: vi.fn(() => ({}) as GPUSampler),
+        createTexture: vi.fn(
+            () =>
+                ({
+                    createView: vi.fn(() => ({}) as GPUTextureView),
+                    destroy: vi.fn(),
+                }) as unknown as GPUTexture
+        ),
+        queue: {
+            copyExternalImageToTexture: vi.fn(),
+            writeBuffer: vi.fn(),
+            writeTexture: vi.fn(),
+        },
+    } as unknown as GPUDevice;
+    return { _device: device } as EngineContext;
+}
+
+function makeNestedMorphGltfSource(): string {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const morphPositions = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const indices = new Uint16Array([0, 1, 2, 0]);
+    const animationInput = new Float32Array([0, 1]);
+    const animationOutput = new Float32Array([0, 1]);
+    const chunks = [positions, morphPositions, indices, animationInput, animationOutput];
+    const byteLength = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const bytes = new Uint8Array(byteLength);
+    const byteOffsets: number[] = [];
+    let byteOffset = 0;
+    for (const chunk of chunks) {
+        byteOffsets.push(byteOffset);
+        bytes.set(new Uint8Array(chunk.buffer), byteOffset);
+        byteOffset += chunk.byteLength;
+    }
+    let binary = "";
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+    const json = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [
+            { name: "Parent", mesh: 0, children: [1] },
+            { name: "Child", mesh: 1 },
+        ],
+        meshes: [
+            { name: "ParentMesh", weights: [0], extras: { targetNames: ["ParentMorph"] }, primitives: [{ attributes: { POSITION: 0 }, indices: 2, targets: [{ POSITION: 1 }] }] },
+            { name: "ChildMesh", weights: [0], extras: { targetNames: ["ChildMorph"] }, primitives: [{ attributes: { POSITION: 0 }, indices: 2, targets: [{ POSITION: 1 }] }] },
+        ],
+        animations: [
+            {
+                name: "ParentWeights",
+                samplers: [{ input: 3, output: 4, interpolation: "LINEAR" }],
+                channels: [{ sampler: 0, target: { node: 0, path: "weights" } }],
+            },
+        ],
+        buffers: [{ byteLength, uri: `data:application/octet-stream;base64,${btoa(binary)}` }],
+        bufferViews: chunks.map((chunk, index) => ({ buffer: 0, byteOffset: byteOffsets[index], byteLength: chunk.byteLength })),
+        accessors: [
+            { bufferView: 0, componentType: 5126, count: 3, type: "VEC3" },
+            { bufferView: 1, componentType: 5126, count: 3, type: "VEC3" },
+            { bufferView: 2, componentType: 5123, count: 3, type: "SCALAR" },
+            { bufferView: 3, componentType: 5126, count: 2, type: "SCALAR", min: [0], max: [1] },
+            { bufferView: 4, componentType: 5126, count: 2, type: "SCALAR" },
+        ],
+    };
+    return `data:model/gltf+json,${encodeURIComponent(JSON.stringify(json))}`;
+}
+
+function createLoaderScene(): Scene {
+    const engine = new NullEngine();
+    (engine as unknown as { _lite: EngineContext })._lite = makeLoaderEngine();
+    return new Scene(engine);
+}
+
+function morphTargetsByParentName(meshes: readonly unknown[]): Map<string, unknown> {
+    const morphMeshes = meshes.filter(
+        (mesh): mesh is { parent?: { name: string } | null; morphTargetManager: { getTarget(index: number): unknown } } =>
+            typeof mesh === "object" && mesh !== null && "morphTargetManager" in mesh && mesh.morphTargetManager !== null
+    );
+    return new Map(morphMeshes.map((mesh) => [mesh.parent?.name ?? "", mesh.morphTargetManager.getTarget(0)] as const));
 }
 
 describe("AssetContainer.addAllToScene", () => {
@@ -160,6 +253,29 @@ describe("AssetContainer.addAllToScene", () => {
 
         expect(container.animationGroups[0]!.targetedAnimations[0]!.target).toBe(directMorph);
         expect(scene._wrapAnimationTargets(target, "weights", 0)).toEqual([directMorph]);
+    });
+
+    it("resolves nested morph targets through real container and scene glTF loads", async () => {
+        const source = makeNestedMorphGltfSource();
+        const containerScene = createLoaderScene();
+        const container = await LoadAssetContainerAsync(source, containerScene);
+        const containerTargets = morphTargetsByParentName(container.meshes);
+        const containerAnimationTarget = container.animationGroups[0]!.targetedAnimations[0]!.target;
+
+        expect(containerTargets.size).toBe(2);
+        expect(containerAnimationTarget).toBe(containerTargets.get("Parent"));
+        expect(containerAnimationTarget).not.toBe(containerTargets.get("Child"));
+
+        const scene = createLoaderScene();
+        const sceneContainer = await LoadAssetContainerAsync(source, scene);
+        sceneContainer.addAllToScene(scene);
+        (scene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = sceneContainer._lite.animationGroups;
+        const sceneTargets = morphTargetsByParentName(scene.meshes);
+        const sceneAnimationTarget = scene.animationGroups[0]!.targetedAnimations[0]!.target;
+
+        expect(sceneTargets.size).toBe(2);
+        expect(sceneAnimationTarget).toBe(sceneTargets.get("Parent"));
+        expect(sceneAnimationTarget).not.toBe(sceneTargets.get("Child"));
     });
 
     it("does not collect meshes until loaded animation target resolution needs them", () => {
