@@ -3210,5 +3210,37 @@
         "description": "The same Diligent Kitchen, lighting, Half-resolution XeGTAO settings and deterministic history as scene 348, using an orthographic camera. Compared against the matching orthographic Babylon.js SSAO2 reference.",
         "tags": ["pbr", "ssao", "post-process", "ibl", "gltf", "frame-graph", "temporal", "orthographic"],
         "skipPerf": true
+    },
+    {
+        "id": 356,
+        "slug": "scene356-glow",
+        "name": "Scene 356 — Selective Glow",
+        "maxMad": 0.5,
+        "maxRawKB": 128,
+        "description": "GlowPostProcessTask over Standard emitters (color and gamma emissive texture) and a PBR emissive factor, a NodeMaterial whose FragmentOutput glow input renders striped through its own vertex-stretched shader, a plain NodeMaterial and an opaque door that only occlude. The Babylon.js reference uses the classic GlowLayer, which also runs through the compat adapter.",
+        "tags": ["std", "pbr", "nme", "procedural", "post-process", "frame-graph"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 357,
+        "slug": "scene357-glow-shader-material",
+        "name": "Scene 357 — Selective Glow (ShaderMaterial, PBR)",
+        "maxMad": 0.5,
+        "maxRawKB": 114,
+        "description": "GlowPostProcessTask over ShaderMaterial and PBR surfaces: a bright ShaderMaterial cube without emissive source renders in the neutral color and occludes a Standard LED, a ShaderMaterial bar glows only because the custom color selector picks it from metadata, a PBR emitter glows through a linear emissive texture, and a bright unlit PBR cube only occludes.",
+        "tags": ["std", "pbr", "shader", "procedural", "post-process", "frame-graph"],
+        "skipPerf": true
+    },
+    {
+        "id": 358,
+        "slug": "scene358-rh-glow",
+        "name": "Scene 358 — Selective Glow (right-handed)",
+        "maxMad": 0.5,
+        "maxRawKB": 129,
+        "description": "Right-handed twin of scene 356: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Protects glow-map pipeline winding for Standard, PBR and NodeMaterial surfaces.",
+        "tags": ["std", "pbr", "nme", "procedural", "post-process", "frame-graph", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
     }
 ]

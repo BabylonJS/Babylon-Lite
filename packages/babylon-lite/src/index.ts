@@ -180,6 +180,8 @@ export { createCircleOfConfusionPostProcessTask } from "./post-process/circle-of
 export type { CircleOfConfusionPostProcessTask, CircleOfConfusionPostProcessTaskConfig } from "./post-process/circle-of-confusion.js";
 export { createBloomPostProcessTask } from "./post-process/bloom.js";
 export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
+export { createGlowPostProcessTask } from "./post-process/glow.js";
+export type { GlowPostProcessTask, GlowPostProcessTaskConfig, GlowColor, GlowEmissiveColorSelector, GlowEmissiveTextureSelector } from "./post-process/glow.js";
 export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post-process/depth-of-field.js";
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
 export { createTaaPostProcessTask } from "./post-process/taa.js";
