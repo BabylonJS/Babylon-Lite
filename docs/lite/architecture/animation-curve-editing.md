@@ -46,7 +46,9 @@ Edits apply on the next playback evaluation or explicit seek. Property edits rep
 the runtime track's sampler so groups created from the same property clip remain
 independently editable. `sharedSampler` identifies glTF channels in the same clip
 that reference one sampler so adapters can reject edits that require controller
-retargeting.
+retargeting. It does not detect groups constructed separately from the same parsed
+glTF data; those groups still share sampler objects, so editing one also affects the
+others.
 
 ## Internal Architecture
 glTF groups expose clip channels via internal `_gltfMixer`; resolve channel sampler

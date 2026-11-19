@@ -6,6 +6,7 @@ import type { IAnimationKey, IEasingFunction } from "../src/index";
 import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
 import type { AnimationGroup as LiteAnimationGroup } from "babylon-lite";
+import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 describe("Animation", () => {
     it("exposes Babylon.js data-type and loop-mode constants", () => {
@@ -241,7 +242,7 @@ describe("AnimationGroup", () => {
         const sampler = {
             input: new Float32Array([0, 1]),
             output: new Float32Array([0, 0, 0, 1, 2, 3]),
-            interpolation: 0,
+            interpolation: INTERP_LINEAR,
         };
         const lite = {
             name: "loaded",
@@ -306,7 +307,7 @@ describe("AnimationGroup", () => {
         const sampler = {
             input: new Float32Array([0, 1]),
             output: new Float32Array([0, 0, 2, 0, 1, 0]),
-            interpolation: 2,
+            interpolation: INTERP_CUBICSPLINE,
         };
         const lite = {
             name: "cubic",
@@ -319,7 +320,7 @@ describe("AnimationGroup", () => {
             loopAnimation: true,
             weight: 1,
             _stopped: false,
-            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: 3 }] }, [], []],
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
         } as unknown as LiteAnimationGroup;
         const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
 
@@ -340,7 +341,7 @@ describe("AnimationGroup", () => {
             weight: 1,
             _stopped: false,
             _propertyMixer: [
-                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 8]), interpolation: 0 }, stride: 1, quaternion: false, easing }],
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 8]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false, easing }],
                 60,
                 0,
                 1,
@@ -350,10 +351,12 @@ describe("AnimationGroup", () => {
 
         expect(animation.getEasingFunction()!.ease).toBe(easing);
         expect(animation.evaluate(30)).toBeCloseTo(2);
+        expect(() => animation.setEasingFunction({ ease: (gradient) => gradient })).toThrow(/Lite runtime-track easing setter/);
+        expect(animation.getEasingFunction()!.ease).toBe(easing);
     });
 
     it("rejects tangent-mode changes and shared glTF samplers without mutating keys", () => {
-        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: 0 };
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR };
         const lite = {
             name: "shared",
             duration: 1,
@@ -375,8 +378,8 @@ describe("AnimationGroup", () => {
                     frameRate: 60,
                     samplers: [sampler],
                     channels: [
-                        { samplerIdx: 0, nodeIdx: 0, path: 3 },
-                        { samplerIdx: 0, nodeIdx: 0, path: 3 },
+                        { samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS },
+                        { samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS },
                     ],
                 },
                 [],
@@ -392,7 +395,7 @@ describe("AnimationGroup", () => {
     });
 
     it("rejects missing cubic tangents with a named interpolation blocker", () => {
-        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 0, 1, 0]), interpolation: 2 };
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 0, 1, 0]), interpolation: INTERP_CUBICSPLINE };
         const lite = {
             name: "cubic",
             duration: 1,
@@ -404,7 +407,7 @@ describe("AnimationGroup", () => {
             loopAnimation: true,
             weight: 1,
             _stopped: false,
-            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: 3 }] }, [], []],
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
         } as unknown as LiteAnimationGroup;
         const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
 
@@ -415,7 +418,7 @@ describe("AnimationGroup", () => {
         const sampler = {
             input: new Float32Array([0, 1]),
             output: new Float32Array([0, 1]),
-            interpolation: 1,
+            interpolation: INTERP_STEP,
         };
         const lite = {
             name: "step",
@@ -447,7 +450,7 @@ describe("AnimationGroup", () => {
         const sampler = {
             input: new Float32Array([0, 1]),
             output: new Float32Array([0, 0, 1, 1]),
-            interpolation: 0,
+            interpolation: INTERP_LINEAR,
         };
         const lite = {
             name: "morph",
@@ -480,7 +483,7 @@ describe("AnimationGroup", () => {
     });
 
     it("retries unsupported pointer-track adaptation without returning partial state", () => {
-        const sampler = { input: new Float32Array([0]), output: new Float32Array([1]), interpolation: 0 };
+        const sampler = { input: new Float32Array([0]), output: new Float32Array([1]), interpolation: INTERP_LINEAR };
         const lite = {
             name: "pointer",
             duration: 0,

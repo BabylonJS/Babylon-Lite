@@ -4,7 +4,7 @@ import { evaluateAnimationTrack, getAnimationGroupTracks, setAnimationTrackKeys 
 import { createAnimationGroups, goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
-import { INTERP_CUBICSPLINE, PATH_POINTER, PATH_WEIGHTS } from "../../../packages/babylon-lite/src/animation/types";
+import { INTERP_CUBICSPLINE, INTERP_LINEAR, PATH_POINTER, PATH_WEIGHTS } from "../../../packages/babylon-lite/src/animation/types";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { parseAnimationData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-animation";
 import { createSceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
@@ -118,7 +118,7 @@ describe("animation curve editing", () => {
             frameRate: 48,
             samplers: [
                 { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 1, 2, 0]), interpolation: INTERP_CUBICSPLINE },
-                { input: new Float32Array([0, 1]), output: new Float32Array([0, 1, 2, 3]), interpolation: 0 },
+                { input: new Float32Array([0, 1]), output: new Float32Array([0, 1, 2, 3]), interpolation: INTERP_LINEAR },
             ],
             channels: [
                 {
@@ -151,7 +151,7 @@ describe("animation curve editing", () => {
     });
 
     it("reports samplers referenced by multiple glTF channels", () => {
-        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: 0 as const };
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR };
         const clip: AnimationClip = {
             name: "shared",
             duration: 1,

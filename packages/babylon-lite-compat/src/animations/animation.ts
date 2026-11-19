@@ -145,6 +145,11 @@ export class Animation {
      * @param easingFunction - A Babylon.js-shaped easing object, or `null` to use linear progress on keys without an override.
      */
     public setEasingFunction(easingFunction: IEasingFunction | null): void {
+        if (this._liteTrack) {
+            // Loaded easing is owned by Lite's runtime track. Supporting mutation would
+            // require changing the already-bundled playback path rather than an additive export.
+            unsupported("Animation.setEasingFunction on loaded animations needs a Lite runtime-track easing setter");
+        }
         this._easingFunction = easingFunction;
     }
 
