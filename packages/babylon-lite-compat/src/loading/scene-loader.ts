@@ -66,8 +66,8 @@ export class AssetContainer {
 
     /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
     private readonly _meshRegistry: LoadedMeshRegistry = new Map();
-    /** @internal Whether the loaded hierarchy has populated `_meshRegistry`. */
-    private _meshesCollected = false;
+    /** @internal Whether animation target lookup has populated `_meshRegistry`. */
+    private _animationTargetsCollected = false;
     /** @internal Retained animation wrappers, including while this container is detached. */
     private readonly _animationGroupRegistry = new Map<LiteAnimationGroup, AnimationGroup>();
     /** @internal The compat scene this container was added to, if any (drives registry membership). */
@@ -113,7 +113,7 @@ export class AssetContainer {
         if (!target) {
             return [target];
         }
-        this._collectMeshes();
+        this._collectAnimationTargets();
         if (path !== "weights" || componentIndex === undefined) {
             return [this._meshRegistry.get(target) ?? target];
         }
@@ -130,23 +130,25 @@ export class AssetContainer {
     /**
      * Flat list of the loaded meshes as canonical, stable-identity compat `Mesh`
      * handles (`__root__` at index 0, matching Babylon.js). Repeated reads return
-     * a snapshot from the first hierarchy walk with the same wrapper objects, and —
-     * once the container is added to a scene — the same handles `scene.meshes` exposes.
+     * the current hierarchy membership with the same wrapper objects, and — once
+     * the container is added to a scene — the same handles `scene.meshes` exposes.
      */
     public get meshes(): Mesh[] {
-        return this._collectMeshes();
-    }
-
-    private _collectMeshes(): Mesh[] {
         if (this._disposed) {
             return [...this._meshRegistry.values()];
         }
-        if (!this._meshesCollected) {
+        const scene = this._scene ?? this._destinationScene;
+        const meshes = collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
+        this._animationTargetsCollected = true;
+        return meshes;
+    }
+
+    private _collectAnimationTargets(): void {
+        if (!this._animationTargetsCollected) {
             const scene = this._scene ?? this._destinationScene;
             collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
-            this._meshesCollected = true;
+            this._animationTargetsCollected = true;
         }
-        return [...this._meshRegistry.values()];
     }
 
     public get skeletons(): Skeleton[] {
@@ -246,7 +248,7 @@ export class AssetContainer {
         // scene, so `scene.meshes` lists the loaded meshes and later
         // `container.meshes` reads share the same scene-aware handles.
         collectLoadedMeshes(this._lite, this._meshRegistry, scene);
-        this._meshesCollected = true;
+        this._animationTargetsCollected = true;
         scene._surfaceLoadedCamera();
     }
 

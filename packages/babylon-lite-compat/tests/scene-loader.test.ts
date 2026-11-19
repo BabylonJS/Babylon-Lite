@@ -239,6 +239,20 @@ describe("AssetContainer.addAllToScene", () => {
         expect(children).toHaveBeenCalledTimes(collectionReadCount);
     });
 
+    it("reflects detached loaded meshes without rebuilding animation target wrappers", () => {
+        const child = { name: "Cube", children: [], parent: null as object | null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [child], parent: null as object | null };
+        child.parent = root;
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, new Scene(new NullEngine()));
+        const first = container.meshes;
+
+        root.children = [];
+        child.parent = null;
+        first[1]!.dispose();
+
+        expect(container.meshes).toEqual([first[0]]);
+    });
+
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {
         const material = createPbrMaterial();
         const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };

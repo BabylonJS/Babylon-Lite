@@ -159,9 +159,9 @@ export class Animation {
         return this._keys.length > 0 ? this._keys[this._keys.length - 1]!.frame : 0;
     }
 
-    /** @internal Read the stored key-frame endpoints without creating a public snapshot. */
-    public _keyFrameRange(): readonly [number, number] | undefined {
-        return this._keys.length > 0 ? [this._keys[0]!.frame, this._keys[this._keys.length - 1]!.frame] : undefined;
+    /** @internal Read the first stored key frame without creating a public snapshot. */
+    public _firstFrame(): number | undefined {
+        return this._keys[0]?.frame;
     }
 
     /**
@@ -1113,19 +1113,19 @@ function isAnimationBinding(binding: AnimationBinding | undefined): binding is A
 }
 
 function clampAnimationFrame(animation: Animation | undefined, frame: number): number {
-    const range = animation?._keyFrameRange();
-    if (!range) {
+    const min = animation?._firstFrame();
+    if (min === undefined || !animation) {
         return frame;
     }
-    return Math.min(Math.max(frame, range[0]), range[1]);
+    return Math.min(Math.max(frame, min), animation.getHighestFrame());
 }
 
 function animationPlaybackRange(animation: Animation, from: number, to: number): readonly [number, number] {
-    const range = animation._keyFrameRange();
-    if (!range) {
+    const min = animation._firstFrame();
+    if (min === undefined) {
         return [from, to];
     }
-    const [min, max] = range;
+    const max = animation.getHighestFrame();
     return [from < min || from > max ? min : from, to < min || to > max ? max : to];
 }
 
