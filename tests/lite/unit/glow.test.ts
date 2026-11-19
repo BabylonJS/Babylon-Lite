@@ -17,6 +17,7 @@ import { packMat4IntoF32 } from "../../../packages/babylon-lite/src/math/pack-ma
 import { SCENE_UBO_BYTES } from "../../../packages/babylon-lite/src/shader/scene-uniforms-size";
 import { parseNodeMaterialFromSnippet } from "../../../packages/babylon-lite/src/material/node/node-material";
 import { _invalidateSceneUboCaches } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
+import { ensureSceneLightState } from "../../../packages/babylon-lite/src/render/scene-lights-ubo";
 import type { GlowMaterialContext } from "../../../packages/babylon-lite/src/material/glow/glow-material";
 import { createGlowDraw, drawGlowMaterial, updateGlowDraw } from "../../../packages/babylon-lite/src/material/glow/glow-material";
 import { readGlowSurface } from "../../../packages/babylon-lite/src/material/glow/glow-source";
@@ -46,7 +47,7 @@ function fixture(samples = 1) {
     const begin = vi.fn((_descriptor: GPURenderPassDescriptor) => Object.assign({} as GPURenderPassEncoder, pass));
     const textures: GPUTexture[] = [];
     const device = Object.assign({} as GPUDevice, {
-        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => Object.assign({} as GPUBuffer, { size: descriptor.size, label: descriptor.label, destroy: vi.fn() })),
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => Object.assign({} as GPUBuffer, { size: descriptor.size, destroy: vi.fn() })),
         createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
             const texture = Object.assign({} as GPUTexture, {
                 format: descriptor.format,
@@ -578,8 +579,9 @@ describe("GlowPostProcessTask", () => {
         const task = createGlowPostProcessTask({ targetTexture: f.target }, f.engine, f.scene);
         const preparing = task._preload!();
         task.dispose();
+        const buffers = f.device.createBuffer.mock.calls.length;
         await preparing;
-        expect(f.device.createBuffer.mock.calls.filter(([descriptor]) => descriptor.label === "glow-node-ubo")).toHaveLength(0);
+        expect(f.device.createBuffer).toHaveBeenCalledTimes(buffers);
     });
 
     it("binds lights relative to a camera override under floating origin for NodeMaterial glow programs", async () => {
@@ -595,18 +597,19 @@ describe("GlowPostProcessTask", () => {
         const task = createGlowPostProcessTask({ targetTexture: f.target, camera: override }, f.engine, f.scene);
         await task._preload!();
         task.record();
+        const shared = ensureSceneLightState(f.engine, f.scene)._buffer;
         const boundLights = () => {
             const groups = f.device.createBindGroup.mock.calls.map(([descriptor]) => [...descriptor.entries]);
             const scene = groups.filter((entries) => entries.length === 2 && (entries[0]!.resource as GPUBufferBinding).buffer.size === SCENE_UBO_BYTES).at(-1)!;
-            return (scene[1]!.resource as GPUBufferBinding).buffer.label;
+            return (scene[1]!.resource as GPUBufferBinding).buffer;
         };
         task.execute!();
-        expect(boundLights()).toBe("glow-lights");
+        expect(boundLights()).not.toBe(shared);
         expect(origins.at(-1)).toBe(override);
         // Without an override the scene camera's shared lights already have the right origin.
         task.camera = null;
         task.execute!();
-        expect(boundLights()).not.toBe("glow-lights");
+        expect(boundLights()).toBe(shared);
         task.dispose();
         disposeGpuResourceRetirements(f.engine);
     });

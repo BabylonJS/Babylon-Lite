@@ -122,4 +122,4 @@ Focused nonvisual tests cover output/ownership contracts, supported options, col
 - `material/glow/glow-node.ts`: NodeMaterial glow-output programs, bindings and draws.
 - `material/glow/glow-merge.ts`: borrowed-target composition and Babylon alpha-mode blend states.
 - `material/node/blocks/fragment-output.ts`: captures the FragmentOutput `glow` and `a` expressions in the build state.
-- `lab/lite/src/{lite,bjs}/scene356.ts`, `scene357.ts`, `scene358.ts` with `lab/lite/src/shared/scene356-glow.ts` and `scene356-nme.ts`: parity scenes.
+- `lab/lite/src/{lite,bjs}/scene356.ts`, `scene357.ts`, `scene358.ts` with `lab/lite/src/shared/scene356-glow.ts` and `scene356-nme.ts`: parity scenes. Their gallery JPEGs are hosted in BabylonJS/Assets and referenced through immutable commit URLs (`thumbnailUrl` in `scene-config.json`); only the parity-reference PNGs live in this repository.
