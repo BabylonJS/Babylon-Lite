@@ -27,6 +27,7 @@ import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
 import type { TransformNode } from "../meshes/meshes.js";
 import type { Vector3 } from "../math/vector.js";
+import type { Vector4 } from "../math/vector.js";
 import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
 import type { Matrix } from "../math/matrix.js";
@@ -45,6 +46,8 @@ const SHADER_MATERIAL_UNSUPPORTED =
     "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
 const SUBMESH_INDIRECT_DRAW_UNSUPPORTED =
     "Lite can bind one indexed-indirect source to an entire mesh, but Babylon.js binds application-owned draw arguments per submesh and render-pass id. Supporting that requires changing Lite's existing material renderable and pass-recording hot paths, so it cannot be added as an independent tree-shakeable adapter.";
+const BAKED_VERTEX_ANIMATION_UNSUPPORTED =
+    "Lite's loaded skeleton handles do not expose synchronous per-frame transform-matrix sampling, and its mesh/material pipelines have no baked-animation texture binding contract. Supporting Babylon.js VAT requires loader-owned pose sampling plus renderer hot-path and resource-lifecycle design.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -78,6 +81,92 @@ export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlo
 }
 
 export type KTX2EncoderUsage = "color" | "data" | "normal";
+
+export interface IBakedVertexAnimationManager {
+    texture: unknown | null;
+    isEnabled: boolean;
+    animationParameters: Vector4;
+    time: number;
+    bind(effect: unknown, useInstances: boolean): void;
+    setAnimationParameters(startFrame: number, endFrame: number, offset: number, speedFramesPerSecond: number): void;
+    dispose(forceDisposeTextures?: boolean): void;
+    getClassName(): string;
+}
+
+export class BakedVertexAnimationManager implements IBakedVertexAnimationManager {
+    public texture: unknown | null = null;
+    public isEnabled = true;
+    public animationParameters!: Vector4;
+    public time = 0;
+
+    public constructor(_scene?: Scene | null) {
+        unsupported("BakedVertexAnimationManager", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bind(_effect: unknown, _useInstances = false): void {
+        unsupported("BakedVertexAnimationManager.bind", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public clone(): BakedVertexAnimationManager {
+        return unsupported("BakedVertexAnimationManager.clone", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public setAnimationParameters(_startFrame: number, _endFrame: number, _offset = 0, _speedFramesPerSecond = 30): void {
+        unsupported("BakedVertexAnimationManager.setAnimationParameters", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public dispose(_forceDisposeTextures?: boolean): void {}
+
+    public getClassName(): string {
+        return "BakedVertexAnimationManager";
+    }
+
+    public copyTo(_vatMap: BakedVertexAnimationManager): void {
+        unsupported("BakedVertexAnimationManager.copyTo", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serialize(): unknown {
+        return unsupported("BakedVertexAnimationManager.serialize", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public parse(_source: unknown, _scene: Scene, _rootUrl: string): void {
+        unsupported("BakedVertexAnimationManager.parse", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+}
+
+export class VertexAnimationBaker {
+    public constructor(_scene: Scene, _meshOrSkeleton: Mesh | unknown) {
+        unsupported("VertexAnimationBaker", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bakeVertexDataSync(_ranges: Array<{ from: number; to: number }>, _halfFloat: boolean): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.bakeVertexDataSync", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bakeVertexData(_ranges: Array<{ from: number; to: number }>): Promise<Float32Array> {
+        return unsupported("VertexAnimationBaker.bakeVertexData", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public textureFromBakedVertexData(_vertexData: Float32Array | Uint16Array): unknown {
+        return unsupported("VertexAnimationBaker.textureFromBakedVertexData", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serializeBakedVertexDataToObject(_vertexData: Float32Array | Uint16Array): Record<string, unknown> {
+        return unsupported("VertexAnimationBaker.serializeBakedVertexDataToObject", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public loadBakedVertexDataFromObject(_data: Record<string, unknown>): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.loadBakedVertexDataFromObject", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serializeBakedVertexDataToJSON(_vertexData: Float32Array | Uint16Array): string {
+        return unsupported("VertexAnimationBaker.serializeBakedVertexDataToJSON", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public loadBakedVertexDataFromJSON(_json: string): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.loadBakedVertexDataFromJSON", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+}
 export interface IKTX2EncoderOptions {
     usage: KTX2EncoderUsage;
     generateMipmaps?: boolean;

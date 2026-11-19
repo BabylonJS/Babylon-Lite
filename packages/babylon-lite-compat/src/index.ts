@@ -232,7 +232,7 @@ export { GridMaterial } from "./materials/grid-material.js";
 export { GetSupportedSimultaneousLights } from "./materials/material-helpers.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
-export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
+export { Animation, AnimationGroup, TargetedAnimation, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
 export type { AnimationGroupState, AnimationValue, IAnimationKey, IAnimationVectorValue } from "./animations/animation.js";
 export {
     EasingFunction,
@@ -439,8 +439,10 @@ export {
     WebGPURenderPassCommandStreamProtocolVersion,
     WebGPURenderPassCommandStreamMaxDrawsPerBatch,
     SubMesh,
+    BakedVertexAnimationManager,
+    VertexAnimationBaker,
 } from "./unsupported/unsupported-apis.js";
-export type { IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
+export type { IBakedVertexAnimationManager, IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";

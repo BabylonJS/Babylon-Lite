@@ -28,7 +28,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
@@ -66,6 +66,29 @@ function captureThrown(callback: () => void): { threw: boolean; value: unknown }
 }
 
 describe("AssetContainer.addAllToScene", () => {
+    it("shares canonical loaded animation-group wrappers with the scene", () => {
+        const scene = new Scene(new NullEngine());
+        const liteGroup = {
+            name: "idle",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+        } as LiteAnimationGroup;
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+        const fromContainer = container.animationGroups[0]!;
+        (scene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = [liteGroup];
+
+        container.addAllToScene(scene);
+
+        expect(scene.animationGroups[0]).toBe(fromContainer);
+        expect(container.animationGroups[0]).toBe(fromContainer);
+    });
+
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {
         const material = createPbrMaterial();
         const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };

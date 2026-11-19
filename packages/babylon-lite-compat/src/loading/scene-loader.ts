@@ -20,7 +20,7 @@ import {
     removeFromScene,
     setParent as setLiteParent,
 } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as LiteMesh } from "babylon-lite";
+import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
@@ -31,6 +31,7 @@ import type { USDFileLoaderOptions } from "./usd-file-loader.js";
 import { SPLATFileLoader, type SPLATLoadingOptions } from "./splat-file-loader.js";
 import { resolveUsdOptions, toLiteUsdOptions } from "./usd-options.js";
 import { RegisterKHR_materials_scatter } from "./khr-materials-scatter.js";
+import type { AnimationGroup } from "../animations/animation.js";
 
 /**
  * Babylon.js registers built-in loader factories through a global plugin
@@ -71,7 +72,6 @@ export class AssetContainer {
     private readonly _destinationScene: Scene | undefined;
     /** @internal Canonical loaded-skeleton wrappers. */
     private _skeletons: Skeleton[] | undefined;
-
     private readonly _dispose: (() => void) | undefined;
     /** @internal Original USD mesh ownership, independent of later hierarchy changes. */
     private readonly _ownedMeshes: readonly LiteMesh[] | undefined;
@@ -86,7 +86,36 @@ export class AssetContainer {
     }
 
     public get animationGroups(): AnimationGroup[] {
-        return this._lite.animationGroups ?? [];
+        const scene = this._scene ?? this._destinationScene;
+        if (!scene) {
+            return [];
+        }
+        this.meshes;
+        return (this._lite.animationGroups ?? []).map((lite) =>
+            scene._wrapAnimationGroup(lite, (target, path, componentIndex) => this._animationTargets(target, path, componentIndex))
+        );
+    }
+
+    /** @internal Map one Lite animation target to canonical node or morph-target wrappers. */
+    private _animationTargets(target: object | undefined, path: string, componentIndex?: number): readonly unknown[] {
+        if (!target) {
+            return [target];
+        }
+        if (path !== "weights" || componentIndex === undefined) {
+            return [this._meshRegistry.get(target) ?? target];
+        }
+        const result: unknown[] = [];
+        const visit = (node: object): void => {
+            const morphTarget = this._meshRegistry.get(node)?.morphTargetManager?.getTarget(componentIndex);
+            if (morphTarget) {
+                result.push(morphTarget);
+            }
+            for (const child of (node as { children?: object[] }).children ?? []) {
+                visit(child);
+            }
+        };
+        visit(target);
+        return result.length > 0 ? result : [this._meshRegistry.get(target) ?? target];
     }
 
     /**

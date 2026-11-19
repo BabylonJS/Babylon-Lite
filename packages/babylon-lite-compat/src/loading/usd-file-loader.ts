@@ -1,6 +1,7 @@
 import { addToScene, disposeUsd, loadUsd } from "babylon-lite";
-import type { AnimationGroup, UsdBinaryInput } from "babylon-lite";
+import type { UsdBinaryInput } from "babylon-lite";
 
+import type { AnimationGroup } from "../animations/animation.js";
 import type { Mesh } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import type { Skeleton } from "../bones/skeleton.js";
