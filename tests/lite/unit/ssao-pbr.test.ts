@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { registerRenderingContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -88,7 +89,7 @@ function renderFixture() {
         createBuffer: (descriptor: GPUBufferDescriptor) => ({ destroy: vi.fn(), getMappedRange: () => new ArrayBuffer(Number(descriptor.size)), unmap: vi.fn() }),
         createBindGroupLayout: () => ({}),
         createBindGroup: () => ({}),
-        createRenderBundleEncoder: () => ({ ...pass, finish: () => ({}) }),
+        createRenderBundleEncoder: vi.fn(() => ({ ...pass, finish: () => ({}) })),
     });
     Object.assign(f.device.queue, { writeBuffer: vi.fn() });
     Object.assign(f.engine, {
@@ -110,6 +111,7 @@ function addDynamicRenderable(f: ReturnType<typeof fixture>) {
     const ao = f.material.plugins![0]!;
     const pipeline = {} as GPURenderPipeline;
     const makeGroup = vi.fn(() => ({ texture: sampled(ao).texture }) as unknown as GPUBindGroup);
+    const drawGroup = vi.fn(() => 1);
     const disposers: (() => void)[] = [];
     const renderable: Renderable = {
         order: 0,
@@ -117,11 +119,11 @@ function addDynamicRenderable(f: ReturnType<typeof fixture>) {
         mesh: {} as Mesh,
         bind() {
             const binding: DrawBinding = { renderable, pipeline, draw: () => 1 };
-            return decorate(binding, f.engine, [ao], "ibl", 0, 0, makeGroup, () => 1, disposers, f.scene);
+            return decorate(binding, f.engine, [ao], "ibl", 0, 0, makeGroup, drawGroup, disposers, f.scene);
         },
     };
     f.scene._renderables.push(renderable);
-    return { renderable, makeGroup, disposers };
+    return { renderable, makeGroup, drawGroup, disposers };
 }
 
 describe("IBL calculation selection", () => {
@@ -372,6 +374,45 @@ describe("PBR SSAO scope and ownership", () => {
 });
 
 describe("dynamic PBR binding generations", () => {
+    it("reuses automatic-pass bindings and bundles until the AO output changes", async () => {
+        const f = renderFixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        registerRenderingContext(f.engine, f.scene);
+        const mesh = addDynamicRenderable(f);
+        const first = publishOutput(f);
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 128, height: 96 } });
+        const pass = _createAutomaticRenderTask({ name: "SSAO color pass", rt }, f.engine, f.scene);
+        const bundleEncoder = vi.mocked(f.device.createRenderBundleEncoder);
+        pass.record();
+
+        expect(pass.execute!()).toBe(1);
+        expect(mesh.drawGroup).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ texture: first.output.texture }));
+        for (let frame = 0; frame < 3; frame++) {
+            expect(pass.execute!()).toBe(1);
+        }
+        expect(mesh.makeGroup).toHaveBeenCalledOnce();
+        expect(bundleEncoder).toHaveBeenCalledOnce();
+
+        const replacement = publishOutput(f);
+        expect(pass.execute!()).toBe(1);
+        expect(mesh.makeGroup).toHaveBeenCalledTimes(2);
+        expect(bundleEncoder).toHaveBeenCalledTimes(2);
+        expect(mesh.drawGroup).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ texture: replacement.output.texture }));
+        for (let frame = 0; frame < 3; frame++) {
+            expect(pass.execute!()).toBe(1);
+        }
+        expect(mesh.makeGroup).toHaveBeenCalledTimes(2);
+        expect(bundleEncoder).toHaveBeenCalledTimes(2);
+
+        pass.dispose();
+        f.task.dispose();
+        first.gpu.releaseVisibility!();
+        replacement.gpu.releaseVisibility!();
+        mesh.disposers.forEach((dispose) => dispose());
+        f.scene._disposables.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(f.engine);
+    });
+
     it("releases temporary automatic-pass leases before repeated AO resize cycles while the mesh lives", async () => {
         const f = renderFixture();
         await enablePbrSsao(f.scene, f.task, [f.material]);
