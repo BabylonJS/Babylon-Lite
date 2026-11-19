@@ -18,6 +18,7 @@ import {
     setAnimationAdditive,
     addAnimationGroup,
     removeAnimationGroup,
+    evaluateAnimationTrack,
     getAnimationGroupTracks,
     setAnimationTrackKeys,
 } from "babylon-lite";
@@ -131,6 +132,7 @@ export class Animation {
         const animation = new Animation(`${group.name}_channel${trackIndex}_${componentIndex ?? 0}`, targetProperty, group.frameRate ?? 60, dataType);
         animation._liteTrack = { group, trackIndex, componentIndex };
         animation._keys = liteTrackKeys(track, animation.framePerSecond, dataType, componentIndex);
+        animation._easingFunction = track.easing ? { ease: track.easing } : null;
         return animation;
     }
 
@@ -156,6 +158,10 @@ export class Animation {
 
     /** Evaluate the animated value at `frame`, clamped to the key range. */
     public evaluate(frame: number): AnimationValue {
+        if (this._liteTrack) {
+            const values = evaluateAnimationTrack(this._liteTrack.group, this._liteTrack.trackIndex, frame / this.framePerSecond);
+            return fromLiteComponents(values, this.dataType, this._liteTrack.componentIndex);
+        }
         const keys = this._keys;
         if (keys.length === 0) {
             return 0;
@@ -286,6 +292,18 @@ function setLoadedTrackKeys(animation: Animation, binding: { group: LiteAnimatio
     }
     const cubic = track.interpolation === "cubicSpline";
     const componentIndex = binding.componentIndex;
+    if (track.sharedSampler) {
+        unsupported(
+            "Animation.setKeys",
+            "This glTF sampler is referenced by multiple channels; independently editable Babylon.js Animation objects require a loader-owned sampler-splitting and controller-retargeting policy."
+        );
+    }
+    if (cubic && keys.some((key) => key.inTangent === undefined || key.outTangent === undefined)) {
+        unsupported("Animation.setKeys", "Loaded cubic-spline tracks must preserve both tangents because Lite's key editor does not change sampler interpolation modes.");
+    }
+    if (!cubic && keys.some((key) => key.inTangent !== undefined || key.outTangent !== undefined)) {
+        unsupported("Animation.setKeys", "Loaded linear and STEP tracks cannot add tangents because Lite's key editor does not change sampler interpolation modes.");
+    }
     if (
         componentIndex !== undefined &&
         (keys.length !== track.keys.length || keys.some((key, index) => Math.fround(key.frame / animation.framePerSecond) !== track.keys[index]!.time))

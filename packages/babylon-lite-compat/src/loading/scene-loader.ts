@@ -90,7 +90,7 @@ export class AssetContainer {
         if (!scene) {
             return [];
         }
-        this.meshes;
+        this._collectMeshes();
         return (this._lite.animationGroups ?? []).map((lite) =>
             scene._wrapAnimationGroup(lite, (target, path, componentIndex) => this._animationTargets(target, path, componentIndex))
         );
@@ -125,6 +125,10 @@ export class AssetContainer {
      * same handles `scene.meshes` exposes.
      */
     public get meshes(): Mesh[] {
+        return this._collectMeshes();
+    }
+
+    private _collectMeshes(): Mesh[] {
         if (this._disposed) {
             return [...this._meshRegistry.values()];
         }

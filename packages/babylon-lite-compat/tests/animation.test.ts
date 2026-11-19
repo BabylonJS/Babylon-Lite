@@ -286,8 +286,129 @@ describe("AnimationGroup", () => {
             { frame: 60, value: new Vector3(6, 5, 4) },
         ]);
 
-        expect(Array.from(sampler.input)).toEqual([0, 1]);
-        expect(Array.from(sampler.output)).toEqual([3, 2, 1, 6, 5, 4]);
+        expect(Array.from(sampler.output)).toEqual([0, 0, 0, 1, 2, 3]);
+        expect(targeted.animation.getKeys().map((key) => animationComponentsForTest(key.value))).toEqual([
+            [3, 2, 1],
+            [6, 5, 4],
+        ]);
+        expect((targeted.animation.evaluate(60) as Vector3).asArray()).toEqual([6, 5, 4]);
+        const editedKeys = targeted.animation.getKeys();
+        expect(() =>
+            targeted.animation.setKeys([
+                { frame: 0, value: new Vector3(3, 2, 1), inTangent: new Vector3(0, 0, 0), outTangent: new Vector3(0, 0, 0) },
+                { frame: 60, value: new Vector3(6, 5, 4), inTangent: new Vector3(0, 0, 0), outTangent: new Vector3(0, 0, 0) },
+            ])
+        ).toThrow(/cannot add tangents/);
+        expect(targeted.animation.getKeys()).toBe(editedKeys);
+    });
+
+    it("evaluates loaded cubic tracks with Lite Hermite interpolation", () => {
+        const sampler = {
+            input: new Float32Array([0, 1]),
+            output: new Float32Array([0, 0, 2, 0, 1, 0]),
+            interpolation: 2,
+        };
+        const lite = {
+            name: "cubic",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: 3 }] }, [], []],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+
+        expect(animation.evaluate(30)).toBeCloseTo(0.75);
+    });
+
+    it("surfaces property-track easing and evaluates through Lite", () => {
+        const easing = (gradient: number) => gradient * gradient;
+        const lite = {
+            name: "eased",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 8]), interpolation: 0 }, stride: 1, quaternion: false, easing }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+
+        expect(animation.getEasingFunction()!.ease).toBe(easing);
+        expect(animation.evaluate(30)).toBeCloseTo(2);
+    });
+
+    it("rejects tangent-mode changes and shared glTF samplers without mutating keys", () => {
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: 0 };
+        const lite = {
+            name: "shared",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [
+                { target: {}, path: "value" },
+                { target: {}, path: "value" },
+            ],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [
+                {
+                    name: "shared",
+                    duration: 1,
+                    frameRate: 60,
+                    samplers: [sampler],
+                    channels: [
+                        { samplerIdx: 0, nodeIdx: 0, path: 3 },
+                        { samplerIdx: 0, nodeIdx: 0, path: 3 },
+                    ],
+                },
+                [],
+                [],
+            ],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+        const originalKeys = animation.getKeys();
+
+        expect(() => animation.setKeys([{ frame: 0, value: 0, inTangent: 0, outTangent: 0 }])).toThrow(/referenced by multiple channels/);
+        expect(animation.getKeys()).toBe(originalKeys);
+        expect(Array.from(sampler.output)).toEqual([0, 1]);
+    });
+
+    it("rejects missing cubic tangents with a named interpolation blocker", () => {
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 0, 1, 0]), interpolation: 2 };
+        const lite = {
+            name: "cubic",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: 3 }] }, [], []],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+
+        expect(() => animation.setKeys([{ frame: 0, value: 0 }])).toThrow(/must preserve both tangents/);
     });
 
     it("keeps wrapper keys and the Lite sampler unchanged when a loaded edit is rejected", () => {
@@ -379,6 +500,10 @@ describe("AnimationGroup", () => {
         expect(() => group.targetedAnimations).toThrow(/exact property path/);
     });
 });
+
+function animationComponentsForTest(value: IAnimationKey["value"]): number[] {
+    return typeof value === "number" ? [value] : Array.isArray(value) ? value : value.asArray();
+}
 
 describe("AnimationGroup structural weighted blending", () => {
     class TestHost {

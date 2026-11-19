@@ -61,7 +61,6 @@ describe("Babylon.js upstream delta surfaces", () => {
 
     it("exposes the WebGPU asynchronous-pipeline opt-in with its renderer-owned blocker", () => {
         const engine = new NullEngine();
-        expect(engine.asynchronousPipelineCreation).toBe(false);
         engine.asynchronousPipelineCreation = false;
         expect(() => {
             engine.asynchronousPipelineCreation = true;

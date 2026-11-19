@@ -1,4 +1,6 @@
 import type { AnimationGroup, TargetedAnimation } from "./animation-group.js";
+import { evaluatePropertySampler, evaluateSampler } from "./evaluate.js";
+import type { AnimationEasing } from "./easing.js";
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_ROTATION } from "./types.js";
 import type { AnimationSampler } from "./types.js";
 
@@ -17,6 +19,10 @@ export interface AnimationCurveTrack {
     readonly interpolation: string;
     readonly componentCount: number;
     readonly quaternion: boolean;
+    /** Property-track easing applied by Lite playback. */
+    readonly easing?: AnimationEasing;
+    /** True when another channel in this glTF clip references the same sampler. */
+    readonly sharedSampler: boolean;
     readonly keys: readonly AnimationCurveKey[];
 }
 
@@ -25,7 +31,10 @@ interface CurveSource {
     readonly sampler: AnimationSampler;
     readonly componentCount: number;
     readonly quaternion: boolean;
+    readonly easing?: AnimationEasing;
+    readonly sharedSampler: boolean;
     readonly endTime: number;
+    readonly replaceSampler?: (sampler: AnimationSampler) => void;
 }
 
 type MutableSamplerBuffers = { -readonly [K in "input" | "output"]: AnimationSampler[K] };
@@ -47,6 +56,7 @@ function getSources(group: AnimationGroup): CurveSource[] {
                 sampler,
                 componentCount,
                 quaternion: channel.path === PATH_ROTATION || (channel.path === PATH_POINTER && channel.pointerQuaternion === true),
+                sharedSampler: clip.channels.some((candidate, candidateIndex) => candidateIndex !== index && candidate.samplerIdx === channel.samplerIdx),
                 endTime: (clip._startTime ?? 0) + clip.duration,
             };
         });
@@ -61,7 +71,18 @@ function getSources(group: AnimationGroup): CurveSource[] {
             if (!target) {
                 throw new Error("Animation group has an invalid property track");
             }
-            return { target, sampler: track.sampler, componentCount: track.stride, quaternion: track.quaternion, endTime: property[3] };
+            return {
+                target,
+                sampler: track.sampler,
+                componentCount: track.stride,
+                quaternion: track.quaternion,
+                easing: track.easing,
+                sharedSampler: false,
+                endTime: property[3],
+                replaceSampler: (sampler) => {
+                    (track as { sampler: AnimationSampler }).sampler = sampler;
+                },
+            };
         });
     }
     throw new Error("Animation group does not expose editable keyframe samplers");
@@ -96,7 +117,7 @@ function validateSource(source: CurveSource): void {
 export function getAnimationGroupTracks(group: AnimationGroup): readonly AnimationCurveTrack[] {
     return getSources(group).map((source) => {
         validateSource(source);
-        const { sampler, componentCount, target, quaternion } = source;
+        const { sampler, componentCount, target, quaternion, easing, sharedSampler } = source;
         const cubic = sampler.interpolation === INTERP_CUBICSPLINE;
         const stride = componentCount * (cubic ? 3 : 1);
         const keys = Array.from(sampler.input, (time, index): AnimationCurveKey => {
@@ -111,8 +132,24 @@ export function getAnimationGroupTracks(group: AnimationGroup): readonly Animati
             }
             return { time, value: Array.from(sampler.output.subarray(offset, offset + stride)) };
         });
-        return { target, interpolation: interpolationName(sampler), componentCount, quaternion, keys };
+        return { target, interpolation: interpolationName(sampler), componentCount, quaternion, easing, sharedSampler, keys };
     });
+}
+
+/** Evaluate one editable group track using the same sampler path as Lite playback. */
+export function evaluateAnimationTrack(group: AnimationGroup, trackIndex: number, time: number): readonly number[] {
+    const source = getSources(group)[trackIndex];
+    if (!source) {
+        throw new Error("Animation track index is out of range");
+    }
+    validateSource(source);
+    const output = new Float32Array(source.componentCount);
+    if (source.easing) {
+        evaluatePropertySampler(source.sampler, time, source.componentCount, source.quaternion, source.easing, output, 0);
+    } else {
+        evaluateSampler(source.sampler, time, source.componentCount, source.quaternion, output, 0);
+    }
+    return Array.from(output);
 }
 
 /** Replace a track's keys without changing the clip duration or playback range.
@@ -169,7 +206,11 @@ export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number,
             write(key.value, offset);
         }
     }
-    const sampler = source.sampler as MutableSamplerBuffers;
-    sampler.input = input;
-    sampler.output = output;
+    if (source.replaceSampler) {
+        source.replaceSampler({ input, output, interpolation: source.sampler.interpolation });
+    } else {
+        const sampler = source.sampler as MutableSamplerBuffers;
+        sampler.input = input;
+        sampler.output = output;
+    }
 }

@@ -19,8 +19,11 @@ interface AnimationCurveTrack {
     readonly interpolation: string;
     readonly componentCount: number;
     readonly quaternion: boolean;
+    readonly easing?: AnimationEasing;
+    readonly sharedSampler: boolean;
     readonly keys: readonly AnimationCurveKey[];
 }
+function evaluateAnimationTrack(group: AnimationGroup, trackIndex: number, time: number): readonly number[];
 function getAnimationGroupTracks(group: AnimationGroup): readonly AnimationCurveTrack[];
 function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: readonly AnimationCurveKey[]): void;
 ```
@@ -28,7 +31,9 @@ function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: 
 Tracks follow `group.targetedAnimations` order. Keys and component arrays returned
 by the getter are detached snapshots. Times are seconds, values and cubic tangents
 are sampler-space components; tangent units are value per second. Quaternion
-values are xyzw. Easing on property tracks remains in effect but is not edited.
+values are xyzw. Property-track easing is exposed by identity and remains in effect
+but is not edited. `evaluateAnimationTrack` uses the same glTF or property sampler
+evaluation path as runtime playback.
 
 The setter atomically replaces a sampler's keys (including insertion/deletion).
 At least one key is required. Times must be finite, nonnegative, strictly increasing
@@ -37,20 +42,22 @@ tangents must have the original component count and be finite Float32 values.
 Cubic tracks require both tangents per key; non-cubic tracks reject tangents.
 Invalid track indices, unsupported groups, malformed samplers and invalid keys throw.
 Interpolation, bindings, target, clip duration, and group play range are unchanged.
-Edits apply on the next playback evaluation or explicit seek. Shared sampler
-objects affect every group/channel using them, but replacing the arrays avoids
-mutating unrelated samplers that alias glTF buffer storage.
+Edits apply on the next playback evaluation or explicit seek. Property edits replace
+the runtime track's sampler so groups created from the same property clip remain
+independently editable. `sharedSampler` identifies glTF channels in the same clip
+that reference one sampler so adapters can reject edits that require controller
+retargeting.
 
 ## Internal Architecture
 glTF groups expose clip channels via internal `_gltfMixer`; resolve channel sampler
 indices in target order, infer component count from output length / key count /
 cubic multiplier, and identify quaternions from the channel. Property groups use
-`_propertyMixer` runtime tracks, which directly retain their samplers and stride.
+`_propertyMixer` runtime tracks, which directly retain their samplers, easing, and stride.
 Groups with neither representation and USD groups (identified by their authored
 start-time mixer marker) are unsupported. Replacing the two arrays on the existing
 sampler preserves references held by controllers and both weighted mixers. No clip
-or controller reconstruction is necessary and no runtime playback module imports
-the editor.
+or controller reconstruction is necessary for unshared glTF channels; property
+tracks receive a detached sampler. No runtime playback module imports the editor.
 
 ## Pipeline Configuration / Shader Logic
 None.
@@ -67,10 +74,11 @@ translation, rotation, scale, morph weights, pointer channels, and manual proper
 tracks use the same component values as the corresponding runtime samplers.
 
 ## Dependencies
-Only animation group/types (type imports) and numeric interpolation/path constants.
+Animation group/types, the existing sampler evaluators, easing types, and numeric
+interpolation/path constants.
 
 ## Test Specification
-Cover property and glTF runtime playback after replacement, shared clips and
+Cover property and glTF runtime playback/evaluation after replacement, shared clips and
 overlapping source buffers, cubic tangents, morph/pointer arity, validation,
 unsupported groups, insertion/deletion, and snapshot isolation. Bundle tests
 compare ordinary animation consumers with and without unused editor imports and

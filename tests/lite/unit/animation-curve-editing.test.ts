@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getAnimationGroupTracks, setAnimationTrackKeys } from "../../../packages/babylon-lite/src/animation/animation-curve-editing";
+import { evaluateAnimationTrack, getAnimationGroupTracks, setAnimationTrackKeys } from "../../../packages/babylon-lite/src/animation/animation-curve-editing";
 import { createAnimationGroups, goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
@@ -30,7 +30,7 @@ function propertyGroup() {
 }
 
 describe("animation curve editing", () => {
-    it("edits shared property tracks without changing ranges, and snapshots are detached", () => {
+    it("detaches edited property tracks without changing ranges, and snapshots are detached", () => {
         const { manager, target, clip, group } = propertyGroup();
         const secondTarget = { value: 0 };
         const second = createPropertyAnimationGroup(manager, secondTarget, clip, { loop: false, fromTime: 0.25, toTime: 0.75 });
@@ -43,16 +43,36 @@ describe("animation curve editing", () => {
             { time: 0.5, value: [8] },
             { time: 1, value: [10] },
         ]);
+        expect(getAnimationGroupTracks(second)[0]!.keys).toHaveLength(2);
         expect(group.duration).toBe(1);
-        expect(getAnimationGroupTracks(second)[0]!.keys).toHaveLength(3);
         updateAnimationManager(manager, 250);
         expect(target.value).toBeCloseTo(5);
-        expect(secondTarget.value).toBeCloseTo(8);
+        expect(secondTarget.value).toBeCloseTo(5);
         goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBeCloseTo(8);
         setAnimationTrackKeys(group, 0, [{ time: 0, value: [7] }]);
         goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBe(7);
+    });
+
+    it("exposes property easing and evaluates through the runtime sampler path", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const easing = (gradient: number) => gradient * gradient;
+        const clip = createPropertyAnimationClip("eased", [
+            {
+                path: "value",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 8 },
+                ],
+                easing,
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+
+        expect(getAnimationGroupTracks(group)[0]!.easing).toBe(easing);
+        expect(evaluateAnimationTrack(group, 0, 0.5)).toEqual([2]);
     });
 
     it("edits real parsed glTF data without mutating aliased accessors", () => {
@@ -119,6 +139,7 @@ describe("animation curve editing", () => {
         expect(tracks[0]!.interpolation).toBe("cubicSpline");
         expect(tracks[0]!.keys[0]).toEqual({ time: 0, value: [0], inTangent: [0], outTangent: [1] });
         expect(tracks[1]!.componentCount).toBe(2);
+        expect(evaluateAnimationTrack(group, 0, 0.5)).toEqual([1]);
         setAnimationTrackKeys(group, 0, [
             { time: 0, value: [4], inTangent: [5], outTangent: [6] },
             { time: 1, value: [7], inTangent: [8], outTangent: [9] },
@@ -127,6 +148,24 @@ describe("animation curve editing", () => {
         goToFrame(group, group.frameRate! / 2);
         expect(pointerValue).toBeCloseTo(5.25);
         expect(() => setAnimationTrackKeys(group, 0, [{ time: 0, value: [0] }])).toThrow();
+    });
+
+    it("reports samplers referenced by multiple glTF channels", () => {
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: 0 as const };
+        const clip: AnimationClip = {
+            name: "shared",
+            duration: 1,
+            frameRate: 60,
+            samplers: [sampler],
+            channels: [
+                { samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS },
+                { samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS },
+            ],
+        };
+        const data: GltfAnimationData = { clips: [clip], nodes: [], skeletons: [], morphBindings: [], nodeTargets: [], excludedNodeIndices: new Set(), nodeNames: [] };
+        const tracks = getAnimationGroupTracks(createAnimationGroups(data)[0]!);
+
+        expect(tracks.map((track) => track.sharedSampler)).toEqual([true, true]);
     });
 
     it("uses edited keys with the property blending mixer", () => {
