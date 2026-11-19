@@ -40,16 +40,23 @@ export function presentRenderTarget(target: GLRenderTarget): void {
     if (engine._isLost || engine._disposed || target._disposed || !target.isReady) {
         return;
     }
-    restoreDefaultFramebuffer(engine);
     const gl = engine.gl;
+    const s = engine._state;
+    // A wiped cache records the canvas binding whatever is actually bound, so that binding is reissued.
+    if (s.boundFramebuffer === null) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+    restoreDefaultFramebuffer(engine);
     // Queried with the canvas framebuffer bound; its sample count is fixed when the context is created.
     engine._canvasSamples ??= Number(gl.getParameter(gl.SAMPLES));
     if (engine._canvasSamples > 0) {
         throw new Error("lite-gl: presentRenderTarget cannot copy into a multisampled canvas; create the engine without antialias");
     }
-    const s = engine._state;
-    const scissorEnabled = s.scissorEnabled;
-    if (scissorEnabled !== 0) {
+    let scissorEnabled = s.scissorEnabled;
+    if (scissorEnabled === -1) {
+        scissorEnabled = gl.isEnabled(gl.SCISSOR_TEST) ? 1 : 0;
+    }
+    if (scissorEnabled === 1) {
         gl.disable(gl.SCISSOR_TEST);
     }
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target._framebuffer);
@@ -57,9 +64,8 @@ export function presentRenderTarget(target: GLRenderTarget): void {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     if (scissorEnabled === 1) {
         gl.enable(gl.SCISSOR_TEST);
-    } else {
-        s.scissorEnabled = 0;
     }
+    s.scissorEnabled = scissorEnabled;
 }
 
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */

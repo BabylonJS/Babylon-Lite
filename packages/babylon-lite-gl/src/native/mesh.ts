@@ -83,11 +83,12 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
 /**
  * Records a mesh's attribute and index bindings independently of shader
  * ownership. Attribute names the effect did not declare are resolved from its
- * program here, once.
+ * program here, once. Throws before any host call for an effect or buffer of
+ * another engine or one that has been disposed.
  */
 export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly GLMeshVertexBuffer[], indexBuffer: GLIndexBuffer, effect: GLEffect): GLMeshVao {
-    if (effect._disposed) {
-        throw new Error("Native Lite GL createMeshVao requires an effect that has not been disposed.");
+    if (!isUsable(engine, effect) || !isUsable(engine, indexBuffer) || !vertexBuffers.every((binding) => isUsable(engine, binding.buffer))) {
+        throw new Error("Native Lite GL createMeshVao requires an effect and buffers of this engine that have not been disposed.");
     }
     const handle = engine._native.createVertexArray();
     const fields: NativeResourceFields<GLMeshVao> = { indexCount: indexBuffer.count, _handle: handle, _engine: engine, _disposed: false };
@@ -125,6 +126,10 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
     }
 }
 
+function isUsable(engine: GLEngineContext, resource: { readonly _engine: GLEngineContext; readonly _disposed: boolean }): boolean {
+    return resource._engine === engine && !resource._disposed;
+}
+
 function getAttributeLocation(engine: GLEngineContext, effect: GLEffect, name: string): number {
     let location = effect._attributes[name];
     if (location === undefined) {
@@ -151,12 +156,16 @@ export function bindMeshVao(mesh: GLMeshVao): void {
 
 /**
  * Draws a triangle range from recorded composition geometry; the range defaults
- * to the indices from `indexStart` to the end. Native composition does not
- * instance. Draws nothing while the scissor rectangle is empty.
+ * to the indices from `indexStart` to the end and must lie within the mesh.
+ * Native composition does not instance. Draws nothing without a current
+ * program or while the scissor rectangle is empty.
  */
 export function drawMesh(mesh: GLMeshVao, _instanceCount: 0 = 0, indexStart = 0, indexCount = mesh.indexCount - indexStart): void {
+    if (!Number.isInteger(indexStart) || !Number.isInteger(indexCount) || indexStart < 0 || indexCount < 0 || indexStart + indexCount > mesh.indexCount) {
+        throw new RangeError(`Native Lite GL drawMesh range (start ${indexStart}, count ${indexCount}) must be whole indices within the mesh's ${mesh.indexCount}.`);
+    }
     const engine = mesh._engine;
-    if (engine._disposed || mesh._disposed || engine._scissorEmpty) {
+    if (engine._disposed || mesh._disposed || engine._program === null || engine._scissorEmpty) {
         return;
     }
     bindMeshVao(mesh);
@@ -168,11 +177,14 @@ export function drawMesh(mesh: GLMeshVao, _instanceCount: 0 = 0, indexStart = 0,
     commands.finish();
 }
 
-/** Releases owned vertex or index storage. */
+/** Releases owned vertex or index storage; after engine disposal it only marks the buffer disposed. */
 export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
     if (!buffer._disposed) {
         buffer._disposed = true;
         const engine = buffer._engine;
+        if (engine._disposed) {
+            return;
+        }
         const commands = engine._commands;
         commands.start(buffer._index ? engine._runtime.Engine.COMMAND_DELETEINDEXBUFFER : engine._runtime.Engine.COMMAND_DELETEVERTEXBUFFER);
         commands.handle(buffer._handle);
@@ -180,11 +192,14 @@ export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
     }
 }
 
-/** Releases recorded geometry without releasing its caller-owned buffers or shader. */
+/** Releases recorded geometry without releasing its caller-owned buffers or shader; after engine disposal it only marks the geometry disposed. */
 export function disposeMeshVao(mesh: GLMeshVao): void {
     if (!mesh._disposed) {
         mesh._disposed = true;
         const engine = mesh._engine;
+        if (engine._disposed) {
+            return;
+        }
         const commands = engine._commands;
         commands.start(engine._runtime.Engine.COMMAND_DELETEVERTEXARRAY);
         commands.handle(mesh._handle);

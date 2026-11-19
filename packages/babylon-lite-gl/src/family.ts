@@ -20,8 +20,8 @@ export interface GLEffectOptions {
     vertexSource: string;
     /** GLSL ES 3.00 fragment source. */
     fragmentSource: string;
-    /** Declared uniform names. Portable code sets only these; the web backend
-     *  also resolves undeclared names lazily, while native ignores them. */
+    /** Declared uniform names. Portable code sets only these; native ignores
+     *  undeclared names, and only some web setters resolve them lazily. */
     uniformNames: readonly string[];
     /** Declared sampler names, in texture-unit assignment order. */
     samplerNames: readonly string[];
@@ -429,6 +429,7 @@ export interface GLOps<F extends GLFamily> {
     readonly setColorMask: (engine: F["engine"], r: boolean, g: boolean, b: boolean, a: boolean) => void;
     readonly clearEngine: (engine: F["engine"], options: GLClearOptions) => void;
     readonly generateRenderTargetStencil: (rt: GLRenderTargetOf<F>, options?: { depth?: boolean }) => void;
+    /** Portable dimensions are nonnegative integers; a rectangle without area clips everything. */
     readonly setScissor: (engine: F["engine"], x: number, y: number, width: number, height: number) => void;
     readonly disableScissor: (engine: F["engine"]) => void;
 

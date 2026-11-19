@@ -110,13 +110,14 @@ export function createRawTexture(engine: GLEngineContext, data: Uint8Array, widt
 /**
  * Releases owned image storage, never a borrowed host texture. The storage
  * outlives every command already recorded, so a frame may still draw with,
- * or into, a texture it disposes.
+ * or into, a texture it disposes. After engine disposal it only marks the
+ * texture disposed.
  */
 export function disposeTexture(texture: GLTexture): void {
     if (!texture._disposed) {
         texture._disposed = true;
         texture.isReady = false;
-        if (texture._owned) {
+        if (texture._owned && !texture._engine._disposed) {
             texture._engine._commands.deleteTexture(texture._handle);
         }
     }

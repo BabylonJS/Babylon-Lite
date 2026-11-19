@@ -85,7 +85,9 @@ any host allocation.
 being unwound after a caller error. Resource operations outside a frame submit
 immediately. Nested or unmatched frame scopes are errors. A command that cannot
 fit in the stream, such as an oversized uniform array, is rejected before any of
-it is recorded, so the stream and the uniform cache are unchanged.
+it is recorded, so the stream and the uniform cache are unchanged. Array values
+are read once, before recording, so an array whose read throws leaves them
+unchanged too.
 
 `disposeNativeEngine(engine)` is idempotent and disposes the native engine.
 
@@ -106,8 +108,11 @@ only within the same frame and program run, and are rebound after a program
 switch or a new frame. `setEffectTexture` ignores a name that is not a declared
 sampler, before selecting any program. `useEffect` and indexed drawing share the
 engine's program and vertex-array caches. As in Lite GL, operations on a
-disposed effect, texture, vertex array, render target or engine are ignored.
-`disposeEffect` releases only the program.
+disposed effect, texture, vertex array, render target or engine are ignored;
+disposing a resource after its engine only marks it disposed. Binding a texture
+of another engine is ignored, while `createMeshVao` and `createRenderTarget`
+reject an effect, buffer or color texture that belongs to another engine or has
+been disposed, before any host call. `disposeEffect` releases only the program.
 
 ### 2.3 Buffers and vertex arrays
 
@@ -130,7 +135,9 @@ array — not its buffers or its shader. Several vertex arrays may therefore sha
 one vertex and index buffer. `bindMeshVao(mesh)` uses the engine's
 binding cache; `drawMesh(mesh, instanceCount, indexStart, indexCount)`
 binds the mesh and draws triangles without allocating; `indexCount` defaults
-to the indices from `indexStart` to the end. Instancing is not
+to the indices from `indexStart` to the end. A range that is not whole indices
+within the mesh throws a `RangeError` before anything is recorded. Without a
+current program, drawing does nothing. Instancing is not
 supported, so `instanceCount` must be `0`. `disposeMeshVao` releases the vertex
 array independently of program references. Callers dispose vertex arrays before
 the buffers they reference.
@@ -171,7 +178,7 @@ The engine tracks the active framebuffer and viewport. As in Lite GL,
 bound target and defaults to the size of the default output, whichever target is
 bound; the native protocol's normalized viewport is derived from the bound
 target's size. `setScissor` uses physical pixels with the same bottom-left
-origin as Lite GL. A scissor rectangle without area clips everything, as in
+origin as Lite GL; portable dimensions are nonnegative integers. A scissor rectangle without area clips everything, as in
 WebGL: drawing and clearing do nothing until the scissor changes or
 `disableScissor` is called. `setBlendMode` uses the Lite GL /
 Babylon numeric presets. `clearEngine(engine, options)` takes `GLClearOptions`
@@ -183,7 +190,8 @@ A native device reset invalidates the engine's cached bindings, not the caller's
 ownership. Hosts dispose their renderer resources before a device change and
 recreate them afterward, re-wrapping or replacing borrowed source and output
 handles. The engine's reset callback reapplies the composition depth and culling
-state before rendering resumes.
+state and removes any scissor rectangle, including an empty one, before
+rendering resumes.
 
 ## 3. Validation
 

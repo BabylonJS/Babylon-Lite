@@ -2307,7 +2307,7 @@ Like the other array setters, they are not value-cached and upload every call.
 
 `presentRenderTarget(target)` copies a ready target to the drawing
 buffer with nearest filtering. It leaves the default framebuffer bound and
-the framebuffer cache coherent; it does not clear or modify the retained
+the framebuffer cache coherent, even after `wipeGLStateCache`; it does not clear or modify the retained
 offscreen image. Lost contexts and disposed or unavailable resources are
 no-ops. The destination dimensions are the physical canvas size, and an active
 scissor rectangle does not clip the copy; the scissor state is restored
@@ -2319,4 +2319,5 @@ drawing buffer's sample count is queried once, on first presentation.
 indexCount = vao's index count - indexStart)` supports subranges of retained
 geometry. Offsets are in indices, not bytes. Omitting the count draws from
 `indexStart` to the end of the mesh, so omitting the range draws the complete
-mesh. Attribute and index bindings remain VAO-owned across subrange draws.
+mesh. A range that is not whole indices within the mesh throws a `RangeError`
+before any binding or draw call. Attribute and index bindings remain VAO-owned across subrange draws.

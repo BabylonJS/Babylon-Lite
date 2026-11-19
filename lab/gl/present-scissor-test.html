@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>LiteGL scissored presentation test</title>
+        <style>
+            body {
+                background: #151a23;
+                color: white;
+                font:
+                    16px system-ui,
+                    sans-serif;
+            }
+            canvas {
+                display: block;
+                width: 256px;
+                height: 256px;
+                image-rendering: pixelated;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Scissored presentation test</h1>
+        <canvas id="renderCanvas" width="64" height="64" aria-label="A presented green target with a blue scissored clear"></canvas>
+        <p id="result" role="status">Checking presentation under an active scissor rectangle…</p>
+        <script type="module" src="/gl/src/present-scissor-test.ts"></script>
+    </body>
+</html>

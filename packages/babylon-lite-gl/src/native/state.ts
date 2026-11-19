@@ -5,8 +5,11 @@ import type { GLClearOptions, GLViewport } from "../family.js";
 /** Blend presets shared with Lite GL: disabled, additive, combine and premultiplied. */
 export type GLBlendMode = 0 | 1 | 2 | 7;
 
-/** Changes the drawing viewport in pixels of the bound target. Defaults to the size of the default output, whichever target is bound. */
+/** Changes the drawing viewport in pixels of the bound target. Defaults to the size of the default output, whichever target is bound. No-op for a disposed engine. */
 export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void {
+    if (engine._disposed) {
+        return;
+    }
     const outputWidth = getRenderWidth(engine);
     const outputHeight = getRenderHeight(engine);
     const target = engine._target;
@@ -46,9 +49,14 @@ export function setNormalizedViewport(engine: GLEngineContext, x: number, y: num
 
 /**
  * Restricts drawing and clearing to a bottom-left-origin rectangle in physical
- * pixels. A rectangle without area allows neither until the scissor changes.
+ * pixels; portable callers pass nonnegative integer dimensions. A rectangle
+ * without area allows neither until the scissor changes. No-op for a disposed
+ * engine.
  */
 export function setScissor(engine: GLEngineContext, x: number, y: number, width: number, height: number): void {
+    if (engine._disposed) {
+        return;
+    }
     // The host reads an all-zero rectangle as "no scissor", so an empty one is enforced here instead.
     engine._scissorEmpty = width <= 0 || height <= 0;
     if (!engine._scissorEmpty) {
@@ -56,8 +64,11 @@ export function setScissor(engine: GLEngineContext, x: number, y: number, width:
     }
 }
 
-/** Restores unrestricted drawing. */
+/** Restores unrestricted drawing. No-op for a disposed engine. */
 export function disableScissor(engine: GLEngineContext): void {
+    if (engine._disposed) {
+        return;
+    }
     engine._scissorEmpty = false;
     encodeScissor(engine, 0, 0, 0, 0);
 }
@@ -72,9 +83,9 @@ function encodeScissor(engine: GLEngineContext, x: number, y: number, width: num
     commands.finish();
 }
 
-/** Sets a Lite GL blend preset. */
+/** Sets a Lite GL blend preset. No-op for a disposed engine. */
 export function setBlendMode(engine: GLEngineContext, mode: GLBlendMode): void {
-    if (engine._blend === mode) {
+    if (engine._blend === mode || engine._disposed) {
         return;
     }
     const native = engine._runtime.Engine;
@@ -86,9 +97,9 @@ export function setBlendMode(engine: GLEngineContext, mode: GLBlendMode): void {
     engine._blend = mode;
 }
 
-/** Clears the current composition target within its scissor, without changing the scissor. */
+/** Clears the current composition target within its scissor, without changing the scissor. No-op for a disposed engine. */
 export function clearEngine(engine: GLEngineContext, options: GLClearOptions): void {
-    if (engine._scissorEmpty) {
+    if (engine._scissorEmpty || engine._disposed) {
         return;
     }
     const color = options.color;

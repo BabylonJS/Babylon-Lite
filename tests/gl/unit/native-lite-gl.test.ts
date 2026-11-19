@@ -35,8 +35,11 @@ import {
     wrapNativeTexture,
 } from "../../../packages/babylon-lite-gl/src/native/index.js";
 import { COMMAND_STREAM_WORDS, CommandStream } from "../../../packages/babylon-lite-gl/src/native/command-stream.js";
-import type { GLMeshVertexBuffer } from "../../../packages/babylon-lite-gl/src/native/index.js";
+import type { GLMeshVertexBuffer, NativeGLFamily } from "../../../packages/babylon-lite-gl/src/native/index.js";
 import type { NativeEngineConstructor, NativeRuntime } from "../../../packages/babylon-lite-gl/src/native/runtime.js";
+import type { GLFamily, GLKit } from "../../../packages/babylon-lite-gl/src/family.js";
+import * as Web from "../../../packages/babylon-lite-gl/src/index.js";
+import { createMockCanvas, createMockGL } from "./_lite-gl-mock.js";
 
 const RGBA = 0x1908;
 const UNSIGNED_BYTE = 0x1401;
@@ -156,6 +159,35 @@ function effect(engine: ReturnType<typeof createNativeEngine>) {
 
 afterEach(() => vi.unstubAllGlobals());
 
+type AttributeOps = "createEffect" | "isEffectReady" | "createVertexBuffer" | "createIndexBuffer" | "createMeshVao";
+
+/** Records two meshes whose `uv` attribute the shared effect did not declare. */
+function recordUndeclaredUv<F extends GLFamily>(kit: GLKit<F, AttributeOps>, engine: F["engine"]): void {
+    const program = kit.createEffect(engine, { name: "uv", vertexSource: "v", fragmentSource: "f", uniformNames: [], samplerNames: [], attributeNames: ["position"] });
+    kit.isEffectReady(program);
+    const buffer = kit.createVertexBuffer(engine, new Float32Array(16));
+    const indices = kit.createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+    for (let index = 0; index < 2; index++) {
+        kit.createMeshVao(
+            engine,
+            [
+                {
+                    buffer,
+                    computeStride: true,
+                    attributes: [
+                        { name: "position", size: 2, divisor: 0 },
+                        { name: "uv", size: 2, offset: 8, divisor: 0 },
+                    ],
+                },
+            ],
+            indices,
+            program
+        );
+    }
+}
+
+const ATTRIBUTE_LOCATIONS: Record<string, number> = { position: 0, uv: 3 };
+
 describe("Native Lite GL protocol", () => {
     it("rejects unavailable and incompatible runtimes before engine creation", () => {
         vi.stubGlobal("_native", undefined);
@@ -175,7 +207,7 @@ describe("Native Lite GL protocol", () => {
         stream.int(-2);
         stream.float(0.5);
         stream.bool(true);
-        stream.array([1, 2]);
+        stream.array([1, 2, 3], 2);
         stream.finish();
         expect(mock.words).toEqual([]);
         stream.end();
@@ -209,14 +241,41 @@ describe("Native Lite GL protocol", () => {
         mock.clear();
         beginFrame(engine);
         setEffectFloat(second, "alpha", 1);
-        expect(() => setEffectFloatArray4(first, "colors", new Float32Array(COMMAND_STREAM_WORDS))).toThrow("exceeds its 64 KiB buffer");
+        expect(() => setEffectFloatArray4(first, "colors", new Float32Array(COMMAND_STREAM_WORDS))).toThrow(`exceeds its ${(COMMAND_STREAM_WORDS * 4) / 1024} KiB buffer`);
         setEffectFloat(second, "alpha", 0.5);
         setEffectFloatArray4(first, "colors", [1, 2, 3, 4]);
         endFrame(engine);
         expect(mock.count("SETPROGRAM")).toBe(2);
         expect(mock.count("SETFLOAT")).toBe(2);
+        expect(mock.count("SETFLOATARRAY4")).toBe(1);
         expect(mock.floats("SETFLOATARRAY4", 6).slice(2)).toEqual([1, 2, 3, 4]);
-        expect(mock.words).toHaveLength(2 + 3 + 3 + 2 + 7);
+    });
+
+    it("rejects an array whose values cannot be read without recording or caching any of it", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const first = effect(engine);
+        const second = effect(engine);
+        const unreadable = new Proxy([1, 2, 3, 4], {
+            get(target, key, receiver) {
+                if (key === "1") {
+                    throw new Error("unreadable value");
+                }
+                return Reflect.get(target, key, receiver);
+            },
+        });
+        mock.clear();
+        beginFrame(engine);
+        setEffectFloat(second, "alpha", 1);
+        expect(() => setEffectFloatArray4(first, "colors", unreadable)).toThrow("unreadable value");
+        setEffectFloat(second, "alpha", 0.5);
+        setEffectFloatArray4(first, "colors", [1, 2, 3, 4]);
+        setEffectFloatArray4(first, "colors", [1, 2, 3, 4]);
+        endFrame(engine);
+        expect(mock.count("SETPROGRAM")).toBe(2);
+        expect(mock.count("SETFLOAT")).toBe(2);
+        expect(mock.count("SETFLOATARRAY4")).toBe(1);
+        expect(mock.floats("SETFLOATARRAY4", 6).slice(2)).toEqual([1, 2, 3, 4]);
     });
 
     it("retains per-program uniform values and notices in-place array changes", () => {
@@ -375,6 +434,14 @@ describe("Native Lite GL protocol", () => {
             samplerNames: [],
         });
         expect(native.createProgram).toHaveBeenLastCalledWith("\n  // header\n/* licence\n */\nvoid main() {}", "void main() {}\n#version 300 es\n");
+        createEffect(engine, {
+            name: "spaced",
+            vertexSource: "#          \t version 300 es\nvoid main() {}",
+            fragmentSource: "#          versioned\nvoid main() {}",
+            uniformNames: [],
+            samplerNames: [],
+        });
+        expect(native.createProgram).toHaveBeenLastCalledWith("void main() {}", "#          versioned\nvoid main() {}");
     });
 
     it("rejects texture sizes the host cannot allocate before any host call", () => {
@@ -491,6 +558,9 @@ describe("Native Lite GL protocol", () => {
         const vertex = createVertexBuffer(engine, new Float32Array([0, 0, 1, 1]));
         const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 0]));
         const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, live);
+        const liveMesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, live);
+        const liveTarget = createRenderTarget(engine, 320, 180);
+        bindRenderTarget(liveTarget);
         disposeEffect(disposed);
         disposeTexture(disposedTexture);
         disposeRenderTarget(target);
@@ -504,12 +574,36 @@ describe("Native Lite GL protocol", () => {
         bindMeshVao(mesh);
         bindRenderTarget(target);
         expect(mock.words).toEqual([]);
+        const native = engine._native as unknown as MockEngine;
+        const deletedTextures = native.deleteTexture.mock.calls.length;
         disposeNativeEngine(engine);
         useEffect(live);
         setEffectFloat(live, "alpha", 1);
         setEffectTexture(live, "plane", texture);
+        setViewport(engine);
+        setScissor(engine, 1, 2, 3, 4);
+        disableScissor(engine);
+        setBlendMode(engine, 1);
+        clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
+        restoreDefaultFramebuffer(engine);
+        disposeEffect(live);
+        disposeTexture(texture);
+        disposeBuffer(vertex);
+        disposeBuffer(indices);
+        disposeMeshVao(liveMesh);
+        disposeRenderTarget(liveTarget);
         expect(mock.words).toEqual([]);
-        expect(() => createMeshVao(engine, [], indices, disposed)).toThrow("effect that has not been disposed");
+        expect([live._disposed, texture._disposed, vertex._disposed, indices._disposed, liveMesh._disposed, liveTarget._disposed, liveTarget.texture._disposed]).toEqual([
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+        ]);
+        expect(native.deleteTexture).toHaveBeenCalledTimes(deletedTextures);
+        expect(() => createMeshVao(engine, [], indices, disposed)).toThrow("of this engine that have not been disposed");
     });
 
     it("validates a sampler name before switching programs", () => {
@@ -550,6 +644,32 @@ describe("Native Lite GL protocol", () => {
         expect(native.recordVertexBuffer.mock.calls.map((call) => call[2])).toEqual([0, 3, 0, 3]);
     });
 
+    it("resolves an undeclared attribute to the same location as the web backend", () => {
+        const webMock = createMockGL();
+        const getAttribLocation = vi.spyOn(webMock.gl, "getAttribLocation").mockImplementation((_program, name) => ATTRIBUTE_LOCATIONS[name] ?? -1);
+        const webEngine = Web.createGLEngine(createMockCanvas(webMock));
+        const webKit: GLKit<Web.WebGLFamily, AttributeOps> = {
+            createEffect: Web.createEffect,
+            isEffectReady: Web.isEffectReady,
+            createVertexBuffer: Web.createVertexBuffer,
+            createIndexBuffer: Web.createIndexBuffer,
+            createMeshVao: Web.createMeshVao,
+        };
+        recordUndeclaredUv(webKit, webEngine);
+        expect(webMock.log.filter((call) => call.name === "vertexAttribPointer").map((call) => call.args[0])).toEqual([0, 3, 0, 3]);
+        expect(getAttribLocation.mock.calls.filter(([, name]) => name === "uv")).toHaveLength(1);
+        Web.disposeGLEngine(webEngine);
+
+        makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const getAttributes = vi.spyOn(native, "getAttributes").mockImplementation((_program, names) => names.map((name) => ATTRIBUTE_LOCATIONS[name] ?? -1));
+        const nativeKit: GLKit<NativeGLFamily, AttributeOps> = { createEffect, isEffectReady, createVertexBuffer, createIndexBuffer, createMeshVao };
+        recordUndeclaredUv(nativeKit, engine);
+        expect(native.recordVertexBuffer.mock.calls.map((call) => call[2])).toEqual([0, 3, 0, 3]);
+        expect(getAttributes.mock.calls.filter(([, names]) => names.includes("uv"))).toHaveLength(1);
+    });
+
     it("draws the remaining indices from a start offset by default", () => {
         const mock = makeRuntime();
         const engine = createNativeEngine();
@@ -557,10 +677,42 @@ describe("Native Lite GL protocol", () => {
         const vertex = createVertexBuffer(engine, new Float32Array(8));
         const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 0, 2, 3]));
         const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        useEffect(program);
         drawMesh(mesh, 0, 3);
         expect(mock.after("DRAWINDEXED", 3)).toEqual([0, 3, 3]);
         drawMesh(mesh);
         expect(mock.after("DRAWINDEXED", 3)).toEqual([0, 0, 6]);
+        mock.clear();
+        for (const [start, count] of [
+            [4, 3],
+            [7, undefined],
+            [-1, 2],
+            [0, -1],
+            [0.5, 2],
+            [0, 1.5],
+        ] as const) {
+            expect(() => drawMesh(mesh, 0, start, count)).toThrow(RangeError);
+        }
+        expect(mock.words).toEqual([]);
+        drawMesh(mesh, 0, 6);
+        expect(mock.after("DRAWINDEXED", 3)).toEqual([0, 6, 0]);
+    });
+
+    it("draws nothing without a current program", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const program = effect(engine);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        mock.clear();
+        drawMesh(mesh);
+        expect(mock.words).toEqual([]);
+        useEffect(program);
+        disposeEffect(program);
+        mock.clear();
+        drawMesh(mesh);
+        expect(mock.words).toEqual([]);
     });
 
     it("draws and clears nothing while the scissor rectangle is empty", () => {
@@ -570,6 +722,7 @@ describe("Native Lite GL protocol", () => {
         const vertex = createVertexBuffer(engine, new Float32Array(8));
         const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        useEffect(program);
         mock.clear();
         setScissor(engine, 4, 4, 0, 10);
         clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
@@ -588,5 +741,67 @@ describe("Native Lite GL protocol", () => {
         drawMesh(mesh);
         expect(mock.count("CLEAR")).toBe(1);
         expect(mock.count("DRAWINDEXED")).toBe(2);
+    });
+
+    it("removes an empty or active scissor rectangle on native reset", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const program = effect(engine);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        setScissor(engine, 4, 4, 0, 10);
+        mock.reset();
+        expect(mock.floats("SETSCISSOR", 4)).toEqual([0, 0, 0, 0]);
+        useEffect(program);
+        mock.clear();
+        clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
+        drawMesh(mesh);
+        expect(mock.count("CLEAR")).toBe(1);
+        expect(mock.count("DRAWINDEXED")).toBe(1);
+        setScissor(engine, 1, 2, 3, 4);
+        mock.clear();
+        mock.reset();
+        expect(mock.count("SETSCISSOR")).toBe(1);
+        expect(mock.floats("SETSCISSOR", 4)).toEqual([0, 0, 0, 0]);
+    });
+
+    it("rejects resources of another engine or disposed resources before any host call", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const other = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const program = effect(engine);
+        const foreignProgram = effect(other);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const foreignVertex = createVertexBuffer(other, new Float32Array(8));
+        const foreignIndices = createIndexBuffer(other, new Uint16Array([0, 1, 2]));
+        const disposedVertex = createVertexBuffer(engine, new Float32Array(8));
+        const disposedIndices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const foreignTexture = wrapNativeTexture(other, new Uint32Array([700]));
+        const disposedTexture = wrapNativeTexture(engine, new Uint32Array([701]));
+        disposeBuffer(disposedVertex);
+        disposeBuffer(disposedIndices);
+        disposeTexture(disposedTexture);
+        const attributes = [{ name: "position", size: 2, divisor: 0 as const }];
+        mock.clear();
+        for (const [buffer, indexBuffer, shader] of [
+            [vertex, indices, foreignProgram],
+            [foreignVertex, indices, program],
+            [vertex, foreignIndices, program],
+            [disposedVertex, indices, program],
+            [vertex, disposedIndices, program],
+        ] as const) {
+            expect(() => createMeshVao(engine, [{ buffer, attributes }], indexBuffer, shader)).toThrow("of this engine that have not been disposed");
+        }
+        for (const colorTexture of [foreignTexture, disposedTexture]) {
+            expect(() => createRenderTarget(engine, 640, 360, { colorTexture })).toThrow("color texture of this engine that has not been disposed");
+        }
+        setEffectTexture(program, "plane", foreignTexture);
+        expect(native.createVertexArray).not.toHaveBeenCalled();
+        expect(native.createTexture).not.toHaveBeenCalled();
+        expect(native.createFrameBuffer).not.toHaveBeenCalled();
+        expect(mock.words).toEqual([]);
     });
 });

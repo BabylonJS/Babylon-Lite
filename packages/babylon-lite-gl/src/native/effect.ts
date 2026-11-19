@@ -90,7 +90,9 @@ function findVersionDirective(source: string): number {
             const end = source.indexOf("*/", index + 2);
             index = end < 0 ? source.length : end + 2;
         } else {
-            return /^#[ \t]*version\b/.test(source.slice(index, index + 16)) ? index : -1;
+            const directive = /#[ \t]*version\b/y;
+            directive.lastIndex = index;
+            return directive.test(source) ? index : -1;
         }
     }
     return -1;
@@ -122,13 +124,16 @@ export function getEffectCompilationError(_effect: GLEffect): string | null {
     return null;
 }
 
-/** Releases the owned shader program. */
+/** Releases the owned shader program; after engine disposal it only marks the effect disposed. */
 export function disposeEffect(effect: GLEffect): void {
     if (effect._disposed) {
         return;
     }
     effect._disposed = true;
     const engine = effect._engine;
+    if (engine._disposed) {
+        return;
+    }
     const commands = engine._commands;
     commands.start(engine._runtime.Engine.COMMAND_DELETEPROGRAM);
     commands.handle(effect._program);
@@ -230,21 +235,28 @@ export function setUniformArray(effect: GLEffect, name: string, values: ArrayLik
     if (!cached || !effect._uniforms[name] || effect._disposed || effect._engine._disposed) {
         return;
     }
-    let differs = cached.length !== values.length;
-    for (let index = 0; index < values.length; index++) {
-        differs ||= cached[index] !== values[index];
+    const commands = effect._engine._commands;
+    const length = values.length;
+    commands.checkArray(length);
+    // Every element is read once, before anything is recorded or cached, so a throwing read leaves both unchanged.
+    const staging = commands.staging;
+    let differs = cached.length !== length;
+    for (let index = 0; index < length; index++) {
+        const value = values[index] as number;
+        staging[index] = value;
+        if (cached[index] !== value) {
+            differs = true;
+        }
     }
     if (!differs) {
         return;
     }
-    const commands = effect._engine._commands;
-    commands.checkArray(values.length);
     uniformCommand(effect, name, command);
-    commands.array(values);
+    commands.array(staging, length);
     commands.finish();
-    cached.length = values.length;
-    for (let index = 0; index < values.length; index++) {
-        cached[index] = values[index] as number;
+    cached.length = length;
+    for (let index = 0; index < length; index++) {
+        cached[index] = staging[index] as number;
     }
 }
 
@@ -275,12 +287,13 @@ export function setEffectFloatArray4(effect: GLEffect, name: string, values: Arr
 
 /**
  * Binds a texture to a declared sampler without repeating an unchanged binding.
- * No-op for an undeclared sampler or a disposed effect, texture or engine.
+ * No-op for an undeclared sampler, a texture of another engine, or a disposed
+ * effect, texture or engine.
  */
 export function setEffectTexture(effect: GLEffect, name: string, texture: GLTexture): void {
     const engine = effect._engine;
     const uniform = effect._uniforms[name];
-    if (!uniform || !(name in effect._textures) || effect._disposed || texture._disposed || engine._disposed) {
+    if (!uniform || !(name in effect._textures) || effect._disposed || texture._disposed || texture._engine !== engine || engine._disposed) {
         return;
     }
     useEffect(effect);

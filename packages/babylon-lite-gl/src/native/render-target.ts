@@ -26,10 +26,13 @@ export interface GLRenderTarget extends NativeResource<"renderTarget"> {
     _disposed: boolean;
 }
 
-/** Creates a composition target around an owned or supplied color attachment. */
+/** Creates a composition target around an owned or supplied color attachment; a supplied attachment must be a live texture of this engine. */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
     validateTextureSize(engine, width, height);
     const colorTexture = options?.colorTexture;
+    if (colorTexture && (colorTexture._engine !== engine || colorTexture._disposed)) {
+        throw new Error("Native Lite GL createRenderTarget requires a color texture of this engine that has not been disposed.");
+    }
     let texture = colorTexture;
     if (!texture) {
         const handle = engine._native.createTexture();
@@ -74,8 +77,11 @@ export function bindRenderTarget(target: GLRenderTarget): void {
     setNormalizedViewport(target._engine, 0, 0, 1, 1, 1, 1);
 }
 
-/** Selects the default output, resolving the prior framebuffer, and sets the viewport to cover it. */
+/** Selects the default output, resolving the prior framebuffer, and sets the viewport to cover it. No-op for a disposed engine. */
 export function restoreDefaultFramebuffer(engine: GLEngineContext): void {
+    if (engine._disposed) {
+        return;
+    }
     selectFramebuffer(engine, null);
     setNormalizedViewport(engine, 0, 0, 1, 1, 1, 1);
 }
@@ -150,17 +156,19 @@ function deleteFramebuffer(engine: GLEngineContext, framebuffer: NativeHandle): 
     commands.finish();
 }
 
-/** Releases a framebuffer and only the color storage it owns. */
+/** Releases a framebuffer and only the color storage it owns; after engine disposal it only marks them disposed. */
 export function disposeRenderTarget(target: GLRenderTarget | null | undefined): void {
     if (!target || target._disposed) {
         return;
     }
     target._disposed = true;
     const engine = target._engine;
-    if (engine._target === target) {
-        selectFramebuffer(engine, null);
+    if (!engine._disposed) {
+        if (engine._target === target) {
+            selectFramebuffer(engine, null);
+        }
+        deleteFramebuffer(engine, target._framebuffer);
     }
-    deleteFramebuffer(engine, target._framebuffer);
     const index = target.texture._targets.indexOf(target);
     if (index >= 0) {
         target.texture._targets.splice(index, 1);

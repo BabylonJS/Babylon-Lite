@@ -3,8 +3,14 @@ import type { NativeEngine, NativeHandle, NativeRuntime } from "./runtime.js";
 /** @internal Capacity of the reusable command buffer, in 32-bit words. */
 export const COMMAND_STREAM_WORDS = 16384;
 
+function capacityError(): Error {
+    return new Error(`Native Lite GL command exceeds its ${(COMMAND_STREAM_WORDS * 4) / 1024} KiB buffer.`);
+}
+
 /** @internal */
 export class CommandStream {
+    /** Reusable copy of an array upload, read completely before any of its command is recorded. */
+    readonly staging: number[] = [];
     private readonly words = new Uint32Array(COMMAND_STREAM_WORDS);
     private readonly integers = new Int32Array(this.words.buffer);
     private readonly floats = new Float32Array(this.words.buffer);
@@ -67,11 +73,12 @@ export class CommandStream {
         this.words[this.position++] = value ? 1 : 0;
     }
 
-    array(values: ArrayLike<number>): void {
+    /** Encodes the first `length` values. */
+    array(values: readonly number[], length: number): void {
         this.tag(this.runtime.NativeDataStream.VALIDATION_FLOAT_32_ARRAY);
-        this.reserve(1 + values.length);
-        this.words[this.position++] = values.length;
-        for (let index = 0; index < values.length; index++) {
+        this.reserve(1 + length);
+        this.words[this.position++] = length;
+        for (let index = 0; index < length; index++) {
             this.floats[this.position++] = values[index] as number;
         }
     }
@@ -93,7 +100,7 @@ export class CommandStream {
     /** Rejects a float array that cannot be encoded, before any word of its command is written. */
     checkArray(length: number): void {
         if (length + 1 > this.words.length) {
-            throw new Error("Native Lite GL command exceeds its 64 KiB buffer.");
+            throw capacityError();
         }
     }
 
@@ -112,7 +119,7 @@ export class CommandStream {
 
     private reserve(length: number): void {
         if (length > this.words.length) {
-            throw new Error("Native Lite GL command exceeds its 64 KiB buffer.");
+            throw capacityError();
         }
         if (this.position + length > this.words.length) {
             this.flush();

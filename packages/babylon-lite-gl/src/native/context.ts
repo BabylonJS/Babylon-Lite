@@ -65,12 +65,14 @@ export function createNativeEngine(): GLEngineContext {
         engine._blend = -1;
         engine._viewport.fill(NaN);
         engine._textureGeneration++;
+        engine._scissorEmpty = false;
         initializeCompositionState(engine);
     });
     initializeCompositionState(engine);
     return engine;
 }
 
+/** Composition draws without depth testing, culling or a scissor rectangle. */
 function initializeCompositionState(engine: GLEngineContext): void {
     const runtime = engine._runtime;
     const commands = engine._commands;
@@ -86,6 +88,13 @@ function initializeCompositionState(engine: GLEngineContext): void {
     commands.float(0);
     commands.uint(1);
     commands.uint(0);
+    commands.finish();
+    // The host keeps the default output's scissor across a device reset; an all-zero rectangle removes it.
+    commands.start(runtime.Engine.COMMAND_SETSCISSOR);
+    commands.float(0);
+    commands.float(0);
+    commands.float(0);
+    commands.float(0);
     commands.finish();
 }
 
