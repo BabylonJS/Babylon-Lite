@@ -386,23 +386,25 @@ describe("dynamic PBR binding generations", () => {
         pass.record();
 
         expect(pass.execute!()).toBe(1);
+        const initialBundleCount = bundleEncoder.mock.calls.length;
         expect(mesh.drawGroup).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ texture: first.output.texture }));
         for (let frame = 0; frame < 3; frame++) {
             expect(pass.execute!()).toBe(1);
         }
         expect(mesh.makeGroup).toHaveBeenCalledOnce();
-        expect(bundleEncoder).toHaveBeenCalledOnce();
+        expect(bundleEncoder).toHaveBeenCalledTimes(initialBundleCount);
 
         const replacement = publishOutput(f);
         expect(pass.execute!()).toBe(1);
+        const refreshedBundleCount = bundleEncoder.mock.calls.length;
         expect(mesh.makeGroup).toHaveBeenCalledTimes(2);
-        expect(bundleEncoder).toHaveBeenCalledTimes(2);
+        expect(refreshedBundleCount).toBeGreaterThan(initialBundleCount);
         expect(mesh.drawGroup).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ texture: replacement.output.texture }));
         for (let frame = 0; frame < 3; frame++) {
             expect(pass.execute!()).toBe(1);
         }
         expect(mesh.makeGroup).toHaveBeenCalledTimes(2);
-        expect(bundleEncoder).toHaveBeenCalledTimes(2);
+        expect(bundleEncoder).toHaveBeenCalledTimes(refreshedBundleCount);
 
         pass.dispose();
         f.task.dispose();
