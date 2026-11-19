@@ -197,6 +197,45 @@ describe("AssetContainer.addAllToScene", () => {
         expect(children).toHaveBeenCalled();
     });
 
+    it("collects meshes only once while resolving multiple animation targets", () => {
+        const children = vi.fn(() => [] as object[]);
+        const root = {} as { children?: object[] };
+        Object.defineProperty(root, "children", { get: children });
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [
+                { target: root, path: "value" },
+                { target: root, path: "otherValue" },
+            ],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                ],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const container = new AssetContainer(
+            { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer,
+            undefined,
+            undefined,
+            new Scene(new NullEngine())
+        );
+
+        expect(container.animationGroups[0]!.targetedAnimations).toHaveLength(2);
+        expect(children).toHaveBeenCalledTimes(3);
+    });
+
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {
         const material = createPbrMaterial();
         const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };

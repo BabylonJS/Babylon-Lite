@@ -298,6 +298,7 @@ describe("AnimationGroup", () => {
             { frame: 0, value: new Vector3(3, 2, 1) },
         ];
         targeted.animation.setKeys(retained, true);
+        expect(retained.map((key) => key.frame)).toEqual([60, 0]);
         retained[0]!.value = new Vector3(100, 100, 100);
         targeted.animation.getKeys()[0]!.value = new Vector3(200, 200, 200);
         expect(targeted.animation.getKeys().map((key) => animationComponentsForTest(key.value))).toEqual([
@@ -491,6 +492,56 @@ describe("AnimationGroup", () => {
         const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
 
         expect(() => animation.setKeys([{ frame: 0, value: 0 }])).toThrow(/must preserve both tangents/);
+    });
+
+    it("does not reorder a retained loaded draft when cubic validation fails", () => {
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 0, 1, 0]), interpolation: INTERP_CUBICSPLINE };
+        const lite = {
+            name: "cubic",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+        const draft = [
+            { frame: 60, value: 1 },
+            { frame: 0, value: 0 },
+        ];
+
+        expect(() => animation.setKeys(draft, true)).toThrow(/must preserve both tangents/);
+        expect(draft.map((key) => key.frame)).toEqual([60, 0]);
+    });
+
+    it("preserves locked tangent metadata after committing loaded cubic keys", () => {
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 1, 0, 1, 0]), interpolation: INTERP_CUBICSPLINE };
+        const lite = {
+            name: "cubic",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+
+        animation.setKeys([
+            { frame: 0, value: 0, inTangent: 0, outTangent: 1, lockedTangent: true },
+            { frame: 60, value: 1, inTangent: 1, outTangent: 0, lockedTangent: false },
+        ]);
+
+        expect(animation.getKeys().map((key) => key.lockedTangent)).toEqual([true, false]);
     });
 
     it("keeps wrapper keys and the Lite sampler unchanged when a loaded edit is rejected", () => {

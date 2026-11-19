@@ -122,11 +122,14 @@ export class Animation {
     ) {}
 
     public setKeys(keys: IAnimationKey[], dontClone = false, cloneKeys = false): void {
-        const nextKeys = dontClone ? keys : cloneKeys ? keys.map(cloneAnimationKey) : keys.slice();
+        const nextKeys = this._liteTrack ? (cloneKeys ? keys.map(cloneAnimationKey) : keys.slice()) : dontClone ? keys : cloneKeys ? keys.map(cloneAnimationKey) : keys.slice();
         nextKeys.sort((left, right) => left.frame - right.frame);
         if (this._liteTrack) {
             setLoadedTrackKeys(this, this._liteTrack, nextKeys);
             this._keys = loadedTrackKeys(this._liteTrack, this.framePerSecond, this.dataType);
+            for (let index = 0; index < this._keys.length; index++) {
+                this._keys[index]!.lockedTangent = nextKeys[index]?.lockedTangent;
+            }
             return;
         }
         this._keys = nextKeys;
@@ -154,6 +157,11 @@ export class Animation {
 
     public getHighestFrame(): number {
         return this._keys.length > 0 ? this._keys[this._keys.length - 1]!.frame : 0;
+    }
+
+    /** @internal Read the stored key-frame endpoints without creating a public snapshot. */
+    public _keyFrameRange(): readonly [number, number] | undefined {
+        return this._keys.length > 0 ? [this._keys[0]!.frame, this._keys[this._keys.length - 1]!.frame] : undefined;
     }
 
     /**
@@ -1105,20 +1113,19 @@ function isAnimationBinding(binding: AnimationBinding | undefined): binding is A
 }
 
 function clampAnimationFrame(animation: Animation | undefined, frame: number): number {
-    const keys = animation?.getKeys();
-    if (!keys || keys.length === 0) {
+    const range = animation?._keyFrameRange();
+    if (!range) {
         return frame;
     }
-    return Math.min(Math.max(frame, keys[0]!.frame), keys[keys.length - 1]!.frame);
+    return Math.min(Math.max(frame, range[0]), range[1]);
 }
 
 function animationPlaybackRange(animation: Animation, from: number, to: number): readonly [number, number] {
-    const keys = animation.getKeys();
-    if (keys.length === 0) {
+    const range = animation._keyFrameRange();
+    if (!range) {
         return [from, to];
     }
-    const min = keys[0]!.frame;
-    const max = keys[keys.length - 1]!.frame;
+    const [min, max] = range;
     return [from < min || from > max ? min : from, to < min || to > max ? max : to];
 }
 

@@ -66,6 +66,8 @@ export class AssetContainer {
 
     /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
     private readonly _meshRegistry: LoadedMeshRegistry = new Map();
+    /** @internal Whether the loaded hierarchy has populated `_meshRegistry`. */
+    private _meshesCollected = false;
     /** @internal Retained animation wrappers, including while this container is detached. */
     private readonly _animationGroupRegistry = new Map<LiteAnimationGroup, AnimationGroup>();
     /** @internal The compat scene this container was added to, if any (drives registry membership). */
@@ -139,8 +141,12 @@ export class AssetContainer {
         if (this._disposed) {
             return [...this._meshRegistry.values()];
         }
-        const scene = this._scene ?? this._destinationScene;
-        return collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
+        if (!this._meshesCollected) {
+            const scene = this._scene ?? this._destinationScene;
+            collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
+            this._meshesCollected = true;
+        }
+        return [...this._meshRegistry.values()];
     }
 
     public get skeletons(): Skeleton[] {
@@ -240,6 +246,7 @@ export class AssetContainer {
         // scene, so `scene.meshes` lists the loaded meshes and later
         // `container.meshes` reads share the same scene-aware handles.
         collectLoadedMeshes(this._lite, this._meshRegistry, scene);
+        this._meshesCollected = true;
         scene._surfaceLoadedCamera();
     }
 

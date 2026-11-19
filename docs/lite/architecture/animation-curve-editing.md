@@ -67,8 +67,9 @@ cubic multiplier, and identify quaternions from the channel. Property groups use
 Groups with neither representation and USD groups (identified by their authored
 start-time mixer marker) are unsupported. Replacing the two arrays on the existing
 sampler preserves references held by controllers and both weighted mixers. No clip
-or controller reconstruction is necessary for unshared glTF channels; property
-tracks receive a detached sampler. No runtime playback module imports the editor.
+or controller reconstruction is necessary for unshared glTF channels. Property
+tracks retain the shared sampler unless `detachPropertyTrack` requests a detached
+runtime sampler. No runtime playback module imports the editor.
 
 ## Pipeline Configuration / Shader Logic
 

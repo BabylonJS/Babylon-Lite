@@ -97,6 +97,16 @@ function getSource(group: AnimationGroup, trackIndex: number, inspectSharing: bo
 }
 
 function getSources(group: AnimationGroup): CurveSource[] {
+    if (group._gltfMixer) {
+        return group.targetedAnimations.map((_target, index) => getSource(group, index, true)!);
+    }
+    const property = group._propertyMixer;
+    if (!property) {
+        throw new Error("Animation group does not expose editable keyframe samplers");
+    }
+    if (property[4] !== undefined) {
+        throw new Error("USD animation groups do not expose editable keyframe samplers");
+    }
     return group.targetedAnimations.map((_target, index) => getSource(group, index, true)!);
 }
 
@@ -173,6 +183,11 @@ export function evaluateAnimationTrack(group: AnimationGroup, trackIndex: number
     return Array.from(output);
 }
 
+export interface SetAnimationTrackKeysOptions {
+    /** Detach a property runtime track from other groups created from the same reusable clip. */
+    readonly detachPropertyTrack?: boolean;
+}
+
 /** Replace a track's keys without changing the clip duration or playback range.
  * Keys must be nonempty, ordered by strictly increasing nonnegative Float32 time,
  * and within the original clip duration; every component must be finite.
@@ -181,11 +196,6 @@ export function evaluateAnimationTrack(group: AnimationGroup, trackIndex: number
  * tracks can opt into detachment for adapter-owned independent editing. Changes take
  * effect on the next evaluation or seek; they do not refresh previously baked VAT data.
  * @throws If the group, track index, or keys are invalid. */
-export interface SetAnimationTrackKeysOptions {
-    /** Detach a property runtime track from other groups created from the same reusable clip. */
-    readonly detachPropertyTrack?: boolean;
-}
-
 export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: readonly AnimationCurveKey[], options?: SetAnimationTrackKeysOptions): void {
     if (!Number.isInteger(trackIndex) || trackIndex < 0) {
         throw new Error("Animation track index is out of range");

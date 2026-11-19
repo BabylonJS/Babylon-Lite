@@ -202,10 +202,12 @@ describe("NullEngine (headless)", () => {
         const scene = new Scene(new NullEngine());
 
         const animatable = scene.beginDirectAnimation(target, [animation], 0, 60, false);
+        const publicSnapshots = vi.spyOn(animation, "getKeys");
         expect(animation.targetProperty).toBe("value");
         expect((animatable as unknown as { _fallbackAnimations: Animation[] })._fallbackAnimations).toEqual([animation]);
         animatable.goToFrame(30);
 
+        expect(publicSnapshots).not.toHaveBeenCalled();
         expect(animatable._lite).toBeUndefined();
         expect(animatable._nativeFallbackReason).toMatch(/cubic-spline tangents/);
         expect(target.value).toBeCloseTo(animation.evaluate(30) as number);
