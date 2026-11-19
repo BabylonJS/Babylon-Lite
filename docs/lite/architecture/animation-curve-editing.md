@@ -35,13 +35,24 @@ by the property runtime track, without invoking or wrapping it. It is `undefined
 for glTF and non-eased property tracks. Key/component arrays are detached; callback
 closure state is not cloned.
 
-To draw or insert values on an eased property track, transform segment-local
-normalized progress with `track.easing` before linear component interpolation or
-quaternion slerp. Do not clamp the transformed progress: callbacks may overshoot.
-STEP interpolation ignores easing, even when a callback is present. Property
-playback rounds the requested time to Float32 before segment selection, holds the
-first/last key outside the key range, and does not invoke easing in those holds or
-on single-key tracks. Easing remains in effect after key edits but is not edited.
+To draw or insert values on an eased property track, first round the requested
+time with `Math.fround`. At or before the first key, at or after the last key,
+or on a single-key track, return the stored key value without invoking easing.
+Otherwise, select the segment whose start time is at or before the sample time
+and whose end time is after it. An exact interior key starts the next segment
+at progress zero. STEP holds the segment's start value and ignores easing.
+
+For linear component interpolation or quaternion slerp, transform the segment's
+normalized progress with the standalone callback, matching playback's call
+without a receiver:
+
+```ts
+const { easing } = track;
+const gradient = easing ? easing(progress) : progress;
+```
+
+Do not clamp the transformed progress: callbacks may overshoot. Easing remains
+in effect after key edits but is not edited.
 
 The setter atomically replaces a sampler's keys (including insertion/deletion).
 At least one key is required. Times must be finite, nonnegative, strictly increasing

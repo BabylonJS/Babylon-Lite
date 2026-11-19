@@ -59,7 +59,13 @@ describe("animation curve editing", () => {
 
     it.each([
         { name: "built-in", easing: quadraticEase, midpoint: 4 },
-        { name: "custom overshooting", easing: (gradient: number) => 3 * gradient, midpoint: 14 },
+        {
+            name: "custom overshooting",
+            easing(this: void, gradient: number): number {
+                return this === undefined ? 3 * gradient : gradient;
+            },
+            midpoint: 14,
+        },
     ])("exposes $name easing for segment evaluation and preserves it after key edits", ({ easing, midpoint }) => {
         const manager = createAnimationManager();
         const target = { value: 0 };
@@ -76,14 +82,17 @@ describe("animation curve editing", () => {
         ]);
         const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
         const track = getAnimationGroupTracks(group)[0]!;
-        expect(track.easing).toBe(easing);
+        const { easing: snapshotEasing } = track;
+        expect(snapshotEasing).toBe(easing);
         const start = track.keys[1]!;
         const end = track.keys[2]!;
         const progress = (3 - start.time) / (end.time - start.time);
-        const value = start.value[0]! + track.easing!(progress) * (end.value[0]! - start.value[0]!);
+        const value = start.value[0]! + snapshotEasing!(progress) * (end.value[0]! - start.value[0]!);
         expect(value).toBe(midpoint);
         goToFrame(group, 3 * group.frameRate!);
         expect(target.value).toBeCloseTo(value);
+        goToFrame(group, 4 * group.frameRate!);
+        expect(target.value).toBe(10);
         setAnimationTrackKeys(group, 0, [
             { time: 0, value: [0] },
             { time: 4, value: [8] },
