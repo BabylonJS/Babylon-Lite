@@ -1,7 +1,8 @@
 import type { GLEngineContext } from "./context.js";
+import type { NativeResource, NativeResourceFields } from "./identity.js";
 import type { NativeHandle } from "./runtime.js";
 import { setNormalizedViewport } from "./state.js";
-import { configureTexture, disposeTexture, makeTexture } from "./texture.js";
+import { configureTexture, disposeTexture, makeTexture, validateTextureSize } from "./texture.js";
 import type { GLTexture, NativeTextureHandle } from "./texture.js";
 
 /** Options for {@link createRenderTarget}. */
@@ -11,7 +12,7 @@ export interface GLRenderTargetOptions {
 }
 
 /** Native framebuffer and its color attachment. */
-export interface GLRenderTarget {
+export interface GLRenderTarget extends NativeResource<"renderTarget"> {
     readonly width: number;
     readonly height: number;
     readonly texture: GLTexture;
@@ -27,6 +28,7 @@ export interface GLRenderTarget {
 
 /** Creates a composition target around an owned or supplied color attachment. */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
+    validateTextureSize(engine, width, height);
     const colorTexture = options?.colorTexture;
     let texture = colorTexture;
     if (!texture) {
@@ -40,7 +42,7 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
         }
     }
     try {
-        const target: GLRenderTarget = {
+        const fields: NativeResourceFields<GLRenderTarget> = {
             width,
             height,
             texture,
@@ -49,6 +51,7 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
             _engine: engine,
             _disposed: false,
         };
+        const target = fields as GLRenderTarget;
         texture._targets.push(target);
         return target;
     } catch (error) {
@@ -61,9 +64,12 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
 
 /**
  * Selects the drawing target, resolving the prior framebuffer before changing it,
- * and sets the viewport to cover it.
+ * and sets the viewport to cover it. No-op for a disposed target or engine.
  */
 export function bindRenderTarget(target: GLRenderTarget): void {
+    if (target._disposed || target._engine._disposed) {
+        return;
+    }
     selectFramebuffer(target._engine, target);
     setNormalizedViewport(target._engine, 0, 0, 1, 1, 1, 1);
 }
@@ -94,26 +100,54 @@ function selectFramebuffer(engine: GLEngineContext, target: GLRenderTarget | nul
     engine._viewport.fill(NaN);
 }
 
-/** Repoints a borrowed texture while preserving its render-target identities. */
+const NO_FRAMEBUFFERS: readonly NativeHandle[] = [];
+
+/**
+ * Repoints a borrowed texture while preserving its render-target identities.
+ * The swap is all-or-nothing: if the host cannot create a replacement
+ * framebuffer, the texture and its targets keep their original storage.
+ */
 export function updateWrappedNativeTexture(texture: GLTexture, replacement: NativeTextureHandle): void {
     const engine = texture._engine;
     if (texture._owned || texture.width !== engine._native.getTextureWidth(replacement) || texture.height !== engine._native.getTextureHeight(replacement)) {
         throw new Error("Replacement native texture must preserve the borrowed texture's shape.");
     }
-    for (const target of texture._targets) {
+    const targets = texture._targets;
+    const framebuffers = targets.length === 0 ? NO_FRAMEBUFFERS : createFramebuffers(engine, targets, replacement);
+    for (const target of targets) {
         if (engine._target === target) {
             selectFramebuffer(engine, null);
         }
     }
     texture._handle = replacement;
     configureTexture(engine, texture);
-    for (const target of texture._targets) {
-        const commands = engine._commands;
-        commands.start(engine._runtime.Engine.COMMAND_DELETEFRAMEBUFFER);
-        commands.handle(target._framebuffer);
-        commands.finish();
-        target._framebuffer = engine._native.createFrameBuffer(replacement, target.width, target.height, false, false, 1);
+    for (let index = 0; index < targets.length; index++) {
+        const target = targets[index] as GLRenderTarget;
+        deleteFramebuffer(engine, target._framebuffer);
+        target._framebuffer = framebuffers[index] as NativeHandle;
     }
+}
+
+function createFramebuffers(engine: GLEngineContext, targets: readonly GLRenderTarget[], texture: NativeHandle): NativeHandle[] {
+    const framebuffers: NativeHandle[] = [];
+    try {
+        for (const target of targets) {
+            framebuffers.push(engine._native.createFrameBuffer(texture, target.width, target.height, false, false, 1));
+        }
+        return framebuffers;
+    } catch (error) {
+        for (const framebuffer of framebuffers) {
+            deleteFramebuffer(engine, framebuffer);
+        }
+        throw error;
+    }
+}
+
+function deleteFramebuffer(engine: GLEngineContext, framebuffer: NativeHandle): void {
+    const commands = engine._commands;
+    commands.start(engine._runtime.Engine.COMMAND_DELETEFRAMEBUFFER);
+    commands.handle(framebuffer);
+    commands.finish();
 }
 
 /** Releases a framebuffer and only the color storage it owns. */
@@ -126,10 +160,7 @@ export function disposeRenderTarget(target: GLRenderTarget | null | undefined): 
     if (engine._target === target) {
         selectFramebuffer(engine, null);
     }
-    const commands = engine._commands;
-    commands.start(engine._runtime.Engine.COMMAND_DELETEFRAMEBUFFER);
-    commands.handle(target._framebuffer);
-    commands.finish();
+    deleteFramebuffer(engine, target._framebuffer);
     const index = target.texture._targets.indexOf(target);
     if (index >= 0) {
         target.texture._targets.splice(index, 1);

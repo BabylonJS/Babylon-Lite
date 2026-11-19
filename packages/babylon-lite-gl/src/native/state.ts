@@ -5,16 +5,20 @@ import type { GLClearOptions, GLViewport } from "../family.js";
 /** Blend presets shared with Lite GL: disabled, additive, combine and premultiplied. */
 export type GLBlendMode = 0 | 1 | 2 | 7;
 
-/** Changes the drawing viewport. Defaults to the full default output in pixel coordinates. */
+/** Changes the drawing viewport in pixels of the bound target. Defaults to the size of the default output, whichever target is bound. */
 export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void {
     const outputWidth = getRenderWidth(engine);
     const outputHeight = getRenderHeight(engine);
-    if (!viewport) {
-        setNormalizedViewport(engine, 0, 0, outputWidth, outputHeight, outputWidth, outputHeight);
-        return;
-    }
     const target = engine._target;
-    setNormalizedViewport(engine, viewport.x, viewport.y, viewport.w, viewport.h, target?.width ?? outputWidth, target?.height ?? outputHeight);
+    setNormalizedViewport(
+        engine,
+        viewport?.x ?? 0,
+        viewport?.y ?? 0,
+        viewport?.w ?? outputWidth,
+        viewport?.h ?? outputHeight,
+        target?.width ?? outputWidth,
+        target?.height ?? outputHeight
+    );
 }
 
 /** @internal Native viewports are fractions of the bound target. */
@@ -40,8 +44,25 @@ export function setNormalizedViewport(engine: GLEngineContext, x: number, y: num
     commands.finish();
 }
 
-/** Restricts drawing to a bottom-left-origin rectangle in physical pixels. */
+/**
+ * Restricts drawing and clearing to a bottom-left-origin rectangle in physical
+ * pixels. A rectangle without area allows neither until the scissor changes.
+ */
 export function setScissor(engine: GLEngineContext, x: number, y: number, width: number, height: number): void {
+    // The host reads an all-zero rectangle as "no scissor", so an empty one is enforced here instead.
+    engine._scissorEmpty = width <= 0 || height <= 0;
+    if (!engine._scissorEmpty) {
+        encodeScissor(engine, x, y, width, height);
+    }
+}
+
+/** Restores unrestricted drawing. */
+export function disableScissor(engine: GLEngineContext): void {
+    engine._scissorEmpty = false;
+    encodeScissor(engine, 0, 0, 0, 0);
+}
+
+function encodeScissor(engine: GLEngineContext, x: number, y: number, width: number, height: number): void {
     const commands = engine._commands;
     commands.start(engine._runtime.Engine.COMMAND_SETSCISSOR);
     commands.float(x);
@@ -49,11 +70,6 @@ export function setScissor(engine: GLEngineContext, x: number, y: number, width:
     commands.float(width);
     commands.float(height);
     commands.finish();
-}
-
-/** Restores unrestricted drawing. */
-export function disableScissor(engine: GLEngineContext): void {
-    setScissor(engine, 0, 0, 0, 0);
 }
 
 /** Sets a Lite GL blend preset. */
@@ -70,8 +86,11 @@ export function setBlendMode(engine: GLEngineContext, mode: GLBlendMode): void {
     engine._blend = mode;
 }
 
-/** Clears the current composition target without changing its scissor. */
+/** Clears the current composition target within its scissor, without changing the scissor. */
 export function clearEngine(engine: GLEngineContext, options: GLClearOptions): void {
+    if (engine._scissorEmpty) {
+        return;
+    }
     const color = options.color;
     const commands = engine._commands;
     commands.start(engine._runtime.Engine.COMMAND_CLEAR);

@@ -1,13 +1,18 @@
 import type { NativeEngine, NativeHandle, NativeRuntime } from "./runtime.js";
 
+/** @internal Capacity of the reusable command buffer, in 32-bit words. */
+export const COMMAND_STREAM_WORDS = 16384;
+
 /** @internal */
 export class CommandStream {
-    private readonly words = new Uint32Array(16384);
+    private readonly words = new Uint32Array(COMMAND_STREAM_WORDS);
     private readonly integers = new Int32Array(this.words.buffer);
     private readonly floats = new Float32Array(this.words.buffer);
     private position = 0;
     private frameActive = false;
     private readonly retained: NativeHandle[] = [];
+    /** Host textures whose deletion waits until the commands recorded before it are submitted. */
+    private readonly deletedTextures: NativeHandle[] = [];
     /** @internal */
     readonly _nativeDataStream;
 
@@ -85,6 +90,19 @@ export class CommandStream {
         }
     }
 
+    /** Rejects a float array that cannot be encoded, before any word of its command is written. */
+    checkArray(length: number): void {
+        if (length + 1 > this.words.length) {
+            throw new Error("Native Lite GL command exceeds its 64 KiB buffer.");
+        }
+    }
+
+    /** Deletes host texture storage once every command recorded before this call has been submitted. */
+    deleteTexture(texture: NativeHandle): void {
+        this.deletedTextures.push(texture);
+        this.finish();
+    }
+
     private tag(value: number): void {
         if (this.runtime.NativeDataStream.VALIDATION_ENABLED) {
             this.reserve(1);
@@ -109,5 +127,9 @@ export class CommandStream {
     private submit(): void {
         this.engine.submitCommands();
         this.retained.length = 0;
+        for (let index = 0; index < this.deletedTextures.length; index++) {
+            this.engine.deleteTexture(this.deletedTextures[index] as NativeHandle);
+        }
+        this.deletedTextures.length = 0;
     }
 }

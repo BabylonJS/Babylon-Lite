@@ -59,9 +59,15 @@ Public handles are pure state; standalone functions own engine creation,
 effects, buffers, sampled textures, render targets, and drawing. The caller
 supplies GLSL ES 3.00 shaders and explicit attribute, uniform, and sampler names,
 as with Lite GL. Shader includes and any host-specific shader preparation belong
-to the caller, not to the native command encoder. A leading `#version` line is
-dropped because the native compiler takes unversioned GLSL; any `defines` lead
-the source sent to the native compiler.
+to the caller, not to the native command encoder. A `#version` line preceded
+only by whitespace and comments is dropped because the native compiler takes
+unversioned GLSL; any `defines` lead the source sent to the native compiler.
+
+Every native resource type carries a type-only identity of its backend and
+kind. It survives the trimmed published declarations, so a web resource, a
+different kind of native resource, or an object with matching public fields is
+not accepted where a native resource is expected. Resources never store it at
+runtime.
 
 ### 2.1 Engine and frames
 
@@ -70,12 +76,16 @@ one native engine and one reusable 64 KiB command stream. It sets hardware
 scaling to one and disables depth test, depth writes, and culling for
 composition. As in Lite GL, `getRenderWidth` / `getRenderHeight` report the
 native output size, `getCurrentRenderTarget` reports the bound target, and
-`engine.caps.maxTextureSize` reports the device texture limit.
+`engine.caps.maxTextureSize` reports the device texture limit; texture and
+render-target sizes must be positive integers within it and are rejected before
+any host allocation.
 
 `beginFrame(engine)` and `endFrame(engine)` bracket command submission;
 `endFrame` submits everything recorded, including a partially encoded frame
 being unwound after a caller error. Resource operations outside a frame submit
-immediately. Nested or unmatched frame scopes are errors.
+immediately. Nested or unmatched frame scopes are errors. A command that cannot
+fit in the stream, such as an oversized uniform array, is rejected before any of
+it is recorded, so the stream and the uniform cache are unchanged.
 
 `disposeNativeEngine(engine)` is idempotent and disposes the native engine.
 
@@ -85,15 +95,19 @@ immediately. Nested or unmatched frame scopes are errors.
 declared names once and throws on failure, so `isEffectReady` is true until
 disposal and `getEffectCompilationError` always returns `null`. Each effect owns
 its program and a value cache. Uniform
-setters bind that program before uploading, ignore absent uniforms, and skip
-unchanged values. Every setter for a given uniform name shares one numeric value
+setters bind that program before uploading, ignore undeclared or absent uniforms,
+and skip unchanged values. Unlike Lite GL, native does not resolve undeclared
+uniform names. Every setter for a given uniform name shares one numeric value
 cache, so scalar, integer, vector, and array setters elide against each other;
 array setters compare values rather than array identity. Uniform data belongs to each native program.
 
 Texture slots belong to the frame encoder instead: sampler bindings are reused
 only within the same frame and program run, and are rebound after a program
-switch or a new frame. `useEffect` and indexed drawing share the engine's
-program and vertex-array caches. `disposeEffect` releases only the program.
+switch or a new frame. `setEffectTexture` ignores a name that is not a declared
+sampler, before selecting any program. `useEffect` and indexed drawing share the
+engine's program and vertex-array caches. As in Lite GL, operations on a
+disposed effect, texture, vertex array, render target or engine are ignored.
+`disposeEffect` releases only the program.
 
 ### 2.3 Buffers and vertex arrays
 
@@ -108,13 +122,15 @@ optional byte `offset`, and `divisor: 0`; as in Lite GL, an omitted divisor
 would mean instanced data, so per-vertex attributes state it explicitly. With
 `computeStride`, stride is the sum of component widths; otherwise attributes
 are tightly packed. Only float, non-instanced geometry is supported. Attribute
-locations come from the supplied effect.
+locations come from the supplied effect; names it did not declare are resolved
+from its program once, when the vertex array is recorded.
 
 The returned `GLMeshVao` exposes `indexCount` and owns its native vertex
 array — not its buffers or its shader. Several vertex arrays may therefore share
 one vertex and index buffer. `bindMeshVao(mesh)` uses the engine's
 binding cache; `drawMesh(mesh, instanceCount, indexStart, indexCount)`
-binds the mesh and draws triangles without allocating. Instancing is not
+binds the mesh and draws triangles without allocating; `indexCount` defaults
+to the indices from `indexStart` to the end. Instancing is not
 supported, so `instanceCount` must be `0`. `disposeMeshVao` releases the vertex
 array independently of program references. Callers dispose vertex arrays before
 the buffers they reference.
@@ -125,7 +141,9 @@ the buffers they reference.
 handle. `wrapNativeTexture(engine, handle)` **borrows** native storage:
 `disposeTexture` releases the wrapper but never deletes the storage.
 `createRawTexture(engine, data, width, height, options?)`
-**owns** RGBA8 storage and deletes it on disposal; its `format` / `type`
+**owns** RGBA8 storage and deletes it once every command recorded before its
+disposal has been submitted, so a frame may still use a texture it disposes;
+its `format` / `type`
 options accept only `RGBA` / `UNSIGNED_BYTE` (the defaults) and it throws for
 other formats. Texture state
 exposes `readonly width`, `readonly height`, and `isReady`; readiness becomes
@@ -143,14 +161,19 @@ binding.
 `updateWrappedNativeTexture(texture, handle)` replaces the storage of a
 borrowed texture in place and rebuilds every framebuffer that renders into it.
 The replacement must have the same dimensions; a shape change is rejected.
+Every replacement framebuffer is created before any existing one is released,
+so if the host fails, the texture and its targets keep their original storage.
 
 ### 2.5 State
 
 The engine tracks the active framebuffer and viewport. As in Lite GL,
-`setViewport(engine, viewport?)` takes a `GLViewport` in physical pixels and
-defaults to the full output; the native protocol's normalized viewport is
-derived from the bound target's size. `setScissor` uses physical pixels with
-the same bottom-left origin as Lite GL. `setBlendMode` uses the Lite GL /
+`setViewport(engine, viewport?)` takes a `GLViewport` in physical pixels of the
+bound target and defaults to the size of the default output, whichever target is
+bound; the native protocol's normalized viewport is derived from the bound
+target's size. `setScissor` uses physical pixels with the same bottom-left
+origin as Lite GL. A scissor rectangle without area clips everything, as in
+WebGL: drawing and clearing do nothing until the scissor changes or
+`disableScissor` is called. `setBlendMode` uses the Lite GL /
 Babylon numeric presets. `clearEngine(engine, options)` takes `GLClearOptions`
 and clears the requested buffers of the bound framebuffer.
 
@@ -166,13 +189,16 @@ state before rendering resumes.
 
 Unit tests (`tests/gl/unit/native-lite-gl.test.ts`) drive the backend through a
 protocol-recording runtime. They cover protocol mismatch, command scopes and
-validation tags, unchanged-state elision, shared uniform values, vertex-array
-reuse, borrowed versus owned texture disposal, target replacement, pixel
-viewports, clear options, `#version` handling, unsupported raw formats, and
-rendering state after a native reset. Package-output tests (`tests/gl/build/`) check the
-built `./native` export, that its trimmed declarations type-check without the
-DOM library, import without a native runtime, and that the web and native
-entries tree-shake independently. The backend-family conformance test
+validation tags, stream capacity and rejected oversized commands, unchanged-state
+elision, shared uniform values, sampler validation, disposed resources,
+vertex-array reuse and attribute resolution, default index ranges, borrowed
+versus owned texture disposal and deferred deletion, atomic target replacement,
+size limits, pixel viewports, empty scissors, clear options, `#version`
+handling, unsupported raw formats, and rendering state after a native reset.
+Package-output tests (`tests/gl/build/`) check the built `./native` export, that
+its trimmed declarations type-check without the DOM library, that they still
+keep web and native resources and resource kinds apart, that it imports without
+a native runtime, and that the web and native entries tree-shake independently. The backend-family conformance test
 (`tests/gl/unit/gl-family-conformance.test.ts`, `04-backend-family.md` §4)
 checks every native export against `GLOps<NativeGLFamily>` or `NativeGLHostOps`.
 

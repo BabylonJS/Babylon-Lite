@@ -20,8 +20,8 @@ export interface GLEffectOptions {
     vertexSource: string;
     /** GLSL ES 3.00 fragment source. */
     fragmentSource: string;
-    /** Declared uniform names. Names not declared here are legal but resolve
-     *  lazily on first setter use. */
+    /** Declared uniform names. Portable code sets only these; the web backend
+     *  also resolves undeclared names lazily, while native ignores them. */
     uniformNames: readonly string[];
     /** Declared sampler names, in texture-unit assignment order. */
     samplerNames: readonly string[];

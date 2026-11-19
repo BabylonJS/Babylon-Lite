@@ -21,16 +21,21 @@ import {
     endFrame,
     getEffectCompilationError,
     isEffectReady,
+    disableScissor,
+    getCurrentRenderTarget,
     restoreDefaultFramebuffer,
     setBlendMode,
     setEffectFloat,
     setEffectFloatArray4,
     setEffectTexture,
+    setScissor,
     setViewport,
     updateWrappedNativeTexture,
+    useEffect,
     wrapNativeTexture,
 } from "../../../packages/babylon-lite-gl/src/native/index.js";
-import { CommandStream } from "../../../packages/babylon-lite-gl/src/native/command-stream.js";
+import { COMMAND_STREAM_WORDS, CommandStream } from "../../../packages/babylon-lite-gl/src/native/command-stream.js";
+import type { GLMeshVertexBuffer } from "../../../packages/babylon-lite-gl/src/native/index.js";
 import type { NativeEngineConstructor, NativeRuntime } from "../../../packages/babylon-lite-gl/src/native/runtime.js";
 
 const RGBA = 0x1908;
@@ -123,9 +128,12 @@ function makeRuntime(validation = false) {
             const value = commands.get(`COMMAND_${name}`)?.[0];
             return words.filter((word) => word === value).length;
         },
-        floats(name: string, length: number) {
+        after(name: string, length: number) {
             const start = words.lastIndexOf(commands.get(`COMMAND_${name}`)?.[0] ?? -1) + 1;
-            return Array.from(new Float32Array(new Uint32Array(words.slice(start, start + length)).buffer));
+            return words.slice(start, start + length);
+        },
+        floats(name: string, length: number) {
+            return Array.from(new Float32Array(new Uint32Array(this.after(name, length)).buffer));
         },
         reset: () => reset(),
         clear: () => {
@@ -178,16 +186,37 @@ describe("Native Lite GL protocol", () => {
         stream.end();
     });
 
-    it("preserves command data when the reusable stream rolls over", () => {
+    it("preserves command data when the reusable stream fills and rolls over", () => {
         const mock = makeRuntime();
         const native = new mock.runtime.Engine({ version: "test", nonFloatVertexBuffers: true });
         const stream = new CommandStream(mock.runtime, native);
         stream.begin();
-        for (let index = 0; index < 17000; index++) {
+        for (let index = 0; index < COMMAND_STREAM_WORDS; index++) {
             stream.uint(index);
         }
+        expect(mock.words).toEqual([]);
+        stream.uint(COMMAND_STREAM_WORDS);
+        expect(mock.words).toHaveLength(COMMAND_STREAM_WORDS);
         stream.end();
-        expect(mock.words).toEqual(Array.from({ length: 17000 }, (_, index) => index));
+        expect(mock.words).toEqual(Array.from({ length: COMMAND_STREAM_WORDS + 1 }, (_, index) => index));
+    });
+
+    it("rejects an oversized uniform array without recording any part of its command", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const first = effect(engine);
+        const second = effect(engine);
+        mock.clear();
+        beginFrame(engine);
+        setEffectFloat(second, "alpha", 1);
+        expect(() => setEffectFloatArray4(first, "colors", new Float32Array(COMMAND_STREAM_WORDS))).toThrow("exceeds its 64 KiB buffer");
+        setEffectFloat(second, "alpha", 0.5);
+        setEffectFloatArray4(first, "colors", [1, 2, 3, 4]);
+        endFrame(engine);
+        expect(mock.count("SETPROGRAM")).toBe(2);
+        expect(mock.count("SETFLOAT")).toBe(2);
+        expect(mock.floats("SETFLOATARRAY4", 6).slice(2)).toEqual([1, 2, 3, 4]);
+        expect(mock.words).toHaveLength(2 + 3 + 3 + 2 + 7);
     });
 
     it("retains per-program uniform values and notices in-place array changes", () => {
@@ -296,6 +325,8 @@ describe("Native Lite GL protocol", () => {
         bindRenderTarget(target);
         expect(mock.count("BINDFRAMEBUFFER")).toBe(0);
         expect(mock.floats("SETVIEWPORT", 4)).toEqual([0, 0, 1, 1]);
+        setViewport(engine);
+        expect(mock.floats("SETVIEWPORT", 4)).toEqual([0, 0, 2, 2]);
         restoreDefaultFramebuffer(engine);
         setViewport(engine, { x: 0, y: 0, w: 320, h: 180 });
         expect(mock.floats("SETVIEWPORT", 4)).toEqual([0, 0, 0.5, 0.5]);
@@ -332,6 +363,39 @@ describe("Native Lite GL protocol", () => {
         expect(getEffectCompilationError(program)).toBeNull();
     });
 
+    it("strips a version directive that follows leading whitespace and comments", () => {
+        makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        createEffect(engine, {
+            name: "commented",
+            vertexSource: "\n  // header\n/* licence\n */\n# version 300 es\nvoid main() {}",
+            fragmentSource: "void main() {}\n#version 300 es\n",
+            uniformNames: [],
+            samplerNames: [],
+        });
+        expect(native.createProgram).toHaveBeenLastCalledWith("\n  // header\n/* licence\n */\nvoid main() {}", "void main() {}\n#version 300 es\n");
+    });
+
+    it("rejects texture sizes the host cannot allocate before any host call", () => {
+        const mock = makeRuntime();
+        mock.Engine.CAPS_LIMITS_MAX_TEXTURE_SIZE = 2048;
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        for (const [width, height] of [
+            [0, 1],
+            [1.5, 1],
+            [1, 2049],
+            [Number.NaN, 1],
+        ] as const) {
+            expect(() => createRawTexture(engine, new Uint8Array(4), width, height)).toThrow("positive integers no larger than 2048");
+            expect(() => createRenderTarget(engine, width, height)).toThrow("positive integers no larger than 2048");
+        }
+        expect(native.createTexture).not.toHaveBeenCalled();
+        expect(native.createFrameBuffer).not.toHaveBeenCalled();
+        expect(createRenderTarget(engine, 2048, 1).width).toBe(2048);
+    });
+
     it("rejects raw texture formats it cannot upload", () => {
         makeRuntime();
         const engine = createNativeEngine();
@@ -361,5 +425,168 @@ describe("Native Lite GL protocol", () => {
         disposeNativeEngine(engine);
         disposeNativeEngine(engine);
         expect(native.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps owned texture storage until the commands recorded before its disposal are submitted", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const program = effect(engine);
+        const texture = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        const target = createRenderTarget(engine, 320, 180);
+        const handles = [texture._handle, target.texture._handle];
+        beginFrame(engine);
+        bindRenderTarget(target);
+        setEffectTexture(program, "plane", texture);
+        disposeTexture(texture);
+        restoreDefaultFramebuffer(engine);
+        setEffectTexture(program, "plane", target.texture);
+        disposeRenderTarget(target);
+        for (let index = 0; index < COMMAND_STREAM_WORDS; index++) {
+            setEffectFloat(program, "alpha", index);
+        }
+        expect(mock.words.length).toBeGreaterThan(0);
+        expect(native.deleteTexture).not.toHaveBeenCalled();
+        endFrame(engine);
+        expect(native.deleteTexture.mock.calls.map(([handle]) => handle)).toEqual(handles);
+        expect(native.deleteTexture.mock.invocationCallOrder[0]).toBeGreaterThan(native.submitCommands.mock.invocationCallOrder.at(-1) ?? Infinity);
+        beginFrame(engine);
+        endFrame(engine);
+        expect(native.deleteTexture).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps borrowed output framebuffers when a replacement cannot be created", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const borrowed = wrapNativeTexture(engine, new Uint32Array([700]));
+        const first = createRenderTarget(engine, 640, 360, { colorTexture: borrowed });
+        const second = createRenderTarget(engine, 640, 360, { colorTexture: borrowed });
+        bindRenderTarget(first);
+        const framebuffers = [first._framebuffer, second._framebuffer];
+        const created = new Uint32Array([900]);
+        native.createFrameBuffer
+            .mockImplementationOnce(() => created)
+            .mockImplementationOnce(() => {
+                throw new Error("host framebuffer failure");
+            });
+        mock.clear();
+        expect(() => updateWrappedNativeTexture(borrowed, new Uint32Array([701]))).toThrow("host framebuffer failure");
+        expect([first._framebuffer, second._framebuffer]).toEqual(framebuffers);
+        expect(borrowed._handle).toEqual(new Uint32Array([700]));
+        expect(getCurrentRenderTarget(engine)).toBe(first);
+        expect(mock.count("UNBINDFRAMEBUFFER")).toBe(0);
+        expect(mock.count("DELETEFRAMEBUFFER")).toBe(1);
+        expect(mock.after("DELETEFRAMEBUFFER", 1)).toEqual([900]);
+    });
+
+    it("ignores disposed effects, textures, geometry, targets and engines like the web backend", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const live = effect(engine);
+        const disposed = effect(engine);
+        const texture = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        const disposedTexture = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        const target = createRenderTarget(engine, 320, 180);
+        const vertex = createVertexBuffer(engine, new Float32Array([0, 0, 1, 1]));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 0]));
+        const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, live);
+        disposeEffect(disposed);
+        disposeTexture(disposedTexture);
+        disposeRenderTarget(target);
+        disposeMeshVao(mesh);
+        mock.clear();
+        useEffect(disposed);
+        setEffectFloat(disposed, "alpha", 1);
+        setEffectFloatArray4(disposed, "colors", [1, 2, 3, 4]);
+        setEffectTexture(disposed, "plane", texture);
+        setEffectTexture(live, "plane", disposedTexture);
+        bindMeshVao(mesh);
+        bindRenderTarget(target);
+        expect(mock.words).toEqual([]);
+        disposeNativeEngine(engine);
+        useEffect(live);
+        setEffectFloat(live, "alpha", 1);
+        setEffectTexture(live, "plane", texture);
+        expect(mock.words).toEqual([]);
+        expect(() => createMeshVao(engine, [], indices, disposed)).toThrow("effect that has not been disposed");
+    });
+
+    it("validates a sampler name before switching programs", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const first = effect(engine);
+        const second = effect(engine);
+        const texture = wrapNativeTexture(engine, new Uint32Array([700]));
+        useEffect(second);
+        mock.clear();
+        setEffectTexture(first, "alpha", texture);
+        setEffectTexture(first, "toString", texture);
+        setEffectTexture(first, "undeclared", texture);
+        expect(mock.words).toEqual([]);
+        setEffectTexture(first, "plane", texture);
+        expect(mock.count("SETPROGRAM")).toBe(1);
+        expect(mock.count("SETTEXTURE")).toBe(1);
+    });
+
+    it("resolves mesh attributes the effect did not declare once from its program", () => {
+        makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const program = effect(engine);
+        const getAttributes = vi.spyOn(native, "getAttributes").mockReturnValue([3]);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 0]));
+        const binding: GLMeshVertexBuffer = {
+            buffer: vertex,
+            attributes: [
+                { name: "position", size: 2, divisor: 0 },
+                { name: "uv", size: 2, divisor: 0 },
+            ],
+        };
+        createMeshVao(engine, [binding], indices, program);
+        createMeshVao(engine, [binding], indices, program);
+        expect(getAttributes).toHaveBeenCalledTimes(1);
+        expect(native.recordVertexBuffer.mock.calls.map((call) => call[2])).toEqual([0, 3, 0, 3]);
+    });
+
+    it("draws the remaining indices from a start offset by default", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const program = effect(engine);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 0, 2, 3]));
+        const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        drawMesh(mesh, 0, 3);
+        expect(mock.after("DRAWINDEXED", 3)).toEqual([0, 3, 3]);
+        drawMesh(mesh);
+        expect(mock.after("DRAWINDEXED", 3)).toEqual([0, 0, 6]);
+    });
+
+    it("draws and clears nothing while the scissor rectangle is empty", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const program = effect(engine);
+        const vertex = createVertexBuffer(engine, new Float32Array(8));
+        const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const mesh = createMeshVao(engine, [{ buffer: vertex, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, program);
+        mock.clear();
+        setScissor(engine, 4, 4, 0, 10);
+        clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
+        drawMesh(mesh);
+        setScissor(engine, 4, 4, 10, -1);
+        drawMesh(mesh);
+        expect(mock.words).toEqual([]);
+        setScissor(engine, 1, 2, 3, 4);
+        expect(mock.floats("SETSCISSOR", 4)).toEqual([1, 2, 3, 4]);
+        drawMesh(mesh);
+        expect(mock.count("DRAWINDEXED")).toBe(1);
+        setScissor(engine, 0, 0, 0, 0);
+        disableScissor(engine);
+        expect(mock.floats("SETSCISSOR", 4)).toEqual([0, 0, 0, 0]);
+        clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
+        drawMesh(mesh);
+        expect(mock.count("CLEAR")).toBe(1);
+        expect(mock.count("DRAWINDEXED")).toBe(2);
     });
 });

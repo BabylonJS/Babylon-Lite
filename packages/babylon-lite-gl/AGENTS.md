@@ -38,6 +38,12 @@ unclassified, missing from its uber-kit, or not identical to its family
 signature. Fix the contract or the mapping; never exempt an export, cast a kit
 member, or loosen the assertions.
 
+A native resource type extends `NativeResource<Kind>` from
+`src/native/identity.ts`, adding its kind to `NativeResourceKind`, so it stays
+distinct from web resources and other native kinds once internal members are
+removed from the published declarations. Extend the emitted-declaration fixture
+in `tests/gl/build/public-api.test.ts` when you add one.
+
 The family entry (`src/family.ts`) and the native entry must stay free of DOM
 types and WebGL modules, and the family contract must stay types only: no
 runtime kit, namespace facade or wrapper ships from the package.

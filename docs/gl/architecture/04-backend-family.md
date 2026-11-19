@@ -316,7 +316,10 @@ const webKit: CompositorKit<WebGLFamily> = { createEffect, useEffect, setEffectT
 The native root is identical with imports from `@babylonjs/lite-gl/native` and
 `NativeGLFamily`. Passing a native kit with a web resource (or the reverse) is
 a type error, and so is a value outside a concrete family's slot, such as a
-`null` sampler texture passed through a native kit.
+`null` sampler texture passed through a native kit. Native resource types carry
+a type-only identity of their backend and kind, so this holds against the
+published declarations too, where internal members are removed and only a few
+public fields would otherwise remain.
 
 Concrete types are checked exactly where the family is known: in composition
 roots and in the uber-kits of §4. Generic code is checked against what every

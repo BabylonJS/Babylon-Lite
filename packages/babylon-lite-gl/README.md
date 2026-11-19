@@ -291,7 +291,8 @@ endFrame(engine);
   `beginFrame` / `endFrame` (one command submission per frame),
   `getRenderWidth`, `getRenderHeight` (native output size),
   `getCurrentRenderTarget`, and `engine.caps.maxTextureSize`.
-- **Effects** — `createEffect` (accepts Lite GL `#version 300 es` sources),
+- **Effects** — `createEffect` (accepts Lite GL `#version 300 es` sources;
+  uniform setters affect only declared names),
   `useEffect`, `isEffectReady`, `getEffectCompilationError` (always `null`:
   compilation errors throw from `createEffect`), `disposeEffect`,
   and the cached setters `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` /
@@ -302,12 +303,14 @@ endFrame(engine);
   `disposeBuffer`, `disposeMeshVao`. A mesh vertex array owns only itself, so
   several meshes can share one vertex/index buffer.
 - **Textures / targets** — `wrapNativeTexture` (borrows host storage),
-  `createRawTexture` (owns storage; `RGBA` / `UNSIGNED_BYTE` only), `disposeTexture`,
+  `createRawTexture` (owns storage; `RGBA` / `UNSIGNED_BYTE` only), `disposeTexture`
+  (owned storage is deleted after the commands already recorded are submitted),
   `createRenderTarget` (`width, height, { colorTexture? }`), `bindRenderTarget` /
   `restoreDefaultFramebuffer` (also set a full-target viewport), `updateWrappedNativeTexture`
   (replaces a borrowed handle and rebuilds its framebuffers),
   `disposeRenderTarget`.
-- **State** — `setViewport` (pixel `GLViewport`), `setScissor`, `disableScissor`,
+- **State** — `setViewport` (pixel `GLViewport`), `setScissor` (an empty rectangle
+  clips everything, as in WebGL), `disableScissor`,
   `setBlendMode`, `clearEngine` (`GLClearOptions`).
 
 The ownership and device-reset contract is documented in

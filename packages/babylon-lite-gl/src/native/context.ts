@@ -1,4 +1,5 @@
 import { CommandStream } from "./command-stream.js";
+import type { NativeResource, NativeResourceFields } from "./identity.js";
 import { getRuntime } from "./runtime.js";
 import type { NativeEngine, NativeHandle, NativeRuntime } from "./runtime.js";
 import type { GLRenderTarget } from "./render-target.js";
@@ -10,7 +11,7 @@ export interface GLEngineCaps {
 }
 
 /** Composition state owned by one Babylon Native engine. */
-export interface GLEngineContext {
+export interface GLEngineContext extends NativeResource<"engine"> {
     /** Device limits. */
     readonly caps: GLEngineCaps;
     /** @internal */
@@ -31,6 +32,8 @@ export interface GLEngineContext {
     readonly _viewport: number[];
     /** @internal */
     _textureGeneration: number;
+    /** @internal Whether the scissor rectangle has no area, so drawing and clearing do nothing. */
+    _scissorEmpty: boolean;
     /** @internal */
     _disposed: boolean;
 }
@@ -39,7 +42,7 @@ export interface GLEngineContext {
 export function createNativeEngine(): GLEngineContext {
     const runtime = getRuntime();
     const nativeEngine = new runtime.Engine({ version: "@babylonjs/lite-gl/native", nonFloatVertexBuffers: true });
-    const engine: GLEngineContext = {
+    const fields: NativeResourceFields<GLEngineContext> = {
         caps: { maxTextureSize: runtime.Engine.CAPS_LIMITS_MAX_TEXTURE_SIZE },
         _runtime: runtime,
         _native: nativeEngine,
@@ -50,8 +53,10 @@ export function createNativeEngine(): GLEngineContext {
         _blend: -1,
         _viewport: [NaN, NaN, NaN, NaN],
         _textureGeneration: 0,
+        _scissorEmpty: false,
         _disposed: false,
     };
+    const engine = fields as GLEngineContext;
     nativeEngine.setHardwareScalingLevel(1);
     nativeEngine.setRenderResetCallback(() => {
         engine._target = null;

@@ -14,6 +14,7 @@ import {
 } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { setEffectTexture } from "../../../packages/babylon-lite-gl/src/effect";
+import { disableScissor, setScissor } from "../../../packages/babylon-lite-gl/src/scissor";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function setup() {
@@ -72,6 +73,47 @@ describe("lite-gl render-target: createRenderTarget", () => {
         mock.clear();
         presentRenderTarget(target);
         expect(mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(engine);
+    });
+    it("presents the whole target under an active scissor and then restores it", () => {
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        setScissor(engine, 1, 2, 3, 4);
+        mock.clear();
+        presentRenderTarget(target);
+        const order = mock.log.filter((c) => c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
+        expect(order.map((c) => [c.name, ...c.args.slice(0, 1)])).toEqual([
+            ["disable", gl.SCISSOR_TEST],
+            ["blitFramebuffer", 0],
+            ["enable", gl.SCISSOR_TEST],
+        ]);
+        expect(engine._state.scissorEnabled).toBe(1);
+        mock.clear();
+        setScissor(engine, 1, 2, 3, 4);
+        expect(mock.log).toEqual([]);
+        disableScissor(engine);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("disable")).toBe(0);
+        expect(mock.count("enable")).toBe(0);
+        expect(engine._state.scissorEnabled).toBe(0);
+        disposeGLEngine(engine);
+    });
+    it("rejects presentation into a multisampled canvas and samples the canvas once", () => {
+        const multisampled = setup();
+        multisampled.mock.setSampleCount(4);
+        const rejected = createRenderTarget(multisampled.engine, 256, 128);
+        multisampled.mock.clear();
+        expect(() => presentRenderTarget(rejected)).toThrow("cannot copy into a multisampled canvas");
+        expect(multisampled.mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(multisampled.engine);
+        const { mock, engine } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        presentRenderTarget(target);
+        mock.setSampleCount(4);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("blitFramebuffer")).toBe(1);
         disposeGLEngine(engine);
     });
     it("creates one FBO, attaches the color texture at COLOR_ATTACHMENT0, validates completeness, and registers in _renderTargets", () => {

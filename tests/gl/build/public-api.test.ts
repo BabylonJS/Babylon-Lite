@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { spawnSync } from "child_process";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { pathToFileURL } from "url";
 import { build as bundle } from "esbuild";
@@ -35,6 +35,112 @@ function typecheckDts(dts: string, lib: string) {
         encoding: "utf-8",
     });
 }
+
+// Compiled against the emitted declarations, where internal members are removed: every
+// `@ts-expect-error` must still be an error and every other line must compile.
+const RESOURCE_IDENTITY_FIXTURE = `
+import type { GLFamily, GLKit } from "./family.js";
+import * as Web from "./index.js";
+import * as Native from "./native/index.js";
+
+declare const webEngine: Web.GLEngineContext;
+declare const webEffect: Web.GLEffect;
+declare const webTexture: Web.GLTexture;
+declare const webTarget: Web.GLRenderTarget;
+declare const webVertex: Web.GLVertexBuffer;
+declare const webIndex: Web.GLIndexBuffer;
+declare const webMesh: Web.GLMeshVao;
+declare const engine: Native.GLEngineContext;
+declare const effect: Native.GLEffect;
+declare const texture: Native.GLTexture;
+declare const target: Native.GLRenderTarget;
+declare const vertex: Native.GLVertexBuffer;
+declare const indices: Native.GLIndexBuffer;
+declare const mesh: Native.GLMeshVao;
+declare const textureWithBufferFields: Native.GLTexture & { readonly byteLength: number };
+
+type FlowOps = "createRenderTarget" | "setEffectTexture" | "createVertexBuffer" | "createIndexBuffer" | "createMeshVao" | "drawMesh" | "disposeBuffer";
+const nativeKit: GLKit<Native.NativeGLFamily, FlowOps> = {
+    createRenderTarget: Native.createRenderTarget,
+    setEffectTexture: Native.setEffectTexture,
+    createVertexBuffer: Native.createVertexBuffer,
+    createIndexBuffer: Native.createIndexBuffer,
+    createMeshVao: Native.createMeshVao,
+    drawMesh: Native.drawMesh,
+    disposeBuffer: Native.disposeBuffer,
+};
+const webKit: GLKit<Web.WebGLFamily, FlowOps> = {
+    createRenderTarget: Web.createRenderTarget,
+    setEffectTexture: Web.setEffectTexture,
+    createVertexBuffer: Web.createVertexBuffer,
+    createIndexBuffer: Web.createIndexBuffer,
+    createMeshVao: Web.createMeshVao,
+    drawMesh: Web.drawMesh,
+    disposeBuffer: Web.disposeBuffer,
+};
+
+// Correlated resources flow through generic code and both backends.
+function flow<F extends GLFamily>(kit: GLKit<F, FlowOps>, engine: F["engine"], effect: F["effect"]): void {
+    kit.setEffectTexture(effect, "source", kit.createRenderTarget(engine, 4, 4).texture);
+    const buffer = kit.createVertexBuffer(engine, new Float32Array(8));
+    const indices = kit.createIndexBuffer(engine, new Uint16Array(6));
+    kit.drawMesh(kit.createMeshVao(engine, [{ buffer, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, effect));
+    kit.disposeBuffer(buffer);
+    kit.disposeBuffer(indices);
+}
+flow(nativeKit, engine, effect);
+flow(webKit, webEngine, webEffect);
+Native.setEffectTexture(effect, "source", target.texture);
+Native.drawMesh(mesh, 0, 3);
+
+// Web resources are not native resources.
+// @ts-expect-error web engine
+Native.createRenderTarget(webEngine, 4, 4);
+// @ts-expect-error web engine through a native kit
+nativeKit.createRenderTarget(webEngine, 4, 4);
+// @ts-expect-error web effect
+Native.useEffect(webEffect);
+// @ts-expect-error web texture
+Native.setEffectTexture(effect, "source", webTexture);
+// @ts-expect-error web texture through a native kit
+nativeKit.setEffectTexture(effect, "source", webTexture);
+// @ts-expect-error web render target
+Native.bindRenderTarget(webTarget);
+// @ts-expect-error web vertex buffer
+Native.createMeshVao(engine, [{ buffer: webVertex, attributes: [] }], indices, effect);
+// @ts-expect-error web index buffer
+Native.createMeshVao(engine, [], webIndex, effect);
+// @ts-expect-error web mesh
+Native.drawMesh(webMesh);
+// @ts-expect-error web engine into a generic flow over the native family
+flow(nativeKit, webEngine, effect);
+
+// Native resources are not web resources.
+// @ts-expect-error native engine
+Web.createRenderTarget(engine, 4, 4);
+// @ts-expect-error native effect
+Web.useEffect(effect);
+// @ts-expect-error native texture
+Web.setEffectTexture(webEffect, "source", texture);
+// @ts-expect-error native render target
+Web.bindRenderTarget(target);
+// @ts-expect-error native mesh
+Web.drawMesh(mesh);
+
+// One kind of native resource is not another, nor is a structural look-alike.
+// @ts-expect-error a texture is not a buffer
+Native.disposeBuffer(texture);
+// @ts-expect-error nor is a texture with a buffer's public fields
+Native.disposeBuffer(textureWithBufferFields);
+// @ts-expect-error a vertex buffer is not an index buffer
+Native.createMeshVao(engine, [], vertex, effect);
+// @ts-expect-error a texture is not an engine
+Native.createRenderTarget(texture, 4, 4);
+// @ts-expect-error a render target is not a texture
+Native.setEffectTexture(effect, "source", target);
+// @ts-expect-error an object with a texture's public fields is not a texture
+Native.setEffectTexture(effect, "source", { width: 1, height: 1, isReady: true });
+`;
 
 describe("babylon-lite-gl build output", () => {
     it("builds, ships a trimmed public API, and exposes the documented exports", async () => {
@@ -247,6 +353,17 @@ describe("babylon-lite-gl build output", () => {
         const familyDtsResult = typecheckDts(resolve(DIST, familyEntry!.types!), HOST_NEUTRAL_LIB);
         if (familyDtsResult.status !== 0) {
             throw new Error(`dist/family.d.ts has TypeScript errors:\n${familyDtsResult.stdout ?? ""}${familyDtsResult.stderr ?? ""}`);
+        }
+        // Backend and resource-kind identity survives the declaration trimming.
+        const identityFixture = resolve(DIST, "resource-identity.check.ts");
+        writeFileSync(identityFixture, RESOURCE_IDENTITY_FIXTURE);
+        try {
+            const identityResult = typecheckDts(identityFixture, BROWSER_LIB);
+            if (identityResult.status !== 0) {
+                throw new Error(`resource identity fixture failed against the emitted declarations:\n${identityResult.stdout ?? ""}${identityResult.stderr ?? ""}`);
+            }
+        } finally {
+            rmSync(identityFixture);
         }
         const familyMod = (await import(pathToFileURL(resolve(DIST, familyEntry!.import!)).href)) as Record<string, unknown>;
         expect(Object.keys(familyMod), "the contract entry must carry no runtime exports").toEqual([]);

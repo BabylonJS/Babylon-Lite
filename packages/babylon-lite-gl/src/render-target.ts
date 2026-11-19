@@ -29,7 +29,12 @@
 import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
-/** Presents a retained composition target without disturbing its contents. */
+/**
+ * Presents a retained composition target to the whole canvas without disturbing
+ * its contents; an active scissor rectangle does not clip the presentation.
+ * Presentation copies framebuffers, which WebGL2 forbids into a multisampled
+ * canvas, so it throws for an engine created with `antialias: true`.
+ */
 export function presentRenderTarget(target: GLRenderTarget): void {
     const engine = target._engine;
     if (engine._isLost || engine._disposed || target._disposed || !target.isReady) {
@@ -37,9 +42,24 @@ export function presentRenderTarget(target: GLRenderTarget): void {
     }
     restoreDefaultFramebuffer(engine);
     const gl = engine.gl;
+    // Queried with the canvas framebuffer bound; its sample count is fixed when the context is created.
+    engine._canvasSamples ??= Number(gl.getParameter(gl.SAMPLES));
+    if (engine._canvasSamples > 0) {
+        throw new Error("lite-gl: presentRenderTarget cannot copy into a multisampled canvas; create the engine without antialias");
+    }
+    const s = engine._state;
+    const scissorEnabled = s.scissorEnabled;
+    if (scissorEnabled !== 0) {
+        gl.disable(gl.SCISSOR_TEST);
+    }
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target._framebuffer);
     gl.blitFramebuffer(0, 0, target.width, target.height, 0, 0, engine.canvas.width, engine.canvas.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    if (scissorEnabled === 1) {
+        gl.enable(gl.SCISSOR_TEST);
+    } else {
+        s.scissorEnabled = 0;
+    }
 }
 
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */

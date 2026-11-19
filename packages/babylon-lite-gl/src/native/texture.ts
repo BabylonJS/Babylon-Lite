@@ -1,4 +1,5 @@
 import type { GLEngineContext } from "./context.js";
+import type { NativeResource, NativeResourceFields } from "./identity.js";
 import type { NativeHandle } from "./runtime.js";
 import type { GLRenderTarget } from "./render-target.js";
 
@@ -6,7 +7,7 @@ import type { GLRenderTarget } from "./render-target.js";
 export type NativeTextureHandle = Uint32Array<ArrayBuffer>;
 
 /** Sampled native image with explicit storage ownership. */
-export interface GLTexture {
+export interface GLTexture extends NativeResource<"texture"> {
     readonly width: number;
     readonly height: number;
     /** Whether the image is available for sampling. */
@@ -45,7 +46,7 @@ export function configureTexture(engine: GLEngineContext, texture: GLTexture, li
 
 /** @internal */
 export function makeTexture(engine: GLEngineContext, handle: NativeHandle, owned: boolean): GLTexture {
-    const texture: GLTexture = {
+    const fields: NativeResourceFields<GLTexture> = {
         width: engine._native.getTextureWidth(handle),
         height: engine._native.getTextureHeight(handle),
         isReady: true,
@@ -55,6 +56,7 @@ export function makeTexture(engine: GLEngineContext, handle: NativeHandle, owned
         _engine: engine,
         _disposed: false,
     };
+    const texture = fields as GLTexture;
     configureTexture(engine, texture);
     return texture;
 }
@@ -81,11 +83,20 @@ export interface GLRawTextureOptions extends GLTextureOptions {
 const GL_RGBA = 0x1908;
 const GL_UNSIGNED_BYTE = 0x1401;
 
+/** @internal Rejects a texture size the host cannot allocate, before any host call. */
+export function validateTextureSize(engine: GLEngineContext, width: number, height: number): void {
+    const max = engine.caps.maxTextureSize;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > max || height > max) {
+        throw new Error(`Native Lite GL texture size must be positive integers no larger than ${max}, got ${width}x${height}.`);
+    }
+}
+
 /** Creates an owned texture from raw pixels. Only `gl.RGBA` / `gl.UNSIGNED_BYTE` data is supported. */
 export function createRawTexture(engine: GLEngineContext, data: Uint8Array, width: number, height: number, options?: GLRawTextureOptions): GLTexture {
     if ((options?.format ?? GL_RGBA) !== GL_RGBA || (options?.type ?? GL_UNSIGNED_BYTE) !== GL_UNSIGNED_BYTE) {
         throw new Error("Native Lite GL raw textures support only RGBA / UNSIGNED_BYTE data.");
     }
+    validateTextureSize(engine, width, height);
     const handle = engine._native.createTexture();
     try {
         engine._native.loadRawTexture(handle, data, width, height, engine._runtime.Engine.TEXTURE_FORMAT_RGBA8, false, options?.invertY ?? false);
@@ -96,13 +107,17 @@ export function createRawTexture(engine: GLEngineContext, data: Uint8Array, widt
     }
 }
 
-/** Releases owned image storage, never a borrowed host texture. */
+/**
+ * Releases owned image storage, never a borrowed host texture. The storage
+ * outlives every command already recorded, so a frame may still draw with,
+ * or into, a texture it disposes.
+ */
 export function disposeTexture(texture: GLTexture): void {
     if (!texture._disposed) {
         texture._disposed = true;
         texture.isReady = false;
         if (texture._owned) {
-            texture._engine._native.deleteTexture(texture._handle);
+            texture._engine._commands.deleteTexture(texture._handle);
         }
     }
 }

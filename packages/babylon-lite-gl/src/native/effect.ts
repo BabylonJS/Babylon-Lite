@@ -1,18 +1,19 @@
 import type { GLEffectOptions } from "../family.js";
 import type { GLEngineContext } from "./context.js";
+import type { NativeResource, NativeResourceFields } from "./identity.js";
 import type { NativeHandle } from "./runtime.js";
 import type { GLTexture } from "./texture.js";
 
 /** Native shader program and its retained upload state. */
-export interface GLEffect {
+export interface GLEffect extends NativeResource<"effect"> {
     readonly name: string;
     /** @internal */
     readonly _program: NativeHandle;
-    /** @internal */
+    /** @internal Declared uniform and sampler names; tables keyed by name have no prototype. */
     readonly _uniforms: Record<string, NativeHandle | null>;
     /** @internal */
     readonly _values: Record<string, number[]>;
-    /** @internal */
+    /** @internal Bound texture per declared sampler. */
     readonly _textures: Record<string, NativeHandle | undefined>;
     /** @internal */
     readonly _samplers: readonly string[];
@@ -32,8 +33,8 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
     const program = engine._native.createProgram(withDefines(options.vertexSource, defines), withDefines(options.fragmentSource, defines));
     const names = [...options.uniformNames, ...options.samplerNames];
     const handles = engine._native.getUniforms(program, names);
-    const uniforms: GLEffect["_uniforms"] = {};
-    const values: GLEffect["_values"] = {};
+    const uniforms: GLEffect["_uniforms"] = Object.create(null);
+    const values: GLEffect["_values"] = Object.create(null);
     for (let index = 0; index < names.length; index++) {
         const name = names[index] as string;
         uniforms[name] = handles[index] ?? null;
@@ -41,15 +42,15 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
     }
     const attributeNames = [...(options.attributeNames ?? ["position"])];
     const locations = engine._native.getAttributes(program, attributeNames);
-    const attributes: GLEffect["_attributes"] = {};
+    const attributes: GLEffect["_attributes"] = Object.create(null);
     for (let index = 0; index < attributeNames.length; index++) {
         attributes[attributeNames[index] as string] = locations[index] ?? -1;
     }
-    const textures: GLEffect["_textures"] = {};
+    const textures: GLEffect["_textures"] = Object.create(null);
     for (const name of options.samplerNames) {
         textures[name] = undefined;
     }
-    return {
+    const fields: NativeResourceFields<GLEffect> = {
         name: options.name,
         _program: program,
         _uniforms: uniforms,
@@ -61,17 +62,46 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
         _engine: engine,
         _disposed: false,
     };
+    return fields as GLEffect;
 }
 
-/** Native compiles unversioned GLSL, so the WebGL2 `#version` header is dropped and defines lead the source. */
+/** Native compiles unversioned GLSL, so the WebGL2 `#version` directive is dropped and defines lead the source. */
 function withDefines(source: string, defines: string): string {
-    const body = source.startsWith("#version") ? source.slice(source.indexOf("\n") + 1) : source;
+    const version = findVersionDirective(source);
+    let body = source;
+    if (version >= 0) {
+        const end = source.indexOf("\n", version);
+        body = source.slice(0, version) + (end < 0 ? "" : source.slice(end + 1));
+    }
     return defines ? `${defines}\n${body}` : body;
 }
 
-/** Selects a program without reissuing an unchanged native binding. */
+/** Offset of a `#version` directive preceded only by whitespace and comments, or -1. */
+function findVersionDirective(source: string): number {
+    let index = 0;
+    while (index < source.length) {
+        const char = source[index] as string;
+        if (char === " " || char === "\t" || char === "\r" || char === "\n") {
+            index++;
+        } else if (source.startsWith("//", index)) {
+            const end = source.indexOf("\n", index);
+            index = end < 0 ? source.length : end + 1;
+        } else if (source.startsWith("/*", index)) {
+            const end = source.indexOf("*/", index + 2);
+            index = end < 0 ? source.length : end + 2;
+        } else {
+            return /^#[ \t]*version\b/.test(source.slice(index, index + 16)) ? index : -1;
+        }
+    }
+    return -1;
+}
+
+/** Selects a program without reissuing an unchanged native binding. No-op for a disposed effect or engine. */
 export function useEffect(effect: GLEffect): void {
     const engine = effect._engine;
+    if (effect._disposed || engine._disposed) {
+        return;
+    }
     if (engine._program !== effect._program) {
         const commands = engine._commands;
         commands.start(engine._runtime.Engine.COMMAND_SETPROGRAM);
@@ -108,9 +138,10 @@ export function disposeEffect(effect: GLEffect): void {
     }
 }
 
+/** Records a changed declared uniform of a live effect and reports whether to upload it. */
 function changed(effect: GLEffect, name: string, count: number, x: number, y = 0, z = 0, w = 0): boolean {
     const values = effect._values[name];
-    if (!values || !effect._uniforms[name]) {
+    if (!values || !effect._uniforms[name] || effect._disposed || effect._engine._disposed) {
         return false;
     }
     if (values.length === count && values[0] === x && (count < 2 || values[1] === y) && (count < 3 || values[2] === z) && (count < 4 || values[3] === w)) {
@@ -193,10 +224,10 @@ export function setEffectInt(effect: GLEffect, name: string, value: number): voi
     }
 }
 
-/** @internal */
+/** @internal Uploads a changed declared array uniform; a rejected upload records nothing and changes no cached value. */
 export function setUniformArray(effect: GLEffect, name: string, values: ArrayLike<number>, command: NativeHandle): void {
     const cached = effect._values[name];
-    if (!cached || !effect._uniforms[name]) {
+    if (!cached || !effect._uniforms[name] || effect._disposed || effect._engine._disposed) {
         return;
     }
     let differs = cached.length !== values.length;
@@ -206,13 +237,15 @@ export function setUniformArray(effect: GLEffect, name: string, values: ArrayLik
     if (!differs) {
         return;
     }
+    const commands = effect._engine._commands;
+    commands.checkArray(values.length);
+    uniformCommand(effect, name, command);
+    commands.array(values);
+    commands.finish();
     cached.length = values.length;
     for (let index = 0; index < values.length; index++) {
         cached[index] = values[index] as number;
     }
-    uniformCommand(effect, name, command);
-    effect._engine._commands.array(values);
-    effect._engine._commands.finish();
 }
 
 /** Uploads a changed matrix in column-major order. */
@@ -240,10 +273,17 @@ export function setEffectFloatArray4(effect: GLEffect, name: string, values: Arr
     setUniformArray(effect, name, values, effect._engine._runtime.Engine.COMMAND_SETFLOATARRAY4);
 }
 
-/** Binds a sampler without repeating an unchanged texture binding. */
+/**
+ * Binds a texture to a declared sampler without repeating an unchanged binding.
+ * No-op for an undeclared sampler or a disposed effect, texture or engine.
+ */
 export function setEffectTexture(effect: GLEffect, name: string, texture: GLTexture): void {
-    useEffect(effect);
     const engine = effect._engine;
+    const uniform = effect._uniforms[name];
+    if (!uniform || !(name in effect._textures) || effect._disposed || texture._disposed || engine._disposed) {
+        return;
+    }
+    useEffect(effect);
     // Native retains program uniforms, but sampler slots belong to the current frame's encoder.
     if (effect._textureGeneration !== engine._textureGeneration) {
         for (let index = 0; index < effect._samplers.length; index++) {
@@ -251,8 +291,7 @@ export function setEffectTexture(effect: GLEffect, name: string, texture: GLText
         }
         effect._textureGeneration = engine._textureGeneration;
     }
-    const uniform = effect._uniforms[name];
-    if (!uniform || effect._textures[name] === texture._handle) {
+    if (effect._textures[name] === texture._handle) {
         return;
     }
     const commands = engine._commands;

@@ -548,9 +548,9 @@ export function bindMeshVao(vao: GLMeshVao): void {
  * @param vao - The mesh VAO to draw.
  * @param instanceCount - Instance count for instanced draws. Default 0 (non-instanced).
  * @param indexStart - First index in the retained mesh.
- * @param indexCount - Number of indices; defaults to the complete mesh.
+ * @param indexCount - Number of indices; defaults to the indices from `indexStart` to the end of the mesh.
  */
-export function drawMesh(vao: GLMeshVao, instanceCount = 0, indexStart = 0, indexCount = vao._indexBuffer.count): void {
+export function drawMesh(vao: GLMeshVao, instanceCount = 0, indexStart = 0, indexCount = vao._indexBuffer.count - indexStart): void {
     const engine = vao._engine;
     if (engine._isLost || engine._disposed || vao._disposed) {
         return;

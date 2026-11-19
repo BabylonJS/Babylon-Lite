@@ -224,6 +224,9 @@ export interface GLEngineContext {
     /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
      * @internal */
     _gpuFrameTime?: GLPerfCounter;
+    /** Sample count of the canvas drawing buffer, queried lazily by `presentRenderTarget`.
+     * @internal */
+    _canvasSamples?: number;
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.

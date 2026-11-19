@@ -1,9 +1,10 @@
 import type { GLEngineContext } from "./context.js";
 import type { GLEffect } from "./effect.js";
+import type { NativeResource, NativeResourceFields } from "./identity.js";
 import type { NativeHandle } from "./runtime.js";
 
 /** Owned immutable float vertex storage. */
-export interface GLVertexBuffer {
+export interface GLVertexBuffer extends NativeResource<"vertexBuffer"> {
     readonly byteLength: number;
     /** @internal */
     readonly _handle: NativeHandle;
@@ -16,7 +17,7 @@ export interface GLVertexBuffer {
 }
 
 /** Owned immutable index storage. */
-export interface GLIndexBuffer {
+export interface GLIndexBuffer extends NativeResource<"indexBuffer"> {
     readonly count: number;
     /** @internal */
     readonly _handle: NativeHandle;
@@ -45,7 +46,7 @@ export interface GLMeshVertexBuffer {
 }
 
 /** Recorded composition geometry; the caller retains ownership of its buffers. */
-export interface GLMeshVao {
+export interface GLMeshVao extends NativeResource<"meshVao"> {
     readonly indexCount: number;
     /** @internal */
     readonly _handle: NativeHandle;
@@ -57,30 +58,40 @@ export interface GLMeshVao {
 
 /** Uploads immutable float vertex data. */
 export function createVertexBuffer(engine: GLEngineContext, data: Float32Array): GLVertexBuffer {
-    return {
+    const fields: NativeResourceFields<GLVertexBuffer> = {
         byteLength: data.byteLength,
         _handle: engine._native.createVertexBuffer(data.buffer, data.byteOffset, data.byteLength, false),
         _index: false,
         _engine: engine,
         _disposed: false,
     };
+    return fields as GLVertexBuffer;
 }
 
 /** Uploads immutable index data. */
 export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | Uint32Array): GLIndexBuffer {
-    return {
+    const fields: NativeResourceFields<GLIndexBuffer> = {
         count: data.length,
         _handle: engine._native.createIndexBuffer(data.buffer, data.byteOffset, data.byteLength, data.BYTES_PER_ELEMENT === 4, false),
         _index: true,
         _engine: engine,
         _disposed: false,
     };
+    return fields as GLIndexBuffer;
 }
 
-/** Records a mesh's attribute and index bindings independently of shader ownership. */
+/**
+ * Records a mesh's attribute and index bindings independently of shader
+ * ownership. Attribute names the effect did not declare are resolved from its
+ * program here, once.
+ */
 export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly GLMeshVertexBuffer[], indexBuffer: GLIndexBuffer, effect: GLEffect): GLMeshVao {
+    if (effect._disposed) {
+        throw new Error("Native Lite GL createMeshVao requires an effect that has not been disposed.");
+    }
     const handle = engine._native.createVertexArray();
-    const mesh: GLMeshVao = { indexCount: indexBuffer.count, _handle: handle, _engine: engine, _disposed: false };
+    const fields: NativeResourceFields<GLMeshVao> = { indexCount: indexBuffer.count, _handle: handle, _engine: engine, _disposed: false };
+    const mesh = fields as GLMeshVao;
     try {
         engine._native.recordIndexBuffer(handle, indexBuffer._handle);
         for (const binding of vertexBuffers) {
@@ -91,7 +102,7 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
                 }
             }
             for (const attribute of binding.attributes) {
-                const location = effect._attributes[attribute.name] ?? -1;
+                const location = getAttributeLocation(engine, effect, attribute.name);
                 if (location >= 0) {
                     engine._native.recordVertexBuffer(
                         handle,
@@ -114,9 +125,21 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
     }
 }
 
-/** Selects recorded geometry without repeating an unchanged native binding. */
+function getAttributeLocation(engine: GLEngineContext, effect: GLEffect, name: string): number {
+    let location = effect._attributes[name];
+    if (location === undefined) {
+        location = engine._native.getAttributes(effect._program, [name])[0] ?? -1;
+        effect._attributes[name] = location;
+    }
+    return location;
+}
+
+/** Selects recorded geometry without repeating an unchanged native binding. No-op for disposed geometry or engine. */
 export function bindMeshVao(mesh: GLMeshVao): void {
     const engine = mesh._engine;
+    if (mesh._disposed || engine._disposed) {
+        return;
+    }
     if (engine._vertexArray !== mesh._handle) {
         const commands = engine._commands;
         commands.start(engine._runtime.Engine.COMMAND_BINDVERTEXARRAY);
@@ -126,10 +149,14 @@ export function bindMeshVao(mesh: GLMeshVao): void {
     }
 }
 
-/** Draws a triangle range from recorded composition geometry. Native composition does not instance. */
-export function drawMesh(mesh: GLMeshVao, _instanceCount: 0 = 0, indexStart = 0, indexCount = mesh.indexCount): void {
+/**
+ * Draws a triangle range from recorded composition geometry; the range defaults
+ * to the indices from `indexStart` to the end. Native composition does not
+ * instance. Draws nothing while the scissor rectangle is empty.
+ */
+export function drawMesh(mesh: GLMeshVao, _instanceCount: 0 = 0, indexStart = 0, indexCount = mesh.indexCount - indexStart): void {
     const engine = mesh._engine;
-    if (engine._disposed || mesh._disposed) {
+    if (engine._disposed || mesh._disposed || engine._scissorEmpty) {
         return;
     }
     bindMeshVao(mesh);

@@ -52,7 +52,9 @@ describe("lite-gl mesh: buffer creation", () => {
         mock.clear();
         drawMesh(vao, 0, 3, 3);
         drawMesh(vao, 0, 0, 3);
+        drawMesh(vao, 0, 2);
         expect(callsNamed(mock, "drawElements")[0]?.args).toEqual([engine.gl.TRIANGLES, 3, wide ? engine.gl.UNSIGNED_INT : engine.gl.UNSIGNED_SHORT, wide ? 12 : 6]);
+        expect(callsNamed(mock, "drawElements")[2]?.args).toEqual([engine.gl.TRIANGLES, 4, wide ? engine.gl.UNSIGNED_INT : engine.gl.UNSIGNED_SHORT, wide ? 8 : 4]);
         expect(mock.count("vertexAttribPointer")).toBe(0);
         disposeGLEngine(engine);
     });
