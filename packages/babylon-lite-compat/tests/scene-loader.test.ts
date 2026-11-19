@@ -239,7 +239,7 @@ describe("AssetContainer.addAllToScene", () => {
         expect(children).toHaveBeenCalledTimes(collectionReadCount);
     });
 
-    it("reflects detached loaded meshes without rebuilding animation target wrappers", () => {
+    it("reflects detached loaded meshes", () => {
         const child = { name: "Cube", children: [], parent: null as object | null, _gpu: {}, material: {} };
         const root = { name: "__root__", children: [child], parent: null as object | null };
         child.parent = root;
