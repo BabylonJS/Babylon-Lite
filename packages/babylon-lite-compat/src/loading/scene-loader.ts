@@ -144,7 +144,7 @@ export class AssetContainer {
     }
 
     private _collectAnimationTargets(): void {
-        if (!this._animationTargetsCollected) {
+        if (!this._disposed && !this._animationTargetsCollected) {
             const scene = this._scene ?? this._destinationScene;
             collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
             this._animationTargetsCollected = true;

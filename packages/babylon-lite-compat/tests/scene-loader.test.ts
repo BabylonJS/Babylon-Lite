@@ -592,11 +592,31 @@ describe("AssetContainer.addAllToScene", () => {
     it("does not create wrappers after disposing an unread asset container", () => {
         const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
         const root = { name: "__root__", children: [mesh] };
-        const lite = { entities: [root] } as unknown as LiteAssetContainer;
-        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: mesh, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const lite = { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh], new Scene(new NullEngine()));
+        const retainedGroup = container.animationGroups[0]!;
 
         container.dispose();
 
+        expect(retainedGroup.targetedAnimations).toHaveLength(1);
         expect(container.meshes).toEqual([]);
     });
 });
