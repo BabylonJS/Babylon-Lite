@@ -4,11 +4,11 @@ import { evaluateAnimationTrack, getAnimationGroupTracks, setAnimationTrackKeys 
 import { createAnimationGroups, goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
-import { INTERP_CUBICSPLINE, INTERP_LINEAR, PATH_POINTER, PATH_WEIGHTS } from "../../../packages/babylon-lite/src/animation/types";
+import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_WEIGHTS } from "../../../packages/babylon-lite/src/animation/types";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { parseAnimationData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-animation";
 import { createSceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
-import type { AnimationClip, GltfAnimationData } from "../../../packages/babylon-lite/src/animation/types";
+import type { AnimationClip, AnimationSampler, GltfAnimationData } from "../../../packages/babylon-lite/src/animation/types";
 
 function propertyGroup() {
     const manager = createAnimationManager();
@@ -30,7 +30,7 @@ function propertyGroup() {
 }
 
 describe("animation curve editing", () => {
-    it("detaches edited property tracks without changing ranges, and snapshots are detached", () => {
+    it("preserves shared property clips by default and detaches only when requested", () => {
         const { manager, target, clip, group } = propertyGroup();
         const secondTarget = { value: 0 };
         const second = createPropertyAnimationGroup(manager, secondTarget, clip, { loop: false, fromTime: 0.25, toTime: 0.75 });
@@ -43,16 +43,17 @@ describe("animation curve editing", () => {
             { time: 0.5, value: [8] },
             { time: 1, value: [10] },
         ]);
-        expect(getAnimationGroupTracks(second)[0]!.keys).toHaveLength(2);
+        expect(getAnimationGroupTracks(second)[0]!.keys).toHaveLength(3);
         expect(group.duration).toBe(1);
         updateAnimationManager(manager, 250);
         expect(target.value).toBeCloseTo(5);
-        expect(secondTarget.value).toBeCloseTo(5);
+        expect(secondTarget.value).toBeCloseTo(8);
         goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBeCloseTo(8);
-        setAnimationTrackKeys(group, 0, [{ time: 0, value: [7] }]);
+        setAnimationTrackKeys(group, 0, [{ time: 0, value: [7] }], { detachPropertyTrack: true });
         goToFrame(group, group.frameRate! / 2);
         expect(target.value).toBe(7);
+        expect(getAnimationGroupTracks(second)[0]!.keys).toHaveLength(3);
     });
 
     it("exposes property easing and evaluates through the runtime sampler path", () => {
@@ -73,6 +74,46 @@ describe("animation curve editing", () => {
 
         expect(getAnimationGroupTracks(group)[0]!.easing).toBe(easing);
         expect(evaluateAnimationTrack(group, 0, 0.5)).toEqual([2]);
+    });
+
+    it("uses the property evaluator for uneased STEP boundaries", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("step", [
+            {
+                path: "value",
+                interpolation: "step",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 0.1, value: 1 },
+                    { time: 0.2, value: 2 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        expect(group._propertyMixer![0][0]!.sampler.interpolation).toBe(INTERP_STEP);
+
+        goToFrame(group, 0.1 * group.frameRate!);
+        expect(evaluateAnimationTrack(group, 0, 0.1)).toEqual([target.value]);
+        expect(target.value).toBe(1);
+    });
+
+    it("evaluates one glTF track without inspecting unrelated channels", () => {
+        const validSampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR } satisfies AnimationSampler;
+        const clip: AnimationClip = {
+            name: "direct",
+            duration: 1,
+            frameRate: 60,
+            samplers: [validSampler],
+            channels: [
+                { samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS },
+                { samplerIdx: 99, nodeIdx: 0, path: PATH_WEIGHTS },
+            ],
+        };
+        const group = createAnimationGroups({ clips: [clip], nodes: [], skeletons: [], morphBindings: [], nodeTargets: [], excludedNodeIndices: new Set(), nodeNames: [] })[0]!;
+
+        expect(evaluateAnimationTrack(group, 0, 0.5)).toEqual([0.5]);
+        expect(() => getAnimationGroupTracks(group)).toThrow(/invalid channel/);
     });
 
     it("edits real parsed glTF data without mutating aliased accessors", () => {
@@ -151,7 +192,7 @@ describe("animation curve editing", () => {
     });
 
     it("reports samplers referenced by multiple glTF channels", () => {
-        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR };
+        const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR } satisfies AnimationSampler;
         const clip: AnimationClip = {
             name: "shared",
             duration: 1,

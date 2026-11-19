@@ -110,7 +110,7 @@ export class USDFileLoader {
                 requireBinary(data),
                 toLiteUsdOptions(resolveUsdOptions({ ...this._options, rootFileName: this._options.rootFileName ?? fileName }), controller.signal, onProgress)
             );
-            const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes);
+            const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes, scene);
             try {
                 controller.signal.throwIfAborted();
                 if (add) {

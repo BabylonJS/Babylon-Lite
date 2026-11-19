@@ -6,7 +6,7 @@ import type { IAnimationKey, IEasingFunction } from "../src/index";
 import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
 import type { AnimationGroup as LiteAnimationGroup } from "babylon-lite";
-import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
+import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 describe("Animation", () => {
     it("exposes Babylon.js data-type and loop-mode constants", () => {
@@ -15,15 +15,15 @@ describe("Animation", () => {
         expect(Animation.ANIMATIONLOOPMODE_CYCLE).toBe(1);
     });
 
-    it("preserves Babylon.js key order and reports the highest trailing frame", () => {
+    it("sorts Babylon.js keys by frame and reports the highest frame", () => {
         const anim = new Animation("a", "position.x", 60);
         const keys = [
-            { frame: 0, value: 0 },
             { frame: 30, value: 5 },
+            { frame: 0, value: 0 },
         ];
         anim.setKeys(keys);
         expect(anim.getKeys()).not.toBe(keys);
-        expect(anim.getKeys()).toEqual(keys);
+        expect(anim.getKeys().map((key) => key.frame)).toEqual([0, 30]);
         expect(anim.getHighestFrame()).toBe(30);
     });
 
@@ -279,7 +279,7 @@ describe("AnimationGroup", () => {
         expect(targeted.getClassName()).toBe("TargetedAnimation");
         expect(targeted.parent).toBe(group);
         expect(targeted.target).toBe(wrappedTarget);
-        expect(targeted.animation.targetProperty).toBe("position");
+        expect(targeted.animation.targetProperty).toBe("translation");
         expect((targeted.animation.getKeys()[1]!.value as Vector3).asArray()).toEqual([1, 2, 3]);
 
         targeted.animation.setKeys([
@@ -293,6 +293,18 @@ describe("AnimationGroup", () => {
             [6, 5, 4],
         ]);
         expect((targeted.animation.evaluate(60) as Vector3).asArray()).toEqual([6, 5, 4]);
+        const retained = [
+            { frame: 60, value: new Vector3(9, 8, 7) },
+            { frame: 0, value: new Vector3(3, 2, 1) },
+        ];
+        targeted.animation.setKeys(retained, true);
+        retained[0]!.value = new Vector3(100, 100, 100);
+        targeted.animation.getKeys()[0]!.value = new Vector3(200, 200, 200);
+        expect(targeted.animation.getKeys().map((key) => animationComponentsForTest(key.value))).toEqual([
+            [3, 2, 1],
+            [9, 8, 7],
+        ]);
+        expect((targeted.animation.evaluate(60) as Vector3).asArray()).toEqual([9, 8, 7]);
         const editedKeys = targeted.animation.getKeys();
         expect(() =>
             targeted.animation.setKeys([
@@ -300,7 +312,7 @@ describe("AnimationGroup", () => {
                 { frame: 60, value: new Vector3(6, 5, 4), inTangent: new Vector3(0, 0, 0), outTangent: new Vector3(0, 0, 0) },
             ])
         ).toThrow(/cannot add tangents/);
-        expect(targeted.animation.getKeys()).toBe(editedKeys);
+        expect(targeted.animation.getKeys()).toEqual(editedKeys);
     });
 
     it("evaluates loaded cubic tracks with Lite Hermite interpolation", () => {
@@ -355,6 +367,73 @@ describe("AnimationGroup", () => {
         expect(animation.getEasingFunction()!.ease).toBe(easing);
     });
 
+    it("keeps colliding manual property names out of glTF path translation", () => {
+        const target = { weights: 0, pointer: 0 };
+        const lite = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [
+                { target, path: "weights" },
+                { target, path: "pointer" },
+            ],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 2]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                ],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+
+        const animations = AnimationGroup._fromLite(lite, {} as never).targetedAnimations.map((targeted) => targeted.animation);
+        expect(animations.map((animation) => animation.targetProperty)).toEqual(["weights", "pointer"]);
+        animations[0]!.setKeys([
+            { frame: 60, value: 3 },
+            { frame: 0, value: 1 },
+        ]);
+        expect(animations[0]!.evaluate(30)).toBe(2);
+    });
+
+    it("rejects loaded per-key easing without mutating snapshots", () => {
+        const lite = {
+            name: "loaded",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+        const before = animation.getKeys();
+
+        expect(() =>
+            animation.setKeys([
+                { frame: 0, value: 0, easingFunction: { ease: (gradient) => gradient } },
+                { frame: 60, value: 1 },
+            ])
+        ).toThrow(/per-key easing/);
+        expect(animation.getKeys()).toEqual(before);
+    });
+
     it("rejects tangent-mode changes and shared glTF samplers without mutating keys", () => {
         const sampler = { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR };
         const lite = {
@@ -390,7 +469,7 @@ describe("AnimationGroup", () => {
         const originalKeys = animation.getKeys();
 
         expect(() => animation.setKeys([{ frame: 0, value: 0, inTangent: 0, outTangent: 0 }])).toThrow(/referenced by multiple channels/);
-        expect(animation.getKeys()).toBe(originalKeys);
+        expect(animation.getKeys()).toEqual(originalKeys);
         expect(Array.from(sampler.output)).toEqual([0, 1]);
     });
 
@@ -442,7 +521,7 @@ describe("AnimationGroup", () => {
                 { frame: 60, value: 3 },
             ])
         ).toThrow(/preserve STEP interpolation/);
-        expect(animation.getKeys()).toBe(originalKeys);
+        expect(animation.getKeys()).toEqual(originalKeys);
         expect(Array.from(sampler.output)).toEqual([0, 1]);
     });
 
@@ -463,7 +542,7 @@ describe("AnimationGroup", () => {
             loopAnimation: true,
             weight: 1,
             _stopped: false,
-            _propertyMixer: [[{ sampler, stride: 2, quaternion: false, writer: () => undefined, mixTarget: () => ({}), mixProperty: "weights" }], 60, 0, 1],
+            _gltfMixer: [{ name: "morph", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
         } as unknown as LiteAnimationGroup;
         const targets = [{ influence: 0 }, { influence: 0 }];
         const group = AnimationGroup._fromLite(lite, {} as never, undefined, (_target, path, componentIndex) => {
@@ -495,7 +574,7 @@ describe("AnimationGroup", () => {
             loopAnimation: true,
             weight: 1,
             _stopped: false,
-            _propertyMixer: [[{ sampler, stride: 1, quaternion: false, writer: () => undefined, mixTarget: () => ({}), mixProperty: "pointer" }], 60, 0, 0],
+            _gltfMixer: [{ name: "pointer", duration: 0, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: -1, path: PATH_POINTER }] }, [], []],
         } as unknown as LiteAnimationGroup;
         const group = AnimationGroup._fromLite(lite, {} as never);
 

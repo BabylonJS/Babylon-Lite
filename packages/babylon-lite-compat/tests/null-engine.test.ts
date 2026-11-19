@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { Animatable, Animation, AnimationKeyInterpolation } from "../src/animations/animation";
+import { Animatable, Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
 import { CubicEase, QuadraticEase } from "../src/animations/easing";
 import { Color3, Color4 } from "../src/math/color";
 import { Quaternion } from "../src/math/quaternion";
@@ -10,6 +10,8 @@ import { Vector2, Vector3 } from "../src/math/vector";
 import { LiteCompatError } from "../src/error";
 import { MeshBuilder } from "../src/meshes/meshes";
 import { stepScene } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup } from "babylon-lite";
+import { INTERP_CUBICSPLINE, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 /**
  * The headless `NullEngine` runs scene logic with no GPU device — a deviceless
@@ -174,6 +176,40 @@ describe("NullEngine (headless)", () => {
         scene._tick(500);
         expect(compatEvaluate).toHaveBeenCalled();
         expect(target.position.x).toBe(-2);
+    });
+
+    it("replays loaded cubic animations through compat evaluation without linearizing them", () => {
+        const sampler = {
+            input: new Float32Array([0, 1]),
+            output: new Float32Array([0, 0, 2, 0, 1, 0]),
+            interpolation: INTERP_CUBICSPLINE,
+        };
+        const lite = {
+            name: "cubic",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: {}, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [{ name: "cubic", duration: 1, frameRate: 60, samplers: [sampler], channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }] }, [], []],
+        } as unknown as LiteAnimationGroup;
+        const animation = AnimationGroup._fromLite(lite, {} as never).targetedAnimations[0]!.animation;
+        const target = { value: 0 };
+        const scene = new Scene(new NullEngine());
+
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 60, false);
+        expect(animation.targetProperty).toBe("value");
+        expect((animatable as unknown as { _fallbackAnimations: Animation[] })._fallbackAnimations).toEqual([animation]);
+        animatable.goToFrame(30);
+
+        expect(animatable._lite).toBeUndefined();
+        expect(animatable._nativeFallbackReason).toMatch(/cubic-spline tangents/);
+        expect(target.value).toBeCloseTo(animation.evaluate(30) as number);
+        expect(target.value).toBeCloseTo(0.75);
     });
 
     it("delegates attached Vector2, Vector3, and Quaternion animations to Lite", () => {

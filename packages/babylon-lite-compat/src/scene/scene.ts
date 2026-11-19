@@ -178,13 +178,16 @@ export class Scene extends AbstractScene {
     public _wrapAnimationGroup(
         lite: LiteAnimationGroup,
         targetMapper: (target: object | undefined, path: string, componentIndex?: number) => readonly unknown[] = (target, path, componentIndex) =>
-            this._wrapAnimationTargets(target, path, componentIndex)
+            this._wrapAnimationTargets(target, path, componentIndex),
+        retained?: AnimationGroup
     ): AnimationGroup {
-        let wrapper = this._animationGroupCache.get(lite);
+        let wrapper = retained ?? this._animationGroupCache.get(lite);
         if (!wrapper) {
             wrapper = AnimationGroup._fromLite(lite, this._engine._lite, this, targetMapper);
-            this._animationGroupCache.set(lite, wrapper);
+        } else if (retained) {
+            wrapper._rebindLiteHost(this._engine._lite, this, targetMapper);
         }
+        this._animationGroupCache.set(lite, wrapper);
         return wrapper;
     }
 
@@ -197,17 +200,13 @@ export class Scene extends AbstractScene {
             return [this._meshWrappers.get(target) ?? target];
         }
         const result: unknown[] = [];
-        const visit = (node: object): void => {
+        for (const node of (target as { children?: object[] }).children ?? []) {
             const wrapper = this._meshWrappers.get(node) as (Mesh & { morphTargetManager?: { getTarget(index: number): unknown } | null }) | undefined;
             const morphTarget = wrapper?.morphTargetManager?.getTarget(componentIndex);
             if (morphTarget) {
                 result.push(morphTarget);
             }
-            for (const child of (node as { children?: object[] }).children ?? []) {
-                visit(child);
-            }
-        };
-        visit(target);
+        }
         return result.length > 0 ? result : [this._meshWrappers.get(target) ?? target];
     }
 

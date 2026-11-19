@@ -888,7 +888,7 @@ export {
 export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimationGroup } from "./animation/animation-group-task.js";
 export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
 export { evaluateAnimationTrack, getAnimationGroupTracks, setAnimationTrackKeys } from "./animation/animation-curve-editing.js";
-export type { AnimationCurveKey, AnimationCurveTrack } from "./animation/animation-curve-editing.js";
+export type { AnimationCurveKey, AnimationCurveTrack, SetAnimationTrackKeysOptions } from "./animation/animation-curve-editing.js";
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export { adoptMeshMorphTargets, releaseMorphTargets, retainMorphTargets, shareMeshMorphTargets, setMorphTargetWeight } from "./morph/compat-morph-targets.js";

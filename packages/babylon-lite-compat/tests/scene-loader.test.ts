@@ -29,6 +29,7 @@ vi.mock("babylon-lite", async (importActual) => {
 
 import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
+import { INTERP_LINEAR, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
@@ -87,6 +88,113 @@ describe("AssetContainer.addAllToScene", () => {
 
         expect(scene.animationGroups[0]).toBe(fromContainer);
         expect(container.animationGroups[0]).toBe(fromContainer);
+    });
+
+    it("rebinds a retained detached animation wrapper when adopted by another scene", () => {
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const liteGroup = {
+            name: "idle",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+        } as LiteAnimationGroup;
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+        const retained = container.animationGroups[0]!;
+        const oldBlend = vi.spyOn(loadScene, "_enableLoadedBlend");
+        const adoptedBlend = vi.spyOn(adoptedScene, "_enableLoadedBlend");
+
+        container.addAllToScene(adoptedScene);
+        (adoptedScene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = [liteGroup];
+        retained.weight = 0.5;
+
+        expect(container.animationGroups[0]).toBe(retained);
+        expect(adoptedScene.animationGroups[0]).toBe(retained);
+        expect(oldBlend).not.toHaveBeenCalled();
+        expect(adoptedBlend).toHaveBeenCalledOnce();
+    });
+
+    it("resolves morph targets only from a glTF node's directly bound primitives", () => {
+        const directPrimitive = {};
+        const childPrimitive = {};
+        const authoredChild = { children: [childPrimitive] };
+        const target = { children: [authoredChild, directPrimitive] };
+        const directMorph = {};
+        const childMorph = {};
+        const liteGroup = {
+            name: "morph",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target, path: "weights" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [
+                {
+                    name: "morph",
+                    duration: 1,
+                    frameRate: 60,
+                    samplers: [{ input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }],
+                    channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }],
+                },
+                [],
+                [],
+            ],
+        } as unknown as LiteAnimationGroup;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+        const registry = (container as unknown as { _meshRegistry: Map<object, { morphTargetManager?: { getTarget(index: number): object } }> })._meshRegistry;
+        registry.set(directPrimitive, { morphTargetManager: { getTarget: () => directMorph } });
+        registry.set(childPrimitive, { morphTargetManager: { getTarget: () => childMorph } });
+        const sceneRegistry = (scene as unknown as { _meshWrappers: Map<object, { morphTargetManager?: { getTarget(index: number): object } }> })._meshWrappers;
+        sceneRegistry.set(directPrimitive, { morphTargetManager: { getTarget: () => directMorph } });
+        sceneRegistry.set(childPrimitive, { morphTargetManager: { getTarget: () => childMorph } });
+
+        expect(container.animationGroups[0]!.targetedAnimations[0]!.target).toBe(directMorph);
+        expect(scene._wrapAnimationTargets(target, "weights", 0)).toEqual([directMorph]);
+    });
+
+    it("does not collect meshes until loaded animation target resolution needs them", () => {
+        const children = vi.fn(() => [] as object[]);
+        const root = {} as { children?: object[] };
+        Object.defineProperty(root, "children", { get: children });
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: root, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const container = new AssetContainer(
+            { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer,
+            undefined,
+            undefined,
+            new Scene(new NullEngine())
+        );
+
+        expect(container.animationGroups).toHaveLength(1);
+        expect(children).not.toHaveBeenCalled();
+        expect(container.animationGroups[0]!.targetedAnimations).toHaveLength(1);
+        expect(children).toHaveBeenCalled();
     });
 
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {

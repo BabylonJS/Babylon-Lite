@@ -20,7 +20,7 @@ import {
     removeFromScene,
     setParent as setLiteParent,
 } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
@@ -66,6 +66,8 @@ export class AssetContainer {
 
     /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
     private readonly _meshRegistry: LoadedMeshRegistry = new Map();
+    /** @internal Retained animation wrappers, including while this container is detached. */
+    private readonly _animationGroupRegistry = new Map<LiteAnimationGroup, AnimationGroup>();
     /** @internal The compat scene this container was added to, if any (drives registry membership). */
     private _scene: Scene | undefined;
     /** @internal Destination supplied at load time for later instantiation, even while the container stays detached. */
@@ -88,12 +90,20 @@ export class AssetContainer {
     public get animationGroups(): AnimationGroup[] {
         const scene = this._scene ?? this._destinationScene;
         if (!scene) {
-            return [];
+            if ((this._lite.animationGroups?.length ?? 0) === 0) {
+                return [];
+            }
+            return unsupported(
+                "AssetContainer.animationGroups",
+                "A detached animated container needs its destination Scene so loaded AnimationGroup wrappers can bind playback, target identity, and blending to the correct engine."
+            );
         }
-        this._collectMeshes();
-        return (this._lite.animationGroups ?? []).map((lite) =>
-            scene._wrapAnimationGroup(lite, (target, path, componentIndex) => this._animationTargets(target, path, componentIndex))
-        );
+        return (this._lite.animationGroups ?? []).map((lite) => {
+            const retained = this._animationGroupRegistry.get(lite);
+            const wrapper = scene._wrapAnimationGroup(lite, (target, path, componentIndex) => this._animationTargets(target, path, componentIndex), retained);
+            this._animationGroupRegistry.set(lite, wrapper);
+            return wrapper;
+        });
     }
 
     /** @internal Map one Lite animation target to canonical node or morph-target wrappers. */
@@ -101,20 +111,17 @@ export class AssetContainer {
         if (!target) {
             return [target];
         }
+        this._collectMeshes();
         if (path !== "weights" || componentIndex === undefined) {
             return [this._meshRegistry.get(target) ?? target];
         }
         const result: unknown[] = [];
-        const visit = (node: object): void => {
+        for (const node of (target as { children?: object[] }).children ?? []) {
             const morphTarget = this._meshRegistry.get(node)?.morphTargetManager?.getTarget(componentIndex);
             if (morphTarget) {
                 result.push(morphTarget);
             }
-            for (const child of (node as { children?: object[] }).children ?? []) {
-                visit(child);
-            }
-        };
-        visit(target);
+        }
         return result.length > 0 ? result : [this._meshRegistry.get(target) ?? target];
     }
 
@@ -216,6 +223,9 @@ export class AssetContainer {
             this._sceneDisposeObserver = undefined;
         }
         this._scene = scene;
+        for (const [lite, wrapper] of this._animationGroupRegistry) {
+            scene._wrapAnimationGroup(lite, (target, path, componentIndex) => this._animationTargets(target, path, componentIndex), wrapper);
+        }
         for (const skeleton of this.skeletons) {
             scene._wrapSkeleton(skeleton._lite, skeleton);
         }

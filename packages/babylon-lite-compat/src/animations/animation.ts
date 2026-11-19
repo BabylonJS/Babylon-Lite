@@ -63,6 +63,14 @@ export interface IAnimationKey {
     easingFunction?: IEasingFunction;
 }
 
+interface LoadedTrackBinding {
+    readonly group: LiteAnimationGroup;
+    readonly trackIndex: number;
+    readonly componentIndex?: number;
+    readonly source: AnimationCurveTrack["source"];
+    readonly interpolation: AnimationCurveTrack["interpolation"];
+}
+
 /**
  * Babylon.js `AnimationKeyInterpolation` — how the segment starting at a key is
  * interpolated. `STEP` holds the key's value until the next key (no blend).
@@ -103,7 +111,7 @@ export class Animation {
     private _keys: IAnimationKey[] = [];
     private _easingFunction: IEasingFunction | null = null;
     /** @internal Loaded Lite sampler edited by this Babylon.js-shaped animation. */
-    private _liteTrack?: { group: LiteAnimationGroup; trackIndex: number; componentIndex?: number };
+    private _liteTrack?: LoadedTrackBinding;
 
     public constructor(
         public name: string,
@@ -115,25 +123,33 @@ export class Animation {
 
     public setKeys(keys: IAnimationKey[], dontClone = false, cloneKeys = false): void {
         const nextKeys = dontClone ? keys : cloneKeys ? keys.map(cloneAnimationKey) : keys.slice();
+        nextKeys.sort((left, right) => left.frame - right.frame);
         if (this._liteTrack) {
             setLoadedTrackKeys(this, this._liteTrack, nextKeys);
+            this._keys = loadedTrackKeys(this._liteTrack, this.framePerSecond, this.dataType);
+            return;
         }
         this._keys = nextKeys;
     }
 
     public getKeys(): IAnimationKey[] {
-        return this._keys;
+        return this._liteTrack ? this._keys.map(cloneAnimationKey) : this._keys;
     }
 
     /** @internal Build a Babylon.js animation over one Lite sampler (or one morph-weight component). */
     public static _fromLiteTrack(group: LiteAnimationGroup, trackIndex: number, track: AnimationCurveTrack, componentIndex?: number): Animation {
-        const targetProperty = liteTargetProperty(track.target.path);
+        const targetProperty = liteTargetProperty(track.target.path, track.source);
         const dataType = componentIndex !== undefined ? AnimationTypes.ANIMATIONTYPE_FLOAT : liteTrackDataType(track, targetProperty);
         const animation = new Animation(`${group.name}_channel${trackIndex}_${componentIndex ?? 0}`, targetProperty, group.frameRate ?? 60, dataType);
-        animation._liteTrack = { group, trackIndex, componentIndex };
+        animation._liteTrack = { group, trackIndex, componentIndex, source: track.source, interpolation: track.interpolation };
         animation._keys = liteTrackKeys(track, animation.framePerSecond, dataType, componentIndex);
         animation._easingFunction = track.easing ? { ease: track.easing } : null;
         return animation;
+    }
+
+    /** @internal Reason this loaded track must use compat evaluation when replayed directly. */
+    public _nativePlaybackFallbackReason(): string | undefined {
+        return this._liteTrack?.interpolation === "cubicSpline" ? `native property animation track "${this.targetProperty}" cannot preserve cubic-spline tangents` : undefined;
     }
 
     public getHighestFrame(): number {
@@ -223,7 +239,10 @@ function cloneAnimationKey(key: IAnimationKey): IAnimationKey {
     };
 }
 
-function liteTargetProperty(path: string): string {
+function liteTargetProperty(path: string, source: AnimationCurveTrack["source"]): string {
+    if (source !== "gltf") {
+        return path;
+    }
     return path === "translation" ? "position" : path === "rotation" ? "rotationQuaternion" : path === "scale" ? "scaling" : path === "weights" ? "influence" : path;
 }
 
@@ -290,7 +309,15 @@ function toLiteComponents(value: AnimationValue, componentCount: number): number
     return components.slice();
 }
 
-function setLoadedTrackKeys(animation: Animation, binding: { group: LiteAnimationGroup; trackIndex: number; componentIndex?: number }, keys: readonly IAnimationKey[]): void {
+function loadedTrackKeys(binding: LoadedTrackBinding, framePerSecond: number, dataType: number): IAnimationKey[] {
+    const track = getAnimationGroupTracks(binding.group)[binding.trackIndex];
+    if (!track) {
+        throw new Error("Animation track index is out of range");
+    }
+    return liteTrackKeys(track, framePerSecond, dataType, binding.componentIndex);
+}
+
+function setLoadedTrackKeys(animation: Animation, binding: LoadedTrackBinding, keys: readonly IAnimationKey[]): void {
     const track = getAnimationGroupTracks(binding.group)[binding.trackIndex];
     if (!track) {
         throw new Error("Animation track index is out of range");
@@ -308,6 +335,9 @@ function setLoadedTrackKeys(animation: Animation, binding: { group: LiteAnimatio
     }
     if (!cubic && keys.some((key) => key.inTangent !== undefined || key.outTangent !== undefined)) {
         unsupported("Animation.setKeys", "Loaded linear and STEP tracks cannot add tangents because Lite's key editor does not change sampler interpolation modes.");
+    }
+    if (keys.some((key) => key.easingFunction !== undefined)) {
+        unsupported("Animation.setKeys", "Loaded per-key easing cannot be forwarded because Lite runtime tracks expose only one track-level easing function.");
     }
     if (
         componentIndex !== undefined &&
@@ -342,7 +372,7 @@ function setLoadedTrackKeys(animation: Animation, binding: { group: LiteAnimatio
             outTangent: cubic ? merge(key.outTangent!, source?.outTangent, true) : undefined,
         };
     });
-    setAnimationTrackKeys(binding.group, binding.trackIndex, converted);
+    setAnimationTrackKeys(binding.group, binding.trackIndex, converted, { detachPropertyTrack: true });
 }
 
 function interpolateValue(a: AnimationValue, b: AnimationValue, t: number, dataType: number): AnimationValue {
@@ -952,6 +982,10 @@ function getGlobalNativeFallbackReason(animations: readonly Animation[], from: n
 }
 
 function getTrackNativeFallbackReason(target: unknown, animation: Animation, from: number, to: number): string | undefined {
+    const loadedReason = animation._nativePlaybackFallbackReason();
+    if (loadedReason) {
+        return loadedReason;
+    }
     if (animation.loopMode !== AnimationLoopModes.ANIMATIONLOOPMODE_CYCLE) {
         return `native property animation track "${animation.targetProperty}" requires cycle loop mode`;
     }
@@ -1243,22 +1277,34 @@ export class AnimationGroup {
         return group;
     }
 
+    /** @internal Rebind a retained loaded wrapper when its detached container is adopted. */
+    public _rebindLiteHost(
+        engine: EngineContext,
+        blendHost: LoadedAnimationBlendHost,
+        targetMapper: (target: object | undefined, path: string, componentIndex?: number) => readonly unknown[]
+    ): void {
+        this._engine = engine;
+        this._blendHost = blendHost;
+        this._targetMapper = targetMapper;
+    }
+
     /** Babylon.js `AnimationGroup.targetedAnimations`. */
     public get targetedAnimations(): TargetedAnimation[] {
         if (this._lite && !this._loadedTargetsInitialized) {
             const adapted: TargetedAnimation[] = [];
             for (const [trackIndex, track] of getAnimationGroupTracks(this._lite).entries()) {
-                if (track.target.path === "pointer") {
+                if (track.source === "gltf" && track.target.path === "pointer") {
                     unsupported(
                         "AnimationGroup.targetedAnimations",
                         "Lite retains KHR_animation_pointer sampler values but does not publish the concrete Babylon.js wrapper target or exact property path needed to construct a BJS TargetedAnimation."
                     );
                 }
-                const componentCount = track.target.path === "weights" ? track.componentCount : 1;
+                const morphTrack = track.source === "gltf" && track.target.path === "weights";
+                const componentCount = morphTrack ? track.componentCount : 1;
                 for (let componentIndex = 0; componentIndex < componentCount; componentIndex++) {
-                    const liteComponentIndex = track.target.path === "weights" ? componentIndex : undefined;
+                    const liteComponentIndex = morphTrack ? componentIndex : undefined;
                     const targets = this._targetMapper?.(track.target.target, track.target.path, liteComponentIndex) ?? [track.target.target];
-                    if (track.target.path === "weights" && targets.length > 1) {
+                    if (morphTrack && targets.length > 1) {
                         unsupported(
                             "AnimationGroup.targetedAnimations",
                             "Lite shares one morph-weight sampler across every primitive of a glTF node, while Babylon.js clones independently editable Animation objects per primitive. Splitting and retargeting that sampler needs a loader-owned policy."
