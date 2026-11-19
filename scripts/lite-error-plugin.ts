@@ -13,9 +13,10 @@
  * (on-demand, single caught error) — so by default the bundle ships numeric codes, not prose.
  *
  * Determinism: codes are assigned in a stable compatibility order during `buildStart`: core
- * files, established compute files, then accessibility files; each tier uses relative file path
- * and source position. This is independent of Vite's parallel per-module `transform` ordering,
- * so the same source always yields the same codes and table.
+ * files, established compute files, accessibility files, then opt-in feature tiers in order of
+ * introduction; each tier uses relative file path and source position. This is independent of
+ * Vite's parallel per-module `transform` ordering, so the same source always yields the same
+ * codes and table.
  *
  * Rewrite rules:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
@@ -71,6 +72,10 @@ function walkTsFiles(root: string): string[] {
 function liteErrorFileRank(root: string, file: string): number {
     const relative = path.relative(root, file).replace(/\\/g, "/");
     // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
+    // Each later feature takes a new tier, so it cannot renumber an established opt-in feature either.
+    if (relative === "post-process/glow.ts" || relative.startsWith("material/glow/")) {
+        return 4;
+    }
     if (
         relative === "frame-graph/enable-geometry-velocity.ts" ||
         relative.startsWith("post-process/ssao") ||

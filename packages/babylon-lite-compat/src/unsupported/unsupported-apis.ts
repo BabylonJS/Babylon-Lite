@@ -948,12 +948,6 @@ export class HighlightLayer {
     }
 }
 
-export class GlowLayer {
-    public constructor() {
-        unsupported("GlowLayer", "Effect layers are not implemented in Babylon Lite. For a bloom-style glow, use the native bloom post-process task.");
-    }
-}
-
 // ─── Mesh-attached renderers / projectors ────────────────────────────
 // ─── GreasedLine (thick-line ribbon subsystem) ───────────────────────
 // Greased lines render polylines as camera-facing ribbons/tubes driven by a

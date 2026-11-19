@@ -171,6 +171,7 @@ const RH_TWIN_COVERAGE: Record<string, number[]> = {
     "loader-gltf/gltf-feature-registry.ts": [322, 324, 326, 343, 347],
     "loader-gltf/gltf-parser.ts": [322, 324, 326, 343, 347],
     "loader-gltf/load-gltf.ts": [322, 324, 326, 343, 347],
+    "material/glow/glow-node.ts": [358],
     "material/node/blocks/input-block.ts": [334, 335],
     "material/node/node-geometry-renderable.ts": [346],
     "material/node/node-pipeline.ts": [334, 335],

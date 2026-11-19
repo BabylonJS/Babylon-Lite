@@ -73,6 +73,11 @@ export { x as a, y as b, calculate as c, calculate as alias, reservedExport as i
         for (const key of established) expect(keys).toContain(key);
         const lastEstablished = Math.max(...established.map((key) => keys.indexOf(key)));
         const optional = [
+            "post-process/glow",
+            "material/glow/glow-source",
+            "material/glow/glow-material",
+            "material/glow/glow-merge",
+            "material/glow/glow-node",
             "frame-graph/enable-geometry-velocity",
             "material/geometry-deformation-hooks",
             "material/geometry-deformation-velocity",
@@ -119,6 +124,10 @@ export { x as a, y as b, calculate as c, calculate as alias, reservedExport as i
             const optional = join(root, relative);
             expect(isDeferredLiteErrorFile(root, optional)).toBe(true);
             expect(compareLiteErrorFiles(root, sceneChange, optional)).toBeLessThan(0);
+            // A later opt-in feature never renumbers an established one, whatever its path.
+            for (const glow of ["material/glow/glow-material.ts", "post-process/glow.ts"]) {
+                expect(compareLiteErrorFiles(root, optional, join(root, glow))).toBeLessThan(0);
+            }
         }
     });
 
