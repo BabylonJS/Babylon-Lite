@@ -145,6 +145,18 @@ exports[`right-handed drift guard > loader-usd/usd-materialize.ts: right-handed 
 }
 `;
 
+exports[`right-handed drift guard > material/glow/glow-material.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "«» → «(» mirrored ? … ? " «cw» → «ccw» " : … : " «ccw» → «cw» " ) … ccw " «» → «)»",
+}
+`;
+
+exports[`right-handed drift guard > material/glow/glow-node.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "updateGlowNodeDraw &&": "«» → «( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+}
+`;
+
 exports[`right-handed drift guard > material/mesh-features.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "_computeMeshFeatures use": "«» → «if ( _rightHanded ) { features | = ( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ; }»",
