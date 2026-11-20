@@ -6,9 +6,8 @@ import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
-import { buildNodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
-import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
-import { animateParticleSystem, createParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { animateParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -194,36 +193,31 @@ describe("NPE build reachability", () => {
             loaderModule: () => {
                 throw new Error("loader chunk failed");
             },
-            failure: new Error("loader chunk failed"),
+            outcome: new Error("loader chunk failed"),
         },
         {
             name: "tolerates a failed texture image load",
             loaderModule: () => ({ loadTexture2D: () => Promise.reject(new Error("image failed")) }),
-            failure: undefined,
+            outcome: null,
         },
-    ])("$name", async ({ loaderModule, failure }) => {
+    ])("$name", async ({ loaderModule, outcome }) => {
         vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", loaderModule);
         vi.resetModules();
         try {
-            const { npeBlock: systemBlock } = await import("../../../packages/babylon-lite/src/particle/node/blocks/system-block");
-            const system = createParticleSystem(1);
-            const promises: Promise<void>[] = [];
-            const ctx = {
-                state: { system },
-                isConnected: () => false,
-                input: (_block: unknown, _name: string, fallback?: () => unknown) => fallback,
-                texture: () => ({ url: "particle.png", invertY: true }),
-                addBuildPromise: (promise: Promise<void>) => promises.push(promise),
-            } as unknown as NpeBuildContext;
-            systemBlock.build({ id: 1, className: "SystemBlock", name: "", inputs: [], serialized: {} } as ParsedParticleBlock, ctx);
+            const graph = parseNodeParticleSource({
+                blocks: [
+                    { customType: "BABYLON.ParticleTextureSourceBlock", id: 1, url: "https://assets.example/particle.png", inputs: [] },
+                    { customType: "BABYLON.SystemBlock", id: 2, inputs: [{ name: "texture", targetBlockId: 1, targetConnectionName: "texture" }] },
+                ],
+            });
 
-            // Vitest wraps a throwing mock factory and keeps the original error as its cause.
-            const settled = await Promise.all(promises).then(
-                () => undefined,
+            // The build either rejects with the loader error, which Vitest wraps as the cause of a throwing mock
+            // factory, or resolves with the system texture left unset.
+            const settled = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph).then(
+                (set) => set.systems[0]!.texture,
                 (error: Error) => error.cause ?? error
             );
-            expect(settled).toEqual(failure);
-            expect(system.texture).toBeNull();
+            expect(settled).toEqual(outcome);
         } finally {
             vi.doUnmock("../../../packages/babylon-lite/src/texture/texture-2d.js");
             vi.resetModules();
@@ -236,7 +230,9 @@ describe("NPE build reachability", () => {
             unhandled.push(reason);
         };
         process.on("unhandledRejection", onUnhandled);
+        let loaderImports = 0;
         vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", () => {
+            loaderImports++;
             throw new Error("loader chunk failed");
         });
         vi.resetModules();
@@ -250,8 +246,11 @@ describe("NPE build reachability", () => {
             });
 
             await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("SystemBlock.emitRate");
-            // Let the orphaned loader import settle, so Node reports it here if nothing observed it.
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Wait for the orphaned loader import to settle, then for the next macrotask, by which Node has reported
+            // any rejection that nothing observed.
+            await vi.dynamicImportSettled();
+            await new Promise((resolve) => setImmediate(resolve));
+            expect(loaderImports).toBe(1);
             expect(unhandled).toEqual([]);
         } finally {
             process.off("unhandledRejection", onUnhandled);

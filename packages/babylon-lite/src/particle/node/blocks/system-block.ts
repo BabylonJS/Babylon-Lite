@@ -40,13 +40,14 @@ export const npeBlock: NpeBlockEvaluator = {
         if (texture?.url) {
             ctx.addBuildPromise(
                 (async () => {
-                    // A failed loader-module import rejects the build; only image failures are tolerated below.
+                    // A failed loader-module import rejects the build. Any rejection from loadTexture2D itself, including its
+                    // own lazy mipmap import, is tolerated below with image failures.
                     const { loadTexture2D } = await import("../../../texture/texture-2d.js");
                     try {
                         // Block invertY defaults to true; Lite's opposite billboard V convention maps false to an upload flip.
                         system.texture = await loadTexture2D(ctx.engine, texture.url, { invertY: !texture.invertY });
                     } catch {
-                        // Image failures do not prevent CPU simulation; billboard creation still requires a texture.
+                        // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
                     }
                 })()
             );
