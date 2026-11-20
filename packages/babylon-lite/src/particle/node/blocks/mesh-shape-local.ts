@@ -10,8 +10,8 @@ interface CachedVertexData {
     colors?: number[];
 }
 
-/** Emitter-local `MeshShapeBlock`. */
-export const meshShapeLocalBlock: NpeBlockEvaluator = {
+/** Emitter-local `MeshShapeBlock` path, lazy-loaded by `mesh-shape-block.ts` when `SystemBlock.isLocal` is set. */
+export const meshShapeLocal: NpeBlockEvaluator = {
     build(block, ctx) {
         const cached = block.serialized.cachedVertexData as CachedVertexData | undefined;
         const positions = cached?.positions;

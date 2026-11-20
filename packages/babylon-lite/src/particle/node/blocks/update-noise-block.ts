@@ -11,7 +11,7 @@ function sampleRed(map: NpeTextureContent, u: number, v: number): number {
 }
 
 /** `UpdateNoiseBlock` — perturb particle direction from fixed per-particle texture samples. */
-export const updateNoiseBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

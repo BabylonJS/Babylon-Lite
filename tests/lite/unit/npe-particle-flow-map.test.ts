@@ -5,10 +5,9 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { registerNodeParticleSet } from "../../../packages/babylon-lite/src/particle/particle-scene";
-import { cpuTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block";
-import { updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
-import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
-import type { NodeParticleSet, NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { npeBlock as particleTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/texture-source-block";
+import { npeBlock as updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
+import { buildNodeParticleSet, type NodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/particle/node/npe-texture-content";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
@@ -246,7 +245,7 @@ describe("NPE UpdateFlowMapBlock", () => {
             ],
         });
         const originalFlowInput = graph.blocks.get(3)!.inputs.find((input) => input.name === "flowMap")!;
-        const set = await buildNodeParticleSetWithFlowMaps({ _device: {} } as never, scene, graph);
+        const set = await buildNodeParticleSet({ _device: {} } as never, scene, graph);
         const system = set.systems[0]!;
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(originalFlowInput.targetBlockId).toBe(2);
@@ -302,7 +301,7 @@ describe("NPE UpdateFlowMapBlock", () => {
                 { customType: "BABYLON.ParticleInputBlock", id: 4, type: 2, value: 2, inputs: [] },
             ],
         });
-        const set = await buildNodeParticleSetWithFlowMaps({ _device: {} } as never, scene, graph);
+        const set = await buildNodeParticleSet({ _device: {} } as never, scene, graph);
         const system = set.systems[0]!;
         system.buffer.angle[0] = 7;
         system._scaledStep = 1;
@@ -361,29 +360,16 @@ describe("NPE UpdateFlowMapBlock", () => {
             },
         } as unknown as NpeBuildContext;
 
-        cpuTextureSourceBlock.build(block, ctx);
+        particleTextureSourceBlock.build(block, ctx);
 
         expect(output?.(0) as unknown as NpeTextureValue).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
     });
 
-    it("rejects unsupported texture URL schemes", () => {
-        const block = {
-            id: 2,
-            className: "ParticleTextureSourceBlock",
-            name: "flow texture",
-            inputs: [],
-            serialized: { url: "javascript:alert(1)", invertY: false },
-        } as ParsedParticleBlock;
-        let output: NpeGetter | undefined;
-        const ctx = {
-            state: {},
-            setOutput(_blockId: number, _name: string, getter: NpeGetter) {
-                output = getter;
-            },
-        } as unknown as NpeBuildContext;
+    it("does not fetch CPU texture content for unsupported URL schemes", async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
 
-        cpuTextureSourceBlock.build(block, ctx);
-
-        expect((output?.(0) as unknown as NpeTextureValue).url).toBe("");
+        await expect(loadNpeTextureContent({ url: "javascript:alert(1)", invertY: false })).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });

@@ -44,7 +44,7 @@ export function lerpGetters(left: NpeGetter, right: NpeGetter, i: number, amount
 }
 
 /** `ParticleLerpBlock` — component-wise linear interpolation `left + (right - left) * gradient`, into scratch. */
-export const particleLerpBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const left = ctx.input(block, "left");
         const right = ctx.input(block, "right");

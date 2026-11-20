@@ -75,7 +75,7 @@ function readSnapshot(shape: number, value0: number, value1: number, value2: num
 }
 
 /** `ParticleLocalVariableBlock` snapshots one value per particle id or started animation-call epoch. */
-export const particleLocalVariableBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const input = ctx.input(block, "input");
         const scratch: LocalScratch = { x: 0, y: 0 };

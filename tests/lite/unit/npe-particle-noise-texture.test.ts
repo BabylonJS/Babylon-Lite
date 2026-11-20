@@ -3,10 +3,8 @@ import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera
 import { animateParticleSystem, createParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { createParticleBillboard } from "../../../packages/babylon-lite/src/particle/particle-billboard";
 import { killParticle, spawnParticle } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import { updateNoiseBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-noise-block";
-import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
-import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
-import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { npeBlock as updateNoiseBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-noise-block";
+import { buildNodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeGetter, NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
@@ -99,7 +97,7 @@ async function buildNoiseTextureFanOut(renderUrl: string) {
             { customType: "BABYLON.ParticleInputBlock", id: 4, type: 8, valueType: "BABYLON.Vector3", value: [2, 3, 4], inputs: [] },
         ],
     });
-    const set = await buildNodeParticleSetWithNoiseTextures(engine, {} as never, graph);
+    const set = await buildNodeParticleSet(engine, {} as never, graph);
     return { system: set.systems[0]!, fetchMock, textureDataUrl };
 }
 
@@ -259,13 +257,14 @@ describe("NPE UpdateNoiseBlock", () => {
         expect(system.buffer.dirZ[0]).toBeCloseTo(2, 6);
     });
 
-    it("prefers the URL for ordinary rendering while retaining embedded CPU noise data", async () => {
+    it("uses the embedded data for both rendering and CPU noise when a URL is also serialized", async () => {
         const renderUrl = "https://example.com/particle.png";
         const { system, fetchMock, textureDataUrl } = await buildNoiseTextureFanOut(renderUrl);
 
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(fetchMock).toHaveBeenNthCalledWith(1, textureDataUrl);
-        expect(fetchMock).toHaveBeenNthCalledWith(2, renderUrl);
+        expect(fetchMock).toHaveBeenNthCalledWith(2, textureDataUrl);
+        expect(fetchMock).not.toHaveBeenCalledWith(renderUrl);
         expect(system.texture).toMatchObject({ width: 1, height: 1 });
         expect(() => createParticleBillboard(system)).not.toThrow();
     });
@@ -317,7 +316,7 @@ describe("NPE UpdateNoiseBlock", () => {
                 { customType: "BABYLON.ParticleInputBlock", id: 4, type: 8, value: [3, 0, 0], inputs: [] },
             ],
         });
-        const set = await buildNodeParticleSetWithTextureUpdates({} as never, scene, graph);
+        const set = await buildNodeParticleSet({} as never, scene, graph);
         const system = set.systems[0]!;
         vi.spyOn(Math, "random").mockReturnValue(0);
         system._scaledStep = 1;

@@ -3,19 +3,26 @@ import type { Vec3 } from "../../../math/types.js";
 import { finishLocalPosition } from "../npe-local-position.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** Emitter-local `PointShapeBlock`. */
-export const pointShapeLocalBlock: NpeBlockEvaluator = {
+/** Emitter-local `BoxShapeBlock` path, lazy-loaded by `box-shape-block.ts` when `SystemBlock.isLocal` is set. */
+export const boxShapeLocal: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
         const emitterWorldMatrix = ctx.state.emitterWorldMatrix;
         const direction1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
         const direction2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
+        const minBoxGetter = ctx.input(block, "minEmitBox", () => ({ x: -0.5, y: -0.5, z: -0.5 }));
+        const maxBoxGetter = ctx.input(block, "maxEmitBox", () => ({ x: 0.5, y: 0.5, z: 0.5 }));
         const scratch: Vec3 = { x: 0, y: 0, z: 0 };
         system.createPosition = (i) => {
-            buffer.posX[i] = 0;
-            buffer.posY[i] = 0;
-            buffer.posZ[i] = 0;
+            const min = minBoxGetter(i) as Vec3;
+            const minX = min.x;
+            const minY = min.y;
+            const minZ = min.z;
+            const max = maxBoxGetter(i) as Vec3;
+            buffer.posX[i] = randomRange(minX, max.x);
+            buffer.posY[i] = randomRange(minY, max.y);
+            buffer.posZ[i] = randomRange(minZ, max.z);
             finishLocalPosition(system, buffer, i, emitterWorldMatrix, scratch);
         };
         system.createDirection = (i) => {

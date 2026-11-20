@@ -15,10 +15,40 @@ import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./
 import type { ParticleBuffer } from "../particle-buffer.js";
 import { createParticleSystem, type ParticleEmitterInverse, type ParticleSystem } from "../particle-system.js";
 import type { NpeGetter, NpeValue } from "./npe-value.js";
-import { loadNpeBlockEvaluator } from "./npe-registry.js";
+import { loadNpeBlock } from "./npe-manifest.js";
 
 function isInputConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
     return input?.targetBlockId != null && input.targetConnectionName != null;
+}
+
+/**
+ * Load the evaluator of every block class reachable from a system block in parallel. Each class is its own
+ * lazy chunk, so resolving them during the depth-first build would cost one round trip per class.
+ */
+async function loadReachableBlocks(graph: ParticleGraph): Promise<Map<string, NpeBlockEvaluator>> {
+    const classNames = new Set<string>();
+    const visited = new Set<number>();
+    const pending = [...graph.systemBlockIds];
+    for (let blockId = pending.pop(); blockId !== undefined; blockId = pending.pop()) {
+        const block = graph.blocks.get(blockId);
+        if (!block || visited.has(blockId)) {
+            continue;
+        }
+        visited.add(blockId);
+        classNames.add(block.className);
+        for (const input of block.inputs) {
+            if (isInputConnected(input)) {
+                pending.push(input.targetBlockId);
+            }
+        }
+    }
+    const evaluators = new Map<string, NpeBlockEvaluator>();
+    await Promise.all(
+        [...classNames].map(async (name) => {
+            evaluators.set(name, await loadNpeBlock(name));
+        })
+    );
+    return evaluators;
 }
 
 /** Parse a literal value serialized directly on an unconnected input. */
@@ -71,9 +101,12 @@ export interface NpeBuildContext {
     addBuildPromise(promise: Promise<void>): void;
 }
 
-/** An NPE block evaluator: wires a parsed block into the runtime during the build walk. */
+/**
+ * An NPE block evaluator: wires a parsed block into the runtime during the build walk. A block that lazy-loads
+ * an optional implementation path returns a promise; the walk awaits it before building downstream blocks.
+ */
 export interface NpeBlockEvaluator {
-    build(block: ParsedParticleBlock, ctx: NpeBuildContext): void;
+    build(block: ParsedParticleBlock, ctx: NpeBuildContext): void | Promise<void>;
 }
 
 /** A built data-oriented particle set. */
@@ -99,6 +132,7 @@ export interface BuildNodeParticleOptions {
 export async function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options: BuildNodeParticleOptions = {}): Promise<NodeParticleSet> {
     const systems: ParticleSystem[] = [];
     const buildPromises: Promise<void>[] = [];
+    const evaluators = await loadReachableBlocks(graph);
 
     for (const systemId of graph.systemBlockIds) {
         const systemBlock = graph.blocks.get(systemId);
@@ -192,26 +226,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                     await buildBlock(input.targetBlockId);
                 }
             }
-            const contextualSource = typeof block.serialized.contextualValue === "number" ? block.serialized.contextualValue : 0;
-            const left = block.inputs.find((input) => input.name === "left");
-            const right = block.inputs.find((input) => input.name === "right");
-            const onceValueType = block.inputs.find((input) => input.name === "min")?.valueType ?? block.inputs.find((input) => input.name === "max")?.valueType ?? "number";
-            const scalarOnce = block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && onceValueType === "number";
-            const localShape = state.isLocal && block.className.endsWith("ShapeBlock");
-            const variant =
-                (block.className === "ParticleInputBlock" && contextualSource !== 0 && !((contextualSource <= 6 && contextualSource !== 2) || contextualSource === 0x17)) ||
-                (block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && !scalarOnce) ||
-                (block.className === "ParticleMathBlock" && left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName) ||
-                (block.className === "SystemBlock" && isInputConnected(block.inputs.find((input) => input.name === "emitRate"))) ||
-                (block.className === "SetupSpriteSheetBlock" && block.serialized.randomStartCell === true);
-            const evaluator = scalarOnce
-                ? (await import("./blocks/particle-random-once-block.js")).particleRandomOnceBlock
-                : localShape
-                  ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
-                  : variant
-                    ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
-                    : await loadNpeBlockEvaluator(block.className);
-            evaluator.build(block, ctx);
+            await (evaluators.get(block.className) as NpeBlockEvaluator).build(block, ctx);
         };
 
         await buildBlock(systemId);

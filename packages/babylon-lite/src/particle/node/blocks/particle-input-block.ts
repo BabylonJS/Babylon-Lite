@@ -13,6 +13,8 @@ const SYS_TIME = 1;
 const SYS_DELTA = 2;
 const SYS_EMITTER = 3;
 
+const CTX_LOCAL_POSITION_UPDATED = 0x0018;
+
 function parseConstant(type: number, value: unknown): NpeValue {
     const array = Array.isArray(value) ? (value as number[]) : null;
     switch (type) {
@@ -30,15 +32,23 @@ function parseConstant(type: number, value: unknown): NpeValue {
     }
 }
 
-/** `ParticleInputBlock` — a constant, a contextual source, or a system source. */
-export const particleInputBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+/**
+ * `ParticleInputBlock` — a constant, a contextual source, or a system source. Common contextual sources build
+ * inline; the remaining sources lazy-load their getter factories.
+ */
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
         const contextual = typeof block.serialized.contextualValue === "number" ? block.serialized.contextualValue : 0;
         const systemSource = typeof block.serialized.systemSource === "number" ? block.serialized.systemSource : 0;
 
         let getter: NpeGetter;
         if (contextual !== 0) {
-            getter = makeContextualGetter(ctx.state.buffer!, ctx.state.system!, contextual)!;
+            const state = ctx.state;
+            getter =
+                makeContextualGetter(state.buffer!, state.system!, contextual) ??
+                (contextual === CTX_LOCAL_POSITION_UPDATED
+                    ? (await import("./particle-input-local-position.js")).createLocalPositionUpdatedGetter(state)
+                    : (await import("../npe-contextual-extra.js")).makeExtraContextualGetter(state.buffer!, state.system!, contextual));
         } else if (systemSource !== 0) {
             const system = ctx.state.system!;
             const emitter = ctx.state.emitter;

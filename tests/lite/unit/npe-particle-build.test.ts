@@ -9,6 +9,23 @@ import { animateParticleSystem, startParticleSystem } from "../../../packages/ba
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
+const blockEvents = vi.hoisted(() => [] as string[]);
+vi.mock("../../../packages/babylon-lite/src/particle/node/npe-manifest.js", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../../packages/babylon-lite/src/particle/node/npe-manifest")>();
+    return {
+        loadNpeBlock: async (className: string) => {
+            blockEvents.push(`load ${className}`);
+            const evaluator = await actual.loadNpeBlock(className);
+            return {
+                build: (...args: Parameters<typeof evaluator.build>) => {
+                    blockEvents.push(`build ${className}`);
+                    return evaluator.build(...args);
+                },
+            };
+        },
+    };
+});
+
 interface MutableGraphSource {
     blocks: Array<{
         customType: string;
@@ -38,6 +55,16 @@ describe("NPE build reachability", () => {
         expect(set.systems[0]!.name).toBe(SCENE262_NPE_JSON.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!.name);
     });
 
+    it("loads every reachable block class once before building any block", async () => {
+        blockEvents.length = 0;
+        await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: { x: 0, y: 0, z: 0 } });
+
+        const loads = blockEvents.filter((event) => event.startsWith("load "));
+        expect(new Set(loads).size).toBe(loads.length);
+        expect(loads.length).toBeGreaterThan(1);
+        expect(blockEvents.findIndex((event) => event.startsWith("build "))).toBe(loads.length);
+    });
+
     it.each(["", undefined])("omits an absent SystemBlock name (%s)", async (name) => {
         const graph = parseNodeParticleSource({ blocks: [{ customType: "BABYLON.SystemBlock", id: 1, name }] });
         const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
@@ -58,10 +85,10 @@ describe("NPE build reachability", () => {
         { name: "loads an embedded texture with explicit invertY false", url: "", invertY: false, expectedUrl: "embedded", expectedFlipY: true },
         { name: "applies Lite's class-default invertY when the field is omitted", url: "", invertY: undefined, expectedUrl: "embedded", expectedFlipY: false },
         {
-            name: "deliberately prefers URL for serializer-unreachable dual-source input",
+            name: "prefers embedded data for dual-source input like Babylon.js deserialization",
             url: "https://assets.example/particle.png",
             invertY: undefined,
-            expectedUrl: "url",
+            expectedUrl: "embedded",
             expectedFlipY: false,
         },
     ])("$name", async ({ url, invertY, expectedUrl, expectedFlipY }) => {

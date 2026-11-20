@@ -24,7 +24,7 @@ function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStre
 }
 
 /** `UpdateFlowMapBlock` — update particle direction from a projected RGBA flow field. */
-export const updateFlowMapBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

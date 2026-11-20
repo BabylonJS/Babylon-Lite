@@ -7,7 +7,7 @@ import { buildNodeParticleSet, type NpeBuildContext, type NpeBuildState } from "
 import { withNodeParticleEmitterProvider } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
 import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-graph-plumbing";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { loadValueBlockEvaluator } from "../../../packages/babylon-lite/src/particle/node/npe-registry-extra-values";
+import { loadNpeBlock } from "../../../packages/babylon-lite/src/particle/node/npe-manifest";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeGetter, NpeValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import { killParticle, spawnParticle } from "../../../packages/babylon-lite/src/particle/particle-buffer";
@@ -46,7 +46,7 @@ async function buildLocalGetter(state: NpeBuildState, blockId: number, scope: un
         },
         addBuildPromise: () => undefined,
     };
-    (await loadValueBlockEvaluator(block.className)).build(block, context);
+    await (await loadNpeBlock(block.className)).build(block, context);
     return output!;
 }
 
@@ -127,8 +127,8 @@ describe("ParticleLocalVariableBlock", () => {
             },
             addBuildPromise: () => undefined,
         };
-        const evaluator = await loadValueBlockEvaluator(block.className);
-        evaluator.build(block, context);
+        const evaluator = await loadNpeBlock(block.className);
+        await evaluator.build(block, context);
 
         system.buffer.id[0] = 0;
         system.buffer.id[1] = 7;

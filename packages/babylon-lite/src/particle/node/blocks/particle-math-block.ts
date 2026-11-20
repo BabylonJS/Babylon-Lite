@@ -32,7 +32,7 @@ function applyScalar(op: number, a: number, b: number): number {
  * `ParticleMathBlock` — arithmetic on two inputs; scalar+vector splats the scalar. Writes results into
  * a reused scratch value so it is allocation-free on the update path.
  */
-export const particleMathBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const op = typeof block.serialized.operation === "number" ? block.serialized.operation : OP_ADD;
         const left = ctx.input(block, "left");

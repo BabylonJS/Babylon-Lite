@@ -20,9 +20,6 @@ import {
     type NodeParticleEmitterProvider,
     withNodeParticleEmitterProvider,
 } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
-import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
-import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
-import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
 import { parseNodeParticleSetFromSnippet, type ParseNodeParticleOptions } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import type { ParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-types";
@@ -390,9 +387,6 @@ describe("NPE moving emitter transforms", () => {
 
     it.each([
         ["default", buildNodeParticleSet],
-        ["flow-map", buildNodeParticleSetWithFlowMaps],
-        ["noise", buildNodeParticleSetWithNoiseTextures],
-        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
         ["blend-mode", buildNodeParticleSetWithBlendModes],
     ] as Array<[string, NodeParticleBuilder]>)("builds a provider-backed set with the %s builder", async (_name, builder) => {
         let providerCalls = 0;
@@ -417,9 +411,6 @@ describe("NPE moving emitter transforms", () => {
 
     it.each([
         ["default", buildNodeParticleSet],
-        ["flow-map", buildNodeParticleSetWithFlowMaps],
-        ["noise", buildNodeParticleSetWithNoiseTextures],
-        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
         ["blend-mode", buildNodeParticleSetWithBlendModes],
     ] as Array<[string, NodeParticleBuilder]>)("retains no provider state on a static set from the %s builder", async (_name, builder) => {
         const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
@@ -641,19 +632,17 @@ describe("NPE moving emitter transforms", () => {
         }
     });
 
-    it.each([
-        ["default", buildNodeParticleSet],
-        ["flow-map", buildNodeParticleSetWithFlowMaps],
-        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
-    ] as Array<[string, NodeParticleBuilder]>)("refreshes implicit-cylinder transforms in the %s builder", async (_name, builder) => {
+    it("refreshes implicit-cylinder transforms", async () => {
         const transformed = emitterMatrix(3, -2, 5, Math.PI / 3, 2, 0.5, 1.5);
-        const liveSet = await builder(
+        const liveSet = await buildNodeParticleSet(
             {} as EngineContext,
             {} as SceneContext,
             parseNodeParticleSource(multiCylinderGraph()),
             withNodeParticleEmitterProvider(() => transformed)
         );
-        const staticSet = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()), { emitterWorldMatrix: transformed });
+        const staticSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()), {
+            emitterWorldMatrix: transformed,
+        });
         const live = liveSet.systems[0]!;
         const staticallyTransformed = staticSet.systems[0]!;
         const draws = [0.1, 0.2, 0.3, 0.4];

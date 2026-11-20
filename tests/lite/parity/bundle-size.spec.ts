@@ -268,7 +268,7 @@ for (const scene of SCENES) {
                 ).toBe(true);
             }
             const offenders = runtimeModules.filter((id) =>
-                /\/(math\/invert-mat4|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                /\/(math\/invert-mat4|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|graph-plumbing(?:-runtime)?|live-emitter|texture-content)|blocks\/update-(flow-map|noise)-block))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
                     id
                 )
             );
@@ -289,7 +289,7 @@ for (const scene of SCENES) {
                 `scene305 is missing the Particle LocalVariable evaluator; loaded modules: ${runtimeModules.join(", ")}`
             ).toBe(true);
             const offenders = runtimeModules.filter((id) =>
-                /\/(?:camera\/arc-rotate-controls|particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/npe-(?:blend-modes|emitter-provider|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content))|sprite\/(?:sprite-renderer|sprite-custom-shader))\.[jt]s$/.test(
+                /\/(?:camera\/arc-rotate-controls|particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/(?:npe-(?:blend-modes|emitter-provider|texture-content)|blocks\/update-(?:flow-map|noise)-block))|sprite\/(?:sprite-renderer|sprite-custom-shader))\.[jt]s$/.test(
                     id
                 )
             );

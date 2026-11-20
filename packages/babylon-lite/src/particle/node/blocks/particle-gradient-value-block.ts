@@ -8,7 +8,7 @@ export interface NpeGradientEntry {
 }
 
 /** `ParticleGradientValueBlock` — emits gradient-stop metadata for its parent gradient block. */
-export const particleGradientValueBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const reference = typeof block.serialized.reference === "number" ? block.serialized.reference : 0;
         const entry: NpeGradientEntry = { reference, value: ctx.input(block, "value", () => 0) };

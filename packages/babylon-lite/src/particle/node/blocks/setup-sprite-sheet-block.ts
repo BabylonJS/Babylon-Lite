@@ -5,11 +5,11 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * `SetupSpriteSheetBlock` — configures the sprite-sheet feature. Allocates the sprite columns via
  * {@link useSpriteSheet} (only now, on this buffer), records the render cell dimensions + the per-particle
  * cell-index column + update step on the system's sprite handle, and attaches the birth hook that seeds a
- * new particle's cell state. A non-sprite system never reaches this block, so it allocates no sprite
- * columns and imports none of the sprite module.
+ * new particle's cell state. Random start cells lazy-load their own column variant. A non-sprite system never
+ * reaches this block, so it allocates no sprite columns and imports none of the sprite module.
  */
-export const setupSpriteSheetBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
         const s = block.serialized;
@@ -19,7 +19,7 @@ export const setupSpriteSheetBlock: NpeBlockEvaluator = {
             loop: typeof s.loop === "boolean" ? s.loop : true,
             changeSpeed: typeof s.spriteCellChangeSpeed === "number" ? s.spriteCellChangeSpeed : 1,
         };
-        const sheet = useSpriteSheet(buffer, config);
+        const sheet = s.randomStartCell === true ? (await import("../../sprite-columns-random.js")).useRandomSpriteSheet(buffer, config) : useSpriteSheet(buffer, config);
         system._spriteSheet = {
             cellWidth: typeof s.width === "number" ? s.width : 0,
             cellHeight: typeof s.height === "number" ? s.height : 0,
