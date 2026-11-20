@@ -482,7 +482,10 @@ pass policy, and retains only immutable fragment indices and enabled names.
 This keeps IBL-only filtering, dynamic lease selection, and policy signatures
 out of scenes that use ordinary material plugins. The same decorator applies
 when the vertex-resource bridge is installed before or after the SSAO enabler.
-Dynamic bindings reuse the existing render-bundle invalidation mechanism.
+Creating or replacing a dynamic bind group advances the visibility epoch so
+cached render bundles record the new group. It leaves the scene's renderable
+version unchanged: automatic passes retain their draw bindings and their cached
+per-pass state until the renderable list actually needs to be rebuilt.
 Replacement bind groups receive the original scene resource identity and binding
 disposer collection, preserving contextual extensions such as textured area lights.
 The expression installer is isolated in `pbr-diffuse-occlusion.ts`, not exported
