@@ -37,16 +37,6 @@ export const npeBlock: NpeBlockEvaluator = {
         let flowMap: NpeTextureContent | null = null;
         let matrixReady = false;
 
-        if (sourceValue?.url) {
-            ctx.addBuildPromise(
-                loadNpeTextureContent(sourceValue)
-                    .then((content) => {
-                        flowMap = content;
-                    })
-                    .catch(() => undefined)
-            );
-        }
-
         const prepareMatrix = (): void => {
             const camera = scene.camera;
             if (!camera) {
@@ -59,9 +49,28 @@ export const npeBlock: NpeBlockEvaluator = {
             matrixStorage.set(getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Mat4Storage);
             matrixReady = true;
         };
-        prepareMatrix();
-        scene._beforeRender.push(prepareMatrix);
 
+        // The system owns the per-frame projection, and only once the map decodes: a failed decode, or a build that is
+        // discarded or rejected, leaves no frame work behind.
+        if (sourceValue?.url) {
+            ctx.addBuildPromise(
+                loadNpeTextureContent(sourceValue)
+                    .then((content) => {
+                        if (!content) {
+                            return;
+                        }
+                        flowMap = content;
+                        const previous = system._prepareFrame;
+                        system._prepareFrame = previous
+                            ? () => {
+                                  previous();
+                                  prepareMatrix();
+                              }
+                            : prepareMatrix;
+                    })
+                    .catch(() => undefined)
+            );
+        }
         system.updateSteps.push((i) => {
             if (!flowMap || !matrixReady) {
                 return;

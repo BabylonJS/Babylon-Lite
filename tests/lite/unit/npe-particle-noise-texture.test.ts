@@ -322,6 +322,8 @@ describe("NPE UpdateNoiseBlock", () => {
         system._scaledStep = 1;
 
         expect(system.updateSteps).toHaveLength(2);
+        // animateParticleSystem prepares every frame before it runs the update steps.
+        system._prepareFrame!();
         system.updateSteps[0]!(0);
         system.updateSteps[1]!(0);
 
