@@ -3,8 +3,8 @@ import type { NpeBlockEvaluator } from "./npe-build.js";
 /** Lazy loader of one block module. Every module listed in a manifest table exports its evaluator as `npeBlock`. */
 export type NpeBlockLoader = () => Promise<{ npeBlock: NpeBlockEvaluator }>;
 
-/** A null-prototype table from serialized Babylon.js class name to its block loader. */
-export type NpeBlockTable = Readonly<Record<string, NpeBlockLoader | undefined>>;
+/** A null-prototype table from serialized Babylon.js class name to its block loader. `null` admits the `__proto__` key. */
+export type NpeBlockTable = Readonly<Record<string, NpeBlockLoader | null | undefined>>;
 
 /**
  * Node-particle block manifest — one lazy entry per supported Babylon.js block class, split by class into two tables.
@@ -19,7 +19,7 @@ export type NpeBlockTable = Readonly<Record<string, NpeBlockLoader | undefined>>
  * elbows, debug) are removed by `normalizeNodeParticleGraph` and are intentionally absent from both tables.
  */
 // Null prototype: serialized class names such as "constructor" must not resolve to inherited members.
-const NPE_BLOCKS = {
+const NPE_BLOCKS: NpeBlockTable = {
     __proto__: null,
     SystemBlock: () => import("./blocks/system-block.js"),
     CreateParticleBlock: () => import("./blocks/create-particle-block.js"),
@@ -32,7 +32,7 @@ const NPE_BLOCKS = {
     ParticleLerpBlock: () => import("./blocks/particle-lerp-block.js"),
     ParticleConverterBlock: () => import("./blocks/particle-converter-block.js"),
     ParticleRandomBlock: () => import("./blocks/particle-random-block.js"),
-} as unknown as NpeBlockTable;
+};
 
 /** Load the evaluator of one serialized block class. Throws for classes Lite does not implement. */
 export async function loadNpeBlock(className: string): Promise<NpeBlockEvaluator> {

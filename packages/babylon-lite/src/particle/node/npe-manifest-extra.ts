@@ -6,7 +6,7 @@ import type { NpeBlockTable } from "./npe-manifest.js";
  * miss, so graphs built from the default classes never fetch it.
  */
 // Null prototype: serialized class names such as "constructor" must not resolve to inherited members.
-export const NPE_EXTRA_BLOCKS = {
+export const NPE_EXTRA_BLOCKS: NpeBlockTable = {
     __proto__: null,
     PointShapeBlock: () => import("./blocks/point-shape-block.js"),
     SphereShapeBlock: () => import("./blocks/sphere-shape-block.js"),
@@ -27,4 +27,4 @@ export const NPE_EXTRA_BLOCKS = {
     ParticleFloatToIntBlock: () => import("./blocks/particle-float-to-int-block.js"),
     ParticleVectorLengthBlock: () => import("./blocks/particle-vector-length-block.js"),
     ParticleLocalVariableBlock: () => import("./blocks/particle-local-variable-block.js"),
-} as unknown as NpeBlockTable;
+};
