@@ -1979,7 +1979,7 @@ A future limited Loop LocalVariable oracle would be an explicit exception to thi
 
 ### 13.3 Visual scenes
 
-The ten frozen billboard oracle Lite scenes seed after build, synchronize one billboard, and register a frozen scene. Scenes 262 through 281 and Scene 305 use a black clear color; scenes 283 and 284 use the warm destination color specified in section 13.5. Scenes 262, 263, 264, 276, 277, and 305 run 200 ratio-1 steps. Scene 280 runs 300, scene 281 runs 240, scene 283 runs 40, and scene 284 runs 20. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render. Scene 302 is the eleventh billboard oracle and adds a default-live mode plus a deterministic frozen query mode.
+The eleven frozen billboard oracle Lite scenes seed after build, synchronize one billboard, and register a frozen scene. Scenes 262 through 281, Scene 305, and Scene 359 use a black clear color; scenes 283 and 284 use the warm destination color specified in section 13.5. Scenes 262, 263, 264, 276, 277, and 305 run 200 ratio-1 steps. Scene 280 runs 300, scene 281 runs 240, scene 283 runs 40, scene 284 runs 20, and scene 359 runs 150 followed by one zero-step frame. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render. Scene 302 is the twelfth billboard oracle and adds a default-live mode plus a deterministic frozen query mode.
 
 | Scene                                 | Coverage                                                                      | Camera                                                       | MAD ceiling | Raw ceiling |
 | ------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------- | ----------- |
@@ -1994,12 +1994,22 @@ The ten frozen billboard oracle Lite scenes seed after build, synchronize one bi
 | 284 `scene284-npe-multiply-add-blend` | MultiplyAdd blend with a sparse procedural radial-alpha field                 | alpha `-pi/2`, beta `pi/2`, radius `12`, target origin       | `0.01`      | `45.0 KB`   |
 | 302 `scene302-npe-moving-emitter`     | local Point, moving provider, `LocalPositionUpdated`, live/frozen modes       | alpha `-pi/2`, beta `1.2`, radius `8.5`, target `(0,0.35,0)` | `0.01`      | `61.5 KB`   |
 | 305 `scene305-npe-teleport`           | Teleport/Elbow/Debug routing plus Particle LocalVariable size snapshot        | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`    | `0.01`      | `45.0 KB`   |
+| 359 `scene359-npe-values-math`        | Values/math family driving position, color, size, and sprite cell             | alpha `-pi/2`, beta `1.25`, radius `7`, target `(0,2,0)`     | `0.01`      | `46.5 KB`   |
 
-Each camera uses near plane `0.1` and far plane `100`. The ten always-frozen scenes set both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start. Scene 302 sets `ready` in both modes and sets `animationFrozen` only for a finite nonnegative `seekTime`.
+Each camera uses near plane `0.1` and far plane `100`. The eleven always-frozen scenes set both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start. Scene 302 sets `ready` in both modes and sets `animationFrozen` only for a finite nonnegative `seekTime`.
 
-Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, 284, and 305 invoke the shared golden-capture helper before opening the Lite page; specifications 276 and 302 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all eleven scenes.
+Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, 284, 305, and 359 invoke the shared golden-capture helper before opening the Lite page; specifications 276 and 302 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all twelve scenes.
 
 Scene 305 follows the runtime-capture group, not Scene 302's manual committed-only convention. It is a frozen, non-interactive fixture: its Lite camera intentionally has no controls import or attachment because the Babylon.js oracle also leaves its camera unattached. This does not establish a camera policy for other NPE scenes. Its shared graph retains Teleport fan-out and adds Elbow, Debug, and a Particle LocalVariable on the creation-only random-size path. The wrapped value, random consumption, and 200-step state are unchanged; a focused nonvisual test compares that full state to Scene 262 exactly. No Loop block is used. The existing golden and thumbnail are not modified locally; CI owns visual parity.
+
+Scene 359 (`scene359-npe-values-math`) is the values/math oracle. It is a frozen, non-interactive, runtime-capture fixture like Scene 305. Both engines parse the same data-only graph from `scene359-values-math-npe.ts`: a Point-shape sprite-sheet fountain (`player.png`, 64 by 64 cells, cells 0 through 9) whose four update blocks are driven entirely by value/math blocks:
+
+- Position adds `ScaledDirection` plus a Trigonometry Sin wobble of age, multiplied by `DirectionScale` (`0x20`).
+- Color is an NLerp between warm and cool Color4 constants. Its gradient is a SmoothStep of `AgeGradient` raised to a NumberMath Pow.
+- Size is a Clamp of the VectorMath Distance from the origin. It adds an Int-left Math band whose `| 0` truncation quantizes age, then multiplies by a Step of the VectorMath Dot with +X.
+- Sprite cell is an Int NumberMath Modulo of `SpriteCellStart` plus a FloatToInt Floor of scaled age, over `SpriteCellEnd + 1`, applied by UpdateSpriteCellIndex.
+
+Babylon.js keeps calling `animate()` with `updateSpeed = 0` on every rendered frame after the fixture freezes. That call emits nothing and adds no age, but it re-runs every update block. Frozen oracle graphs must therefore be idempotent at a zero step. The wobble is scaled by `DirectionScale` for that reason. The Lite entry also mirrors one zero-step `animateParticleSystem` call after its 150 steps, so the newest particle receives the same absolute size, color, and cell updates. The local parity run measured `MAD = 0.000`.
 
 Scene 300 (`scene300-npe-sprite2d`) is a separate deterministic Lite-native integration fixture. It advances an authored NPE graph for 200 seeded ratio-1 steps, freezes simulation, registers the set through `registerNodeParticleSet2D`, and keeps the renderer hook sampling the stable packed layer. `scene-config.json` marks it `skipParity: true` because Babylon.js has no equivalent pure-2D SpriteRenderer path. Its Playwright specification verifies active binding state, live sampling, equal particle/layer counts, frozen particle age, one renderer layer, draw calls, and visible flare pixels; it does not use a Babylon golden or MAD comparison. The fixture uses a two-cell 128 by 64 atlas. Deterministic slot 0 is isolated as an unrotated 64 px marker sprite centered at canvas coordinates `(96,96)` on cell 1; an upper-versus-lower marker-band assertion detects vertical texture or UV inversion. `demo-npe-sprite2d` is the interactive counterpart and mutates the bridge origin from pointer/touch input while the renderer-managed simulation remains live.
 
@@ -2045,7 +2055,7 @@ Scene 305 fetches the thin helper, heavy runtime, and LocalVariable block module
 
 The Phase 3B run originally measured `43,936` raw bytes while the same 2,924-byte Scene 305 graph payload had a noncanonical filename and was counted. The comparison column subtracts that payload from the Phase 3B raw result as well (`43,936 - 2,924 = 41,012`) so the `+3,815` raw delta remains an honest engine/runtime comparison. Gzip subsets cannot be removed from a mixed chunk, so the measured gzip values remain unadjusted.
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, and 305 as sprite users. Scenes 262 through 284, 302, and 305 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. CI-published baselines and generated bundle-info are comparison inputs, and no per-scene manifest is committed.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 305, and 359 as sprite users. Scenes 262 through 284, 302, 305, and 359 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. CI-published baselines and generated bundle-info are comparison inputs, and no per-scene manifest is committed.
 
 Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `invert-mat4-to-ref-or-identity.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `invert-mat4.ts`, `npe-texture-content.ts`, the flow-map and noise update blocks, advanced particle blend modules, either graph-plumbing module, or either Sprite2D bridge/render path. The final filtered build measures `56,705` raw bytes (`55.4 KB`) and `22,761` gzip bytes (`22.2 KB`). The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
 
@@ -2067,11 +2077,23 @@ Scenes 1 and 12 are non-particle glTF controls. When their manifests exist, each
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also applies the table to every `particle/` and `math/` module inside the scene's fetched runtime chunks, so a feature folded into a shared chunk is still rejected. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
-`npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every configured particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other configured particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; generated runtime chunk manifests, fetched-module checks, and provider isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
+`npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every configured particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other configured particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, and 359) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; generated runtime chunk manifests, fetched-module checks, and provider isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
 
-Phase 3 bundle guards filter generated bundle-info through each scene's `runtimeChunks`, because Vite may build a lazy runtime chunk without fetching it. Existing canonical direct scenes and Scene 302 reject both `npe-graph-plumbing.ts` and `npe-graph-plumbing-runtime.ts`, plus `particle-local-variable-block.ts`; Scene 305 requires all three while rejecting `arc-rotate-controls`, the provider, `npe-texture-content`, the flow-map and noise update blocks, exact-blend, and Sprite2D modules. A source guard also rejects any Scene 305 `attachControl` import or call. The detached malformed unit fixture proves marked shared block/root storage and build success but deliberately makes no false no-import assertion after an explicit helper hit. No existing lab scene uses `parseNodeParticleSetFromSnippet`, so no representative snippet scene is added to the filtered bundle list; inline/network unit coverage and the helper's dynamic-import source guard cover that boundary. No bundle may contain a Teleport, Elbow, or Debug evaluator module because those files do not exist.
+Phase 3 bundle guards filter generated bundle-info through each scene's `runtimeChunks`, because Vite may build a lazy runtime chunk without fetching it. Existing canonical direct scenes, Scene 302, and Scene 359 reject both `npe-graph-plumbing.ts` and `npe-graph-plumbing-runtime.ts`, plus `particle-local-variable-block.ts`; Scene 305 requires all three while rejecting `arc-rotate-controls`, the provider, `npe-texture-content`, the flow-map and noise update blocks, exact-blend, and Sprite2D modules. A source guard also rejects any Scene 305 `attachControl` import or call. The detached malformed unit fixture proves marked shared block/root storage and build success but deliberately makes no false no-import assertion after an explicit helper hit. No existing lab scene uses `parseNodeParticleSetFromSnippet`, so no representative snippet scene is added to the filtered bundle list; inline/network unit coverage and the helper's dynamic-import source guard cover that boundary. No bundle may contain a Teleport, Elbow, or Debug evaluator module because those files do not exist.
 
 The parser, builder, and block manifest contain no graph-plumbing source. The thin helper is retained only by an explicit helper/snippet import; the heavy runtime is reached only by its dynamic import after a candidate hit. Against the exact Phase 3B raw totals, all nine canonical direct graph scenes moved by `0 B` and fetched neither graph-plumbing module nor the local evaluator. Scene 305 fetches the thin helper, heavy runtime, and LocalVariable block module, fetches no camera controls, and remains below its approved `45.0 KB` ceiling after excluding checked-in `*-npe.ts` graph payloads.
+
+Scene 359 is not a canonical scene. It deliberately fetches value/math block chunks that the `OPTIONAL_FEATURES` table forbids in canonical scenes:
+
+- Trigonometry, NLerp, SmoothStep, Clamp, Step, NumberMath, VectorMath, and FloatToInt
+- UpdateSpriteCellIndex
+- `npe-contextual-extra`
+- `particle-component-map`
+- the Point shape block
+
+It fetches no emitter provider, no graph-plumbing module, no LocalVariable evaluator, and no camera controls. A focused filtered build measures `46,861` raw bytes and `27.3 KB` gzip, below its approved `46.5 KB` (`47,616` byte) ceiling.
+
+Its non-payload runtime is about the same size as Scene 276's: the value/math chunks replace the random, lerp, converter, box-shape, and basic sprite-update chunks. The raw totals still differ because bundle accounting subtracts each `*-npe.ts` payload's unminified esbuild size. That subtraction is larger than the payload's real minified size. Scene 359's graph is therefore a data-only serialized literal, like the other NPE payloads. A helper-function encoding of the same graph is smaller unminified, so it would get a smaller discount and measure about `52.8 KB` raw for identical shipped code.
 
 The provider implementation is synchronous because its public options helper must install the callback before a builder starts. Tree shaking removes the entire module, including its matrix validation and inverse-refresh dependencies, from non-provider scenes.
 
@@ -2255,8 +2277,10 @@ lab/lite/src/lite/scene300.ts
 lab/lite/src/lite/scene301.ts
 lab/lite/src/lite/scene302.ts
 lab/lite/src/lite/scene305.ts
+lab/lite/src/lite/scene359.ts
 lab/lite/src/bjs/scene302.ts
 lab/lite/src/bjs/scene305.ts
+lab/lite/src/bjs/scene359.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
@@ -2268,10 +2292,12 @@ lab/lite/src/shared/scene283-npe-multiply-blend.ts
 lab/lite/src/shared/scene284-npe-multiply-add-blend.ts
 lab/lite/src/shared/scene302-npe-moving-emitter.ts
 lab/lite/src/shared/scene305-teleport-npe.ts
+lab/lite/src/shared/scene359-values-math-npe.ts
 lab/lite/src/shared/npe-sprite2d-fixture.ts
 lab/public/thumbnails/scene301.jpg
 lab/public/thumbnails/scene302.jpg
 lab/public/thumbnails/scene305.jpg
+lab/public/thumbnails/scene359.jpg
 lab/lite/bundle-scene301.html
 lab/lite/scene301.html
 lab/lite/babylon-ref-scene302.html
@@ -2280,8 +2306,12 @@ lab/lite/scene302.html
 lab/lite/babylon-ref-scene305.html
 lab/lite/bundle-scene305.html
 lab/lite/scene305.html
+lab/lite/babylon-ref-scene359.html
+lab/lite/bundle-scene359.html
+lab/lite/scene359.html
 reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png
 reference/lite/scene305-npe-teleport/babylon-ref-golden.png
+reference/lite/scene359-npe-values-math/babylon-ref-golden.png
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
@@ -2295,6 +2325,7 @@ tests/lite/parity/scenes/scene300-npe-sprite2d.spec.ts
 tests/lite/parity/scenes/scene301-npe-sprite2d-blend-modes.spec.ts
 tests/lite/parity/scenes/scene302-npe-moving-emitter.spec.ts
 tests/lite/parity/scenes/scene305-npe-teleport.spec.ts
+tests/lite/parity/scenes/scene359-npe-values-math.spec.ts
 tests/lite/parity/bundle-size.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
 tests/lite/unit/npe-particle-noise-texture.test.ts

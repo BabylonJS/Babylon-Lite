@@ -3245,5 +3245,15 @@
         "tags": ["std", "pbr", "nme", "procedural", "post-process", "frame-graph", "right-handed"],
         "rightHanded": true,
         "skipPerf": true
+    },
+    {
+        "id": 359,
+        "slug": "scene359-npe-values-math",
+        "name": "Scene 359 — NPE Values & Math",
+        "maxMad": 0.01,
+        "maxRawKB": 46.5,
+        "description": "Deterministic NPE sprite-sheet fountain whose position, colour, size, and sprite cell are computed by the value/math blocks: Trigonometry, NLerp, SmoothStep, Clamp, Step, NumberMath, VectorMath, FloatToInt, Int-typed Math, the sprite-cell contextual sources, and UpdateSpriteCellIndex. Lite must preserve Babylon.js pixels.",
+        "tags": ["npe", "particles", "billboards", "sprite-sheet", "math"],
+        "skipPerf": true
     }
 ]

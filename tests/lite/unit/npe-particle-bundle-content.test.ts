@@ -15,9 +15,9 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const SCENE_305_SOURCE = resolve(__dirname, "../../../lab/lite/src/lite/scene305.ts");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
-const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
+const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302, 359];
 const SPRITE_2D_BLEND_SCENES = [50, 300, 301];
-const GRAPH_PLUMBING_SCENES = [...CANONICAL_PARTICLE_SCENES, 302, 305];
+const GRAPH_PLUMBING_SCENES = [...CANONICAL_PARTICLE_SCENES, 302, 305, 359];
 /** The per-scene manifests are build output, not tracked source, so the specs that
  *  read them self-skip in CI's Unit Tests job (which runs before any build). The
  *  Bundle Size job re-runs them after `pnpm build:bundle-scenes`, and local
