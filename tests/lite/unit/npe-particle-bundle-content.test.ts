@@ -40,7 +40,7 @@ const OPTIONAL_FEATURES: ReadonlyArray<{ pattern: RegExp; scenes: readonly numbe
     { pattern: /npe-manifest-extra/, scenes: [263, 264, 276, 277, 280, 281] },
     {
         pattern:
-            /update-(direction|angle)-block|npe-(contextual-extra|emitter-provider|graph-plumbing(?:-runtime)?|live-emitter|local-position)|random-once-typed|sprite-columns-random|particle-(condition|float-to-int|local-variable|vector-length|input-local-position)|-shape-local|(point|cone|cylinder|mesh)-shape-block|math\/invert-mat4/,
+            /update-(direction|angle|sprite-cell-index)-block|npe-(contextual-extra|emitter-provider|graph-plumbing(?:-runtime)?|live-emitter|local-position)|random-once-typed|sprite-columns-random|particle-(condition|float-to-int|local-variable|vector-length|input-local-position|clamp|nlerp|number-math|smooth-step|step|trigonometry|vector-math|component-map)|-shape-local|(point|cone|cylinder|mesh)-shape-block|math\/invert-mat4/,
         scenes: [],
     },
 ];

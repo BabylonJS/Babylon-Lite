@@ -397,6 +397,8 @@ Only these columns are allocated in addition to the base and standard columns:
 interface ParticleSpriteHandle {
     readonly cellWidth: number;
     readonly cellHeight: number;
+    readonly startCellID: number;
+    readonly endCellID: number;
     readonly cellIndex: Uint16Array;
     readonly update: (i: number) => void;
 }
@@ -662,12 +664,12 @@ An input is connected only when both `targetBlockId != null` and `targetConnecti
 
 The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
-- `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
+- `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleNumberMathBlock`, `ParticleVectorMathBlock`, `ParticleTrigonometryBlock`, `ParticleLerpBlock`, `ParticleNLerpBlock`, `ParticleClampBlock`, `ParticleStepBlock`, `ParticleSmoothStepBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
 - `color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, and `w`: `ParticleConverterBlock`.
 
 `ParticleTextureSourceBlock` publishes its `texture` output through `ctx.setTexture` into a separate texture map with the same key form. The value is one static `NpeTextureValue { url, invertY }` descriptor, not a per-particle getter.
 
-`SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all seven update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
+`SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, `UpdateSpriteCellIndexBlock`, and all seven other update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
 
 ### 7.3 Input resolution and literals
 
@@ -688,13 +690,30 @@ Literal parsing is:
 - `BABYLON.Color4` arrays become `{ r: value[0] ?? 0, g: value[1] ?? 0, b: value[2] ?? 0, a: value[3] ?? 1 }`.
 - Other literal forms are ignored.
 
+`ctx.isConnected(block, name)` applies the two-field connection rule without resolving a getter. Blocks that Babylon.js leaves without output when a required input is unconnected use it to skip `setOutput`, so a consuming connection fails with the unresolved-connection error.
+
+Babylon.js `Int` typing is build-time metadata. `ctx.setOutput(blockId, name, getter, isInt)` records an output as `Int` when `isInt` is true, and `ctx.isInt(block, name)` is true only for a connected input whose exact source output was recorded as `Int`. Unconnected inputs and literals are never `Int`. Typing changes values only where Babylon.js does: `ParticleMathBlock` and `ParticleNumberMathBlock` truncate with `| 0` when their `left` input is `Int`. The `Int` sources are `Int` typed `ParticleInputBlock` constants, the three sprite-cell contextual sources, and `ParticleFloatToIntBlock`. Other value outputs take their typing from inputs, mirroring Babylon.js `_typeConnectionSource` and `_linkConnectionTypes`:
+
+| Block                                                                | Output is `Int` when         |
+| -------------------------------------------------------------------- | ---------------------------- |
+| `ParticleMathBlock`                                                  | `left` and `right` are `Int` |
+| `ParticleNumberMathBlock`, `ParticleLerpBlock`, `ParticleNLerpBlock` | `left` is `Int`              |
+| `ParticleClampBlock`, `ParticleStepBlock`, `ParticleSmoothStepBlock` | `value` is `Int`             |
+| `ParticleTrigonometryBlock`, `ParticleLocalVariableBlock`            | `input` is `Int`             |
+| `ParticleConditionBlock`                                             | `ifTrue` is `Int`            |
+| `ParticleRandomBlock`                                                | `min` is `Int`               |
+| `ParticleGradientValueBlock`                                         | `value` is `Int`             |
+| `ParticleGradientBlock`                                              | `value0` is `Int`            |
+
+Every other output is never `Int`. Babylon.js derives the Math output type when a connection changes; Lite derives it once at build from the connected sources, which gives the same result for a serialized graph.
+
 ### 7.4 Block manifest
 
 The block manifest maps every supported serialized Babylon.js class name to one lazy block module through two tables split by class, and `loadNpeBlock(className)` in `npe-manifest.ts` resolves it:
 
 - Each table is one object literal with a `null` prototype. Each entry is `ClassName: () => import("./blocks/<file>.js")`, where every block module has the uniform export `npeBlock: NpeBlockEvaluator`. The null prototype keeps serialized class names such as `constructor` or `toString` from resolving to inherited `Object.prototype` members.
 - The base table in `npe-manifest.ts` lists exactly the 11 classes that Babylon.js `ConvertToNodeParticleSystemSetAsync` emits for a default box-emitter `ParticleSystem` without gradients: `SystemBlock`, `CreateParticleBlock`, `BoxShapeBlock`, `UpdatePositionBlock`, `UpdateColorBlock`, `ParticleTextureSourceBlock`, `ParticleInputBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleConverterBlock`, and `ParticleRandomBlock`. The set also covers the editor's default graph (`NodeParticleSystemSet.setToDefault`). `npe-particle-build.test.ts` checks the table against the converted scene 262 graph.
-- The extension table `NPE_EXTRA_BLOCKS` in `npe-manifest-extra.ts` lists the other 19 classes, including `ParticleLocalVariableBlock`. Every newly supported class is added there. Table membership follows this rule, never a per-class size measurement.
+- The extension table `NPE_EXTRA_BLOCKS` in `npe-manifest-extra.ts` lists the other 27 classes, including `ParticleLocalVariableBlock`. Every newly supported class is added there. Table membership follows this rule, never a per-class size measurement.
 - `loadNpeBlock` reads the base table first and imports the extension table only on a miss. A graph whose reachable classes are all in the base table never fetches the extension chunk. Any other graph fetches it once, then fetches its extension block chunks. The `OPTIONAL_FEATURES` table of `npe-particle-bundle-content.test.ts` lists the canonical scenes allowed to fetch it.
 - `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` have no entry in either table, because `normalizeNodeParticleGraph` removes them before a builder runs (section 9.31).
 - Every class name without an entry in either table throws `NodeParticle: unsupported block "<ClassName>"`. `loadReachableBlocks` calls the loader for every reachable class before the first root is built (section 7.1), so an unsupported class fails the build before any system is created.
@@ -765,6 +784,9 @@ interface NpeTextureValue {
 | `0x0007` | Scale                | scratch `Vec2` from standard scale columns                                                                                                |
 | `0x0008` | AgeGradient          | `age[i] / lifeTime[i]`, without a zero guard                                                                                              |
 | `0x0009` | Angle                | `number` from the standard angle column                                                                                                   |
+| `0x0010` | SpriteCellIndex      | `Int` `number` from the shared `sprite.cellIndex` column, allocating it when no sprite feature has                                        |
+| `0x0011` | SpriteCellStart      | `Int` `number`; the sprite sheet's `startCellID`, read lazily so a sheet built later applies, otherwise `0`                               |
+| `0x0012` | SpriteCellEnd        | `Int` `number`; the sprite sheet's `endCellID`, read lazily so a sheet built later applies, otherwise `0`                                 |
 | `0x0013` | InitialColor         | scratch `Color4`; requests four initial-color columns and wraps `createColorDead` to copy current color before invoking the captured step |
 | `0x0014` | ColorDead            | scratch `Color4`; requests four dead-color columns and installs `_writeColorDead`                                                         |
 | `0x0015` | InitialDirection     | scratch `Vec3`; normally requests three columns and wraps `createEmitPower` to copy direction before invoking the captured step           |
@@ -823,11 +845,11 @@ When both contextual and system source ids are zero, the block reads `serialized
 | `0x0080` Color4  | array RGB with missing entries `0`, alpha with missing entry `1` |
 | any other id     | numeric serialized value or `0`                                  |
 
-Contextual source has precedence over system source, and system source has precedence over a constant. The block installs `output`.
+Contextual source has precedence over system source, and system source has precedence over a constant. The block installs `output`, typed `Int` for an `Int` constant and for the three sprite-cell contextual sources (section 7.3). System sources and every other source are not `Int`.
 
 ## 9. Supported blocks
 
-Builders support exactly 34 block class names after graph normalization. The 29 ordinary classes work on a directly parsed graph; `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` are supported only at the normalized boundary. The parser itself can represent arbitrary serialized class names.
+Builders support exactly 42 block class names after graph normalization. The 37 ordinary classes work on a directly parsed graph; `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` are supported only at the normalized boundary. The parser itself can represent arbitrary serialized class names.
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -835,12 +857,16 @@ BoxShapeBlock                       PointShapeBlock
 SphereShapeBlock                    ConeShapeBlock
 CylinderShapeBlock                  MeshShapeBlock
 ParticleInputBlock                  ParticleRandomBlock
-ParticleMathBlock                   ParticleLerpBlock
-ParticleConverterBlock              ParticleGradientBlock
-ParticleGradientValueBlock          ParticleConditionBlock
-ParticleFloatToIntBlock             ParticleVectorLengthBlock
-ParticleTextureSourceBlock          SetupSpriteSheetBlock
-BasicSpriteUpdateBlock              UpdatePositionBlock
+ParticleMathBlock                   ParticleNumberMathBlock
+ParticleVectorMathBlock             ParticleTrigonometryBlock
+ParticleLerpBlock                   ParticleNLerpBlock
+ParticleClampBlock                  ParticleStepBlock
+ParticleSmoothStepBlock             ParticleConverterBlock
+ParticleGradientBlock               ParticleGradientValueBlock
+ParticleConditionBlock              ParticleFloatToIntBlock
+ParticleVectorLengthBlock           ParticleTextureSourceBlock
+SetupSpriteSheetBlock               BasicSpriteUpdateBlock
+UpdateSpriteCellIndexBlock          UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
 UpdateAngleBlock                    UpdateSizeBlock
 UpdateAttractorBlock                UpdateFlowMapBlock
@@ -1049,6 +1075,8 @@ Two scalars produce a scalar. A scalar and Vector2, Vector3, or Color4 splat the
 
 The one evaluator is alias-safe for every graph. Left and right may both read a getter that rewrites one shared scratch value on every call, such as a lock-mode-0 `ParticleRandomBlock`, without a separate variant. It evaluates left first. A scalar left selects the result shape from right: Color4 when it has `r`, Vector3 when it has `z`, otherwise Vector2. A non-scalar left copies all its components into the result scratch before right is evaluated. For a non-scalar left, a scalar right is splatted, a matching right supplies components, and an incompatible right supplies zero. Results use one reused scratch value per shape. The block installs `output`.
 
+When `left` is `Int` (section 7.3), a scalar result is truncated with `| 0`, and the output is `Int` only when `right` is also `Int`. Babylon.js applies `| 0` to an `Int` left with a vector or color right as well, which collapses that result to the number `0`; Lite leaves such non-scalar results untruncated.
+
 ### 9.13 ParticleLerpBlock
 
 `gradient` defaults to `0`. The result is `left + (right - left) * gradient` without clamping. The getter copies all left components before evaluating right. Shape is determined by left; an incompatible right supplies zero. It supports scalar, Vector2, Vector3, and Color4, writes non-scalars into reused scratch, and installs `output`.
@@ -1102,7 +1130,7 @@ Unknown test ids select false. The block installs `output`.
 
 ### 9.18 ParticleFloatToIntBlock
 
-Input defaults to `0`. Operation ids are `0 Math.round`, `1 Math.ceil`, `2 Math.floor`, and `3 Math.trunc`. Missing and unknown operation ids use `Math.round`. The block installs `output`.
+Input defaults to `0`. Operation ids are `0 Math.round`, `1 Math.ceil`, `2 Math.floor`, and `3 Math.trunc`. Missing and unknown operation ids use `Math.round`. The block installs an `Int` typed `output`.
 
 ### 9.19 ParticleVectorLengthBlock
 
@@ -1110,13 +1138,13 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-The block performs no loading. It installs one `texture` output whose getter returns the same `NpeTextureValue { url, invertY }` descriptor for every index.
+The block performs no loading. It publishes one static `NpeTextureValue { url, invertY }` descriptor on its `texture` output through `ctx.setTexture` (section 7.2).
 
 - `url` is a nonempty string `serialized.textureDataUrl`, otherwise a nonempty string `serialized.url`, otherwise the empty string. This matches Babylon.js `_deserialize`, where an embedded data URL takes precedence over the serialized URL. Babylon serialization clears `url` when `textureDataUrl` is set, so serializer output carries only one of them. The `serializedCachedData` flag alone has no effect because it carries no pixels.
 - HTTP(S), protocol-relative, and root-relative URLs are kept as written. Any other nonempty source is resolved with `new URL(source, textureBaseUrl).href` when `textureBaseUrl` is supplied; `data:` and `blob:` URLs are absolute and resolve to themselves.
-- `invertY` is `serialized.invertY !== false`. An omitted field applies Lite's block class default of `true`. This differs from Babylon's `_deserialize` fallback for a missing field, but Babylon's serializer always emits the field.
+- `invertY` is `!!serialized.invertY`, matching Babylon.js `_deserialize`: an omitted field is `false`. The Babylon.js class default of `true` applies only to a block created in the editor, and its serializer always emits the field.
 
-Consumers own the loading. `SystemBlock` uploads the descriptor with `loadTexture2D` (section 9.1); an omitted or `true` `invertY` passes loader `invertY: false` because Lite's billboard V convention is the opposite of Babylon's. `UpdateFlowMapBlock` and `UpdateNoiseBlock` decode it with `loadNpeTextureContent` (sections 9.24 and 9.25). Decoding caches its promise on the descriptor, so one source that feeds a system and a CPU texture update is uploaded once and decoded once, and neither consumer replaces the other.
+Consumers own the loading. `SystemBlock` uploads the descriptor with `loadTexture2D` (section 9.1); a `false` or omitted `invertY` passes loader `invertY: true` because Lite's billboard V convention is the opposite of Babylon's. `UpdateFlowMapBlock` and `UpdateNoiseBlock` decode it with `loadNpeTextureContent` (sections 9.24 and 9.25). Decoding caches its promise on the descriptor, so one source that feeds a system and a CPU texture update is uploaded once and decoded once, and neither consumer replaces the other.
 
 ### 9.21 SetupSpriteSheetBlock
 
@@ -1146,7 +1174,7 @@ cellIndex = (startCellID + ratio * distance) | 0
 
 The random-start path lazy-loads `particle/sprite-columns-random.ts` and also allocates `sprite.randomOffset`. Birth writes offset `-1` and the start cell. On an update with a negative offset, it writes `Math.random() * lifeTime`. With zero `changeSpeed`, progress is the offset; otherwise progress is `(age + offset) * changeSpeed`. Ratio and cell math then match the ordinary path.
 
-Both paths set `_spriteSheet` with cell dimensions, the cell array, and the update function. They capture the current `createColorDead` and assign a wrapper so sprite birth runs after that function when non-null; when it is null, sprite birth becomes the slot. They install no output getter.
+Both paths set `_spriteSheet` with cell dimensions, the configured start and end cells, the cell array, and the update function. They capture the current `createColorDead` and assign a wrapper so sprite birth runs after that function when non-null; when it is null, sprite birth becomes the slot. They install no output getter.
 
 ### 9.22 BasicSpriteUpdateBlock
 
@@ -1561,7 +1589,53 @@ Phase 3C raises the normalized-builder class count from 31 to 34 and block evalu
 
 The block manifest (section 7.4) later replaced the registry chain described in these historical slices. `ParticleLocalVariableBlock` now loads through its own manifest entry rather than `npe-registry-extra-values.ts`, the flow-map, noise, and combined texture-update builders became deprecated aliases of the default builder, and `embedded-texture-source-block.ts` and every other registry, variant, and specialized-walk module was removed or folded into its class's block module. That refactor added no Phase 3 behavior and changed no graph-plumbing contract.
 
-The current descriptive sections are synchronized at 34 normalized-builder classes, 11 particle root files, 18 node infrastructure files, and 39 block evaluator/helper files.
+The current descriptive sections are synchronized at 42 normalized-builder classes, 11 particle root files, 18 node infrastructure files, and 48 block evaluator/helper files.
+
+### 9.32 ParticleClampBlock
+
+An unconnected `value` installs no output. `min` defaults to `0` and `max` to `1`. Each component becomes `Math.max(min, Math.min(component, max))`, for scalar, Vector2, Vector3, and Color4 values. The getter copies the `value` components into block-owned scratch before evaluating the bounds, so a bound that rewrites the same shared scratch cannot change the operand. It installs `output`, typed like `value`.
+
+### 9.33 ParticleStepBlock
+
+An unconnected `value` installs no output. `edge` defaults to `0`. Each component becomes `0` when it is below `edge` and `1` otherwise. Shape support, operand copying, and output typing match section 9.32.
+
+### 9.34 ParticleSmoothStepBlock
+
+An unconnected `value` installs no output. `edge0` defaults to `0` and `edge1` to `1`. Each component computes `x = Math.max(0, Math.min((component - edge0) / (edge1 - edge0), 1))` and returns `x * x * (3 - 2 * x)`, without guarding equal edges. Shape support, operand copying, and output typing match section 9.32.
+
+### 9.35 ParticleTrigonometryBlock
+
+The serialized `operation` indexes this table; a missing operation is `0`:
+
+| Id  | Operation | Id  | Operation | Id  | Operation  |
+| --- | --------- | --- | --------- | --- | ---------- |
+| 0   | Cos       | 7   | Ceiling   | 14  | Sign       |
+| 1   | Sin       | 8   | Sqrt      | 15  | Negate     |
+| 2   | Abs       | 9   | Log       | 16  | OneMinus   |
+| 3   | Exp       | 10  | Tan       | 17  | Reciprocal |
+| 4   | Exp2      | 11  | ArcTan    | 18  | ToDegrees  |
+| 5   | Round     | 12  | ArcCos    | 19  | ToRadians  |
+| 6   | Floor     | 13  | ArcSin    | 20  | Fract      |
+
+Each operation uses the matching JavaScript `Math` function or arithmetic expression. Fract keeps the sign: `value - Math.floor(value)` for non-negative values and `value - Math.ceil(value)` otherwise. An unknown operation or an unconnected `input` installs no output, as in Babylon.js. The getter maps every component of scalar, Vector2, Vector3, and Color4 inputs into reused scratch and installs `output`, typed like `input` without truncation.
+
+### 9.36 ParticleNLerpBlock
+
+Both `left` and `right` must be connected or the block installs no output. `gradient` defaults to `0`. The getter reads left, copies its components, then reads right, then gradient, matching Babylon.js evaluation order. It computes `(1 - gradient) * left + gradient * right` per component. A scalar result is returned unnormalized. Vector2, Vector3, and Color4 results are divided by their length when that length is nonzero; a zero-length result is returned as is. Results use reused scratch, and the block installs `output`, typed like `left`.
+
+### 9.37 ParticleNumberMathBlock
+
+Operations are `0 Modulo` (default) and `1 Pow`, computing JavaScript `left % right` and `Math.pow(left, right)` on scalars. Both operands must be connected. A missing operand or an unknown operation installs no output, so a consuming connection fails with the unresolved-connection error. When `left` is `Int`, the result is truncated with `| 0` and the output is `Int`; otherwise it is Float.
+
+### 9.38 ParticleVectorMathBlock
+
+Operations are `0 Dot` (default) and `1 Distance` on two Vector3 operands. Both operands must be connected. A missing operand or an unknown operation installs no output. The getter copies the left components before reading right. It installs a Float `output`.
+
+### 9.39 UpdateSpriteCellIndexBlock
+
+An unconnected `cellIndex` input makes the block a no-op: it allocates no column and adds no step. Otherwise it allocates or shares the `sprite.cellIndex` column and appends one `updateSteps` function that stores `Math.floor(cellIndex)`. Assignment to Uint16 then applies Uint16 conversion, so values below `0` or above `65535` wrap instead of keeping Babylon.js's unbounded number.
+
+Babylon.js `Particle._reset` sets a recycled particle's cell to the sprite sheet's start cell, which is `0` without a sheet. When no `SetupSpriteSheetBlock` has been built yet, this block wraps `createLifeTime` so birth writes cell `0` before the previous function runs, because spawned slots keep stale column data. A sheet built later seeds its configured start cell through its own birth hook (section 9.21). The block installs no output getter.
 
 ## 10. Rendering and live registration
 
@@ -1827,7 +1901,9 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- The parser represents arbitrary serialized class names. Builders support the 29 ordinary classes directly and five Phase 3 classes at the required normalized boundary, for 34 supported classes after normalization. Other reachable NPE classes fail with the manifest error in section 11.
+- The parser represents arbitrary serialized class names. Builders support the 37 ordinary classes directly and five Phase 3 classes at the required normalized boundary, for 42 supported classes after normalization. Other reachable NPE classes fail with the manifest error in section 11.
+- `Int` typing truncates only scalar `ParticleMathBlock` results. Babylon.js also applies `| 0` to an `Int` left with a vector or color right, which collapses the result to `0`; Lite keeps the untruncated vector.
+- Sprite cells are stored as Uint16, so an `UpdateSpriteCellIndexBlock` value below `0` or above `65535` wraps instead of keeping Babylon.js's unbounded number.
 - Simulation is CPU-only.
 - Rendering is selected explicitly by the caller: camera-facing billboards or pure-2D Sprite2D. Serialized `billBoardMode` and `isBillboardBased` do not select either runtime path.
 - The Sprite2D bridge maps only NPE world XY. It ignores `posZ` and does not support XZ/YZ projection.
@@ -1862,12 +1938,14 @@ Snapshots sort live slots by particle id. The scene 262 canonical state test use
 The current unit categories are:
 
 - Buffer and lifecycle: base-only allocation, string-key column sharing, dense spawn/swap-remove, capacity, emission, integration, death clamp, and sprite-column math.
-- Build behavior: inline JSON, root reachability, one parallel load of every reachable block class before any block builds, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, system-time reevaluation, Babylon.js data-over-URL precedence for dual-source input, and `SystemBlock` embedded texture upload with explicit-false mapping and Lite's class default when `invertY` is omitted.
+- Build behavior: inline JSON, root reachability, one parallel load of every reachable block class before any block builds, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, system-time reevaluation, Babylon.js data-over-URL precedence for dual-source input, and `SystemBlock` embedded texture upload with the explicit-true, explicit-false, and omitted `invertY` mappings, where omitted matches Babylon.js `false`.
 - Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Moving emitters: translating and rotating provider snapshots, newly returned matrices and in-place mutation, static-option precedence and immutability, world births, all six world/local shape paths, `LocalPositionUpdated`, contextual Emitter, every implicit Cylinder inverse in one system, every builder, Parse-option preservation, unstarted and stopped-but-started calls, independent multi-system sampling, wrapped-options reuse isolation, and provider exception/invalid-result atomicity across matrix, translation, inverse, and particle state.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
+- Value and math blocks: per-component Clamp, Step, and SmoothStep with defaults and no output for an unconnected value; NLerp normalization, zero length, required operands, and alias-safe evaluation order; Trigonometry operations, unknown operations, and unconnected input; VectorMath Dot and Distance; NumberMath Modulo and Pow; shared-scratch aliasing for the multi-input blocks; and `Int` typing from sources through every forwarding block, including scalar-only Math truncation.
+- Sprite cells: UpdateSpriteCellIndex birth reset and floor without a sheet, sheet start cells with a sheet built before or after the block, the unconnected no-op, lazy SpriteCellStart/SpriteCellEnd reads, and `Int` typing of the three sprite-cell sources.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, `textureDataUrl` precedence, cached decoding, unsupported-scheme rejection, and lazy texture/evaluator isolation.
 - Noise textures: exact three-sample red-channel addressing, six deterministic Float64 random coordinates, coordinate reuse and slot recycling, Vector3 defaults/strength, lifetime-clamped step scaling, extraction failure, parsed graph wiring including one embedded texture source shared by the system upload and CPU noise decoding, Babylon multi-step state fixtures, and lazy block isolation.
@@ -1973,15 +2051,15 @@ Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list
 
 The particle bundle-content test applies one table-driven unused-feature rule to the nine canonical billboard parity scenes. Every block class is its own lazy chunk, so a canonical scene that fetches an optional block or helper its graph does not use is a tree-shaking leak. The `OPTIONAL_FEATURES` table pairs each optional pattern with the scenes allowed to fetch it:
 
-| Optional chunk or module pattern                                                                                                                                                                                                                                                                                                                                      | Allowed canonical scenes     |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `particle-blend`, `particle-billboard-renderable`, `particle-billboard-scene`, `npe-blend-modes`                                                                                                                                                                                                                                                                      | 283, 284                     |
-| `update-attractor-block`                                                                                                                                                                                                                                                                                                                                              | 277                          |
-| `update-flow-map-block`                                                                                                                                                                                                                                                                                                                                               | 280                          |
-| `update-noise-block`                                                                                                                                                                                                                                                                                                                                                  | 281                          |
-| `npe-texture-content`                                                                                                                                                                                                                                                                                                                                                 | 280, 281                     |
-| `npe-manifest-extra` (extension table)                                                                                                                                                                                                                                                                                                                                | 263, 264, 276, 277, 280, 281 |
-| UpdateDirection and UpdateAngle blocks; `npe-contextual-extra`, emitter provider, graph plumbing, live emitter, and local position; typed once-random; random sprite columns; Condition, FloatToInt, LocalVariable, VectorLength, and local-position input modules; every local shape body; the Point, Cone, Cylinder, and Mesh shape blocks; and `math/invert-mat4*` | none                         |
+| Optional chunk or module pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Allowed canonical scenes     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `particle-blend`, `particle-billboard-renderable`, `particle-billboard-scene`, `npe-blend-modes`                                                                                                                                                                                                                                                                                                                                                                                                         | 283, 284                     |
+| `update-attractor-block`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 277                          |
+| `update-flow-map-block`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 280                          |
+| `update-noise-block`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 281                          |
+| `npe-texture-content`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 280, 281                     |
+| `npe-manifest-extra` (extension table)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 263, 264, 276, 277, 280, 281 |
+| UpdateDirection, UpdateAngle, and UpdateSpriteCellIndex blocks; `npe-contextual-extra`, emitter provider, graph plumbing, live emitter, and local position; typed once-random; random sprite columns; Condition, FloatToInt, LocalVariable, VectorLength, Clamp, Step, SmoothStep, NLerp, NumberMath, VectorMath, Trigonometry, and local-position input modules; the `particle-component-map` helper; every local shape body; the Point, Cone, Cylinder, and Mesh shape blocks; and `math/invert-mat4*` | none                         |
 
 Each canonical scene must have a nonempty runtime chunk list, and every fetched chunk name is checked against the table. Scene 277 must fetch `update-attractor-block`, scene 280 must fetch `update-flow-map-block` and `npe-texture-content`, and scene 281 must fetch `update-noise-block` and `npe-texture-content`. These required features are matched against the module ids inside the fetched runtime chunks when bundle-info exists, because a valid build may fold a required module into another fetched chunk; without bundle-info the check falls back to chunk names. A pure-helper test proves the table accepts an allowed feature chunk and rejects every other optional chunk.
 
@@ -2070,9 +2148,9 @@ packages/babylon-lite/src/particle/node/npe-value.ts
 
 The block manifest replaced the eight `npe-registry*.ts` tiers and the flow-map, noise, and texture-update runtime modules with `npe-manifest.ts` and its single extension table `npe-manifest-extra.ts`. `npe-flow-map.ts`, `npe-noise.ts`, and `npe-texture-updates.ts` remain only as `@deprecated` builder aliases.
 
-### 14.3 Block evaluators and helpers: 39 files
+### 14.3 Block evaluators and helpers: 48 files
 
-Thirty files are manifest block modules that export `npeBlock`. The other nine are lazy block-local paths: six `*-shape-local.ts` bodies, `particle-input-local-position.ts`, `particle-random-once.ts`, and `particle-random-once-typed.ts`. The block manifest removed the old variant and wrapper modules: compact math, CPU and embedded texture sources, dynamic emit rate, the extra and local input variants, random-sprite setup, the once-random wrapper blocks, and the `*-shape-local-block.ts` wrappers.
+Thirty-eight files are manifest block modules that export `npeBlock`. The other ten are block-local helpers and lazy paths: `particle-component-map.ts`, the shared per-component scratch helper statically imported by the Clamp, Step, SmoothStep, and Trigonometry blocks; six `*-shape-local.ts` bodies; `particle-input-local-position.ts`; `particle-random-once.ts`; and `particle-random-once-typed.ts`. The block manifest removed the old variant and wrapper modules: compact math, CPU and embedded texture sources, dynamic emit rate, the extra and local input variants, random-sprite setup, the once-random wrapper blocks, and the `*-shape-local-block.ts` wrappers.
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -2085,6 +2163,8 @@ packages/babylon-lite/src/particle/node/blocks/cylinder-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-local.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local.ts
+packages/babylon-lite/src/particle/node/blocks/particle-clamp-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-component-map.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-converter-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-float-to-int-block.ts
@@ -2095,10 +2175,16 @@ packages/babylon-lite/src/particle/node/blocks/particle-input-local-position.ts
 packages/babylon-lite/src/particle/node/blocks/particle-lerp-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-local-variable-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-math-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-nlerp-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-number-math-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once-typed.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once.ts
+packages/babylon-lite/src/particle/node/blocks/particle-smooth-step-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-step-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-trigonometry-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-vector-length-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-vector-math-block.ts
 packages/babylon-lite/src/particle/node/blocks/point-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/point-shape-local.ts
 packages/babylon-lite/src/particle/node/blocks/setup-sprite-sheet-block.ts
@@ -2114,6 +2200,7 @@ packages/babylon-lite/src/particle/node/blocks/update-flow-map-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-noise-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-position-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-size-block.ts
+packages/babylon-lite/src/particle/node/blocks/update-sprite-cell-index-block.ts
 ```
 
 TeleportIn, TeleportOut, Elbow, and Debug add no evaluator files. Frame-preparation composition remains a function in existing `particle-system.ts`, so section 14.1 stays at 11 root files.

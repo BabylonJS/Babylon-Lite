@@ -21,13 +21,16 @@ export interface ParticleEmitterInverse {
 
 /**
  * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
- * Holds the render cell dimensions, the per-particle cell-index column read by the billboard, and the
- * per-particle update step. The feature's columns and logic live in `sprite-columns.ts` + the sprite
- * blocks; a non-sprite system leaves this null and imports none of that.
+ * Holds the render cell dimensions, the configured start/end cells (read by the sprite-cell contextual
+ * sources), the per-particle cell-index column read by the billboard, and the per-particle update step.
+ * The feature's columns and logic live in `sprite-columns.ts` + the sprite blocks; a non-sprite system
+ * leaves this null and imports none of that.
  */
 export interface ParticleSpriteHandle {
     readonly cellWidth: number;
     readonly cellHeight: number;
+    readonly startCellID: number;
+    readonly endCellID: number;
     readonly cellIndex: Uint16Array;
     readonly update: (i: number) => void;
 }

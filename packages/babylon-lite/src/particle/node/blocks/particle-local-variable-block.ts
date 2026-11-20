@@ -144,6 +144,6 @@ export const npeBlock: NpeBlockEvaluator = {
                 return readSnapshot(shape, value0, value1, value2, value3, scratch);
             };
         }
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, ctx.isInt(block, "input"));
     },
 };

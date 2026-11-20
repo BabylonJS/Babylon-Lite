@@ -98,7 +98,13 @@ export interface NpeBuildContext {
     /** Per-particle value of an input. Throws when the input is wired to a texture output. */
     input(block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter;
     isConnected(block: ParsedParticleBlock, name: string): boolean;
-    setOutput(blockId: number, name: string, getter: NpeGetter): void;
+    /**
+     * Whether a connected input carries Babylon.js `Int` typing. Only Int-typed left operands change math
+     * results (Babylon.js truncates them with `| 0`); value blocks forward the typing of their type-source input.
+     */
+    isInt(block: ParsedParticleBlock, name: string): boolean;
+    /** Publish an output getter; `isInt` marks it as Babylon.js `Int` typed for downstream {@link NpeBuildContext.isInt}. */
+    setOutput(blockId: number, name: string, getter: NpeGetter, isInt?: boolean): void;
     /** Texture descriptor of a texture input, or null when it is unconnected. Throws when it is wired to a value output. */
     texture(block: ParsedParticleBlock, name: string): NpeTextureValue | null;
     setTexture(blockId: number, name: string, value: NpeTextureValue): void;
@@ -178,6 +184,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         // Texture descriptors live apart from per-particle getters, so a cross-kind connection fails here, once, at build.
         const outputs = new Map<string, NpeGetter>();
         const textures = new Map<string, NpeTextureValue>();
+        const intOutputs = new Set<string>();
         const built = new Set<number>();
 
         const ctx: NpeBuildContext = {
@@ -209,8 +216,15 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                 const input = block.inputs.find((i) => i.name === name);
                 return isInputConnected(input);
             },
-            setOutput(blockId, name, getter) {
+            isInt(block, name) {
+                const input = block.inputs.find((i) => i.name === name);
+                return isInputConnected(input) && intOutputs.has(`${input.targetBlockId}:${input.targetConnectionName}`);
+            },
+            setOutput(blockId, name, getter, isInt) {
                 outputs.set(`${blockId}:${name}`, getter);
+                if (isInt) {
+                    intOutputs.add(`${blockId}:${name}`);
+                }
             },
             texture(block, name) {
                 const input = block.inputs.find((i) => i.name === name);

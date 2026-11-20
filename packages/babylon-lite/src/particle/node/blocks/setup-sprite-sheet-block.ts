@@ -23,6 +23,8 @@ export const npeBlock: NpeBlockEvaluator = {
         system._spriteSheet = {
             cellWidth: typeof s.width === "number" ? s.width : 0,
             cellHeight: typeof s.height === "number" ? s.height : 0,
+            startCellID: config.startCellID,
+            endCellID: config.endCellID,
             cellIndex: sheet.cellIndex,
             update: sheet.update,
         };

@@ -290,7 +290,7 @@ describe("NPE Sprite2D bridge", () => {
     it("uses the NPE sprite-sheet cell index for atlas UVs", () => {
         const system = makeSystem(2);
         const cellIndex = new Uint16Array(2);
-        system._spriteSheet = { cellWidth: 16, cellHeight: 16, cellIndex, update: () => undefined };
+        system._spriteSheet = { cellWidth: 16, cellHeight: 16, startCellID: 0, endCellID: 0, cellIndex, update: () => undefined };
         addParticle(system, { x: 0, y: 0, size: 1, scaleX: 1, scaleY: 1, angle: 0, color: [1, 1, 1, 1] });
         cellIndex[0] = 5;
         const bridge = createParticleSprite2DBridge(system);
@@ -304,7 +304,7 @@ describe("NPE Sprite2D bridge", () => {
     it("propagates the atlas bounds error for an out-of-range sprite-sheet cell", () => {
         const system = makeSystem(2);
         const cellIndex = new Uint16Array(2);
-        system._spriteSheet = { cellWidth: 16, cellHeight: 16, cellIndex, update: () => undefined };
+        system._spriteSheet = { cellWidth: 16, cellHeight: 16, startCellID: 0, endCellID: 0, cellIndex, update: () => undefined };
         addParticle(system, { x: 0, y: 0, size: 1, scaleX: 1, scaleY: 1, angle: 0, color: [1, 1, 1, 1] });
         cellIndex[0] = 99;
         const bridge = createParticleSprite2DBridge(system);
