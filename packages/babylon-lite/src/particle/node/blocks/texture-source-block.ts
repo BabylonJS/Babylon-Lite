@@ -1,5 +1,4 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
-import type { NpeGetter, NpeTextureValue } from "../npe-value.js";
 
 /**
  * `ParticleTextureSourceBlock` — publishes a static texture descriptor on its `texture` output. Consumers own
@@ -12,7 +11,6 @@ export const npeBlock: NpeBlockEvaluator = {
         const rawUrl = (typeof textureDataUrl === "string" && textureDataUrl) || (typeof serializedUrl === "string" && serializedUrl) || "";
         const base = ctx.state.textureBaseUrl;
         const url = rawUrl && base && !/^(https?:)?\/\//.test(rawUrl) && !rawUrl.startsWith("/") ? new URL(rawUrl, base).href : rawUrl;
-        const value: NpeTextureValue = { url, invertY: invertY !== false };
-        ctx.setOutput(block.id, "texture", (() => value) as unknown as NpeGetter);
+        ctx.setTexture(block.id, "texture", { url, invertY: invertY !== false });
     },
 };

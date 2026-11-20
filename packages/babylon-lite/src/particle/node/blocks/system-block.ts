@@ -1,6 +1,5 @@
 import { loadTexture2D } from "../../../texture/texture-2d.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
-import type { NpeTextureValue } from "../npe-value.js";
 
 /**
  * `SystemBlock` — the graph root. Applies update speed, blend mode, emit rate, target stop duration, and the
@@ -38,20 +37,18 @@ export const npeBlock: NpeBlockEvaluator = {
             system.targetStopDuration = targetStop;
         }
 
-        if (ctx.isConnected(block, "texture")) {
-            const texture = ctx.input(block, "texture")(0) as unknown as NpeTextureValue;
-            if (texture.url) {
-                ctx.addBuildPromise(
-                    (async () => {
-                        try {
-                            // Block invertY defaults to true; Lite's opposite billboard V convention maps false to an upload flip.
-                            system.texture = await loadTexture2D(ctx.engine, texture.url, { invertY: !texture.invertY });
-                        } catch {
-                            // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
-                        }
-                    })()
-                );
-            }
+        const texture = ctx.texture(block, "texture");
+        if (texture?.url) {
+            ctx.addBuildPromise(
+                (async () => {
+                    try {
+                        // Block invertY defaults to true; Lite's opposite billboard V convention maps false to an upload flip.
+                        system.texture = await loadTexture2D(ctx.engine, texture.url, { invertY: !texture.invertY });
+                    } catch {
+                        // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
+                    }
+                })()
+            );
         }
     },
 };

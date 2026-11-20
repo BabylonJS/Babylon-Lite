@@ -18,9 +18,8 @@ async function attachNoise(map: NpeTextureContent, strength: Vec3, capacity = 1)
     const promises: Promise<void>[] = [];
     const ctx = {
         state: { system, buffer: system.buffer },
-        input(_block: ParsedParticleBlock, name: string): NpeGetter {
-            return name === "noiseTexture" ? ((() => source) as unknown as NpeGetter) : () => strength;
-        },
+        input: () => () => strength,
+        texture: () => source,
         addBuildPromise(promise: Promise<void>) {
             promises.push(promise);
         },
@@ -31,14 +30,15 @@ async function attachNoise(map: NpeTextureContent, strength: Vec3, capacity = 1)
     return system;
 }
 
-async function attachNoiseWithGetters(sourceGetter: NpeGetter, strengthGetter?: NpeGetter) {
+async function attachNoiseWithStrength(source: NpeTextureValue, strengthGetter?: NpeGetter) {
     const system = createParticleSystem(2);
     const promises: Promise<void>[] = [];
     const ctx = {
         state: { system, buffer: system.buffer },
-        input(_block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter {
-            return name === "noiseTexture" ? sourceGetter : (strengthGetter ?? fallback!);
+        input(_block: ParsedParticleBlock, _name: string, fallback?: NpeGetter): NpeGetter {
+            return strengthGetter ?? fallback!;
         },
+        texture: () => source,
         addBuildPromise(promise: Promise<void>) {
             promises.push(promise);
         },
@@ -148,7 +148,7 @@ describe("NPE UpdateNoiseBlock", () => {
 
     it("uses the Babylon Vector3 default and consumes no random values when texture extraction fails", async () => {
         const source: NpeTextureValue = { url: "noise.png", invertY: false, _content: Promise.reject(new Error("decode failed")) };
-        const system = await attachNoiseWithGetters((() => source) as unknown as NpeGetter);
+        const system = await attachNoiseWithStrength(source);
         const random = vi.spyOn(Math, "random");
         system._scaledStep = 1;
 
@@ -161,7 +161,7 @@ describe("NPE UpdateNoiseBlock", () => {
     it("applies the Babylon default strength of 100 on every axis", async () => {
         const data = new Uint8ClampedArray([255, 0, 0, 255]);
         const source: NpeTextureValue = { url: "noise.png", invertY: false, _content: Promise.resolve({ width: 1, height: 1, data }) };
-        const system = await attachNoiseWithGetters((() => source) as unknown as NpeGetter);
+        const system = await attachNoiseWithStrength(source);
         vi.spyOn(Math, "random").mockReturnValue(0);
         system._scaledStep = 0.25;
 
@@ -177,7 +177,7 @@ describe("NPE UpdateNoiseBlock", () => {
         const source: NpeTextureValue = { url: "noise.png", invertY: false, _content: Promise.resolve({ width: 1, height: 1, data }) };
         const strength = { x: 1, y: 2, z: 3 };
         const strengthGetter = vi.fn(() => strength);
-        const system = await attachNoiseWithGetters((() => source) as unknown as NpeGetter, strengthGetter);
+        const system = await attachNoiseWithStrength(source, strengthGetter);
         vi.spyOn(Math, "random").mockReturnValue(0);
         strength.x = 4;
         system._scaledStep = 1;

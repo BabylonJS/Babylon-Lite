@@ -47,6 +47,7 @@ describe("NPE particle blend modes", () => {
             isConnected() {
                 return false;
             },
+            texture: () => null,
         } as unknown as NpeBuildContext;
         systemBlock.build(block, ctx);
         system.texture = {

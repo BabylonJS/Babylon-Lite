@@ -14,7 +14,7 @@ import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 import type { ParticleBuffer } from "../particle-buffer.js";
 import { createParticleSystem, type ParticleEmitterInverse, type ParticleSystem } from "../particle-system.js";
-import type { NpeGetter, NpeValue } from "./npe-value.js";
+import type { NpeGetter, NpeTextureValue, NpeValue } from "./npe-value.js";
 import { loadNpeBlock } from "./npe-manifest.js";
 
 function isInputConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
@@ -95,9 +95,13 @@ export interface NpeBuildState {
 export interface NpeBuildContext {
     state: NpeBuildState;
     engine: EngineContext;
+    /** Per-particle value of an input. Throws when the input is wired to a texture output. */
     input(block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter;
     isConnected(block: ParsedParticleBlock, name: string): boolean;
     setOutput(blockId: number, name: string, getter: NpeGetter): void;
+    /** Texture descriptor of a texture input, or null when it is unconnected. Throws when it is wired to a value output. */
+    texture(block: ParsedParticleBlock, name: string): NpeTextureValue | null;
+    setTexture(blockId: number, name: string, value: NpeTextureValue): void;
     addBuildPromise(promise: Promise<void>): void;
 }
 
@@ -171,7 +175,9 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         };
         options._setupEmitter?.(state);
 
+        // Texture descriptors live apart from per-particle getters, so a cross-kind connection fails here, once, at build.
         const outputs = new Map<string, NpeGetter>();
+        const textures = new Map<string, NpeTextureValue>();
         const built = new Set<number>();
 
         const ctx: NpeBuildContext = {
@@ -180,11 +186,16 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             input(block, name, fallback) {
                 const input = block.inputs.find((i) => i.name === name);
                 if (isInputConnected(input)) {
-                    const getter = outputs.get(`${input.targetBlockId}:${input.targetConnectionName}`);
+                    const source = `${input.targetBlockId}:${input.targetConnectionName}`;
+                    const getter = outputs.get(source);
                     if (getter) {
                         return getter;
                     }
-                    throw new Error(`NodeParticle: unresolved connection ${block.className}.${name}`);
+                    throw new Error(
+                        textures.has(source)
+                            ? `NodeParticle: ${block.className}.${name} does not accept a texture`
+                            : `NodeParticle: unresolved connection ${block.className}.${name}`
+                    );
                 }
                 if (input) {
                     const literal = parseInputLiteral(input);
@@ -200,6 +211,20 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             },
             setOutput(blockId, name, getter) {
                 outputs.set(`${blockId}:${name}`, getter);
+            },
+            texture(block, name) {
+                const input = block.inputs.find((i) => i.name === name);
+                if (!isInputConnected(input)) {
+                    return null;
+                }
+                const texture = textures.get(`${input.targetBlockId}:${input.targetConnectionName}`);
+                if (!texture) {
+                    throw new Error(`NodeParticle: ${block.className}.${name} expects a texture`);
+                }
+                return texture;
+            },
+            setTexture(blockId, name, value) {
+                textures.set(`${blockId}:${name}`, value);
             },
             addBuildPromise(promise) {
                 buildPromises.push(promise);

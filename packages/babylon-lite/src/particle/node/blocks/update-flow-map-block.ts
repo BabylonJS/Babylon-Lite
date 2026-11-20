@@ -5,7 +5,7 @@ import type { Mat4, Mat4Storage, Vec3 } from "../../../math/types.js";
 import type { ParticleBuffer } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import { loadNpeTextureContent } from "../npe-texture-content.js";
-import type { NpeTextureContent, NpeTextureValue } from "../npe-value.js";
+import type { NpeTextureContent } from "../npe-value.js";
 
 /** Apply one screen-space flow-map sample to a particle direction. */
 function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStrength: number, buffer: ParticleBuffer, i: number, screen: Vec3): void {
@@ -29,7 +29,7 @@ export const npeBlock: NpeBlockEvaluator = {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
         const scene = ctx.state.scene;
-        const sourceValue = ctx.input(block, "flowMap")(0) as unknown as NpeTextureValue;
+        const sourceValue = ctx.texture(block, "flowMap");
         const strengthGetter = ctx.input(block, "strength", () => 1);
         const screen: Vec3 = { x: 0, y: 0, z: 0 };
         const matrix = allocateMat4();

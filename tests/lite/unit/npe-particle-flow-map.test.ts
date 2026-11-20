@@ -11,7 +11,7 @@ import { buildNodeParticleSet, type NodeParticleSet, type NpeBuildContext } from
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/particle/node/npe-texture-content";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
-import type { NpeGetter, NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
+import type { NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 function flowMap(data: number[], width = 1, height = 1): NpeTextureContent {
@@ -42,9 +42,8 @@ async function attachFlowMap(
     const promises: Promise<void>[] = [];
     const ctx = {
         state: { system, buffer: system.buffer, scene },
-        input(_block: ParsedParticleBlock, name: string): NpeGetter {
-            return name === "flowMap" ? ((() => source) as unknown as NpeGetter) : strengthGetter;
-        },
+        input: () => strengthGetter,
+        texture: () => source,
         addBuildPromise(promise: Promise<void>) {
             promises.push(promise);
         },
@@ -422,17 +421,17 @@ describe("NPE UpdateFlowMapBlock", () => {
             inputs: [],
             serialized: { url: "fallback.png", textureDataUrl: "data:image/png;base64,AA==", invertY: true },
         } as ParsedParticleBlock;
-        let output: NpeGetter | undefined;
+        let output: NpeTextureValue | undefined;
         const ctx = {
             state: { textureBaseUrl: "https://example.test/textures/" },
-            setOutput(_blockId: number, _name: string, getter: NpeGetter) {
-                output = getter;
+            setTexture(_blockId: number, _name: string, value: NpeTextureValue) {
+                output = value;
             },
         } as unknown as NpeBuildContext;
 
         particleTextureSourceBlock.build(block, ctx);
 
-        expect(output?.(0) as unknown as NpeTextureValue).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
+        expect(output).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
     });
 
     it("does not fetch CPU texture content for unsupported URL schemes", async () => {

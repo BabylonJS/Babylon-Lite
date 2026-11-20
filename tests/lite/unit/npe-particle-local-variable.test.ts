@@ -44,6 +44,8 @@ async function buildLocalGetter(state: NpeBuildState, blockId: number, scope: un
         setOutput: (_blockId, _name, getter) => {
             output = getter;
         },
+        texture: () => null,
+        setTexture: () => undefined,
         addBuildPromise: () => undefined,
     };
     await (await loadNpeBlock(block.className)).build(block, context);
@@ -125,6 +127,8 @@ describe("ParticleLocalVariableBlock", () => {
             setOutput: (_blockId, _name, getter) => {
                 output = getter;
             },
+            texture: () => null,
+            setTexture: () => undefined,
             addBuildPromise: () => undefined,
         };
         const evaluator = await loadNpeBlock(block.className);

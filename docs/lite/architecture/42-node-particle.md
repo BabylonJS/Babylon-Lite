@@ -664,7 +664,8 @@ The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
 - `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
 - `color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, and `w`: `ParticleConverterBlock`.
-- `texture`: `ParticleTextureSourceBlock`. Its getter returns the same `NpeTextureValue { url, invertY }` descriptor for every index.
+
+`ParticleTextureSourceBlock` publishes its `texture` output through `ctx.setTexture` into a separate texture map with the same key form. The value is one static `NpeTextureValue { url, invertY }` descriptor, not a per-particle getter.
 
 `SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all seven update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
 
@@ -672,10 +673,12 @@ The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
 `ctx.input(block, name, fallback)` finds the first input with that name.
 
-- A connected input must find its exact output-map key. Otherwise the call throws `NodeParticle: unresolved connection <ClassName>.<inputName>`.
+- A connected input must find its exact output-map key. A key found only in the texture map throws `NodeParticle: <ClassName>.<inputName> does not accept a texture`; any other miss throws `NodeParticle: unresolved connection <ClassName>.<inputName>`.
 - An unconnected input with a parsed literal returns a closure over that literal.
 - If there is no parsed literal, the supplied fallback is returned.
 - Without a fallback, the getter returns `null` cast to the graph value type.
+
+`ctx.texture(block, name)` is the texture-port counterpart, used by `SystemBlock.texture`, `UpdateFlowMapBlock.flowMap`, and `UpdateNoiseBlock.noiseTexture`. An unconnected input returns `null`. A connected input returns the descriptor from the texture map, or throws `NodeParticle: <ClassName>.<inputName> expects a texture` when the source is not a texture output. Both kinds of cross-wiring are rejected once, during the build walk, so no per-particle type check exists. Babylon.js restores serialized connections without type constraints, so it would accept such a graph and evaluate the wrong kind of value; Lite rejects it.
 
 Literal parsing is:
 
@@ -731,7 +734,7 @@ type ParticleStep = (i: number) => void;
 
 Scalar getters return a number. Vector and color getters generally fill one value captured by the getter and return that same value on every call. Consumers copy components before invoking another volatile getter.
 
-The flow-map and noise features internally carry one build-local texture value through their dependency override (cast across the scalar/vector getter contract and consumed only by the matching update block):
+Texture ports carry a build-time descriptor instead of a getter, through `ctx.setTexture` and `ctx.texture` (section 7.3):
 
 ```ts
 interface NpeTextureContent {
@@ -1170,7 +1173,7 @@ The block observes position and direction as left by earlier `updateSteps`, and 
 
 ### 9.24 UpdateFlowMapBlock
 
-Inputs are `particle`, `flowMap`, and `strength`; `strength` defaults to `1`. The block allocates no particle columns and appends one direction-only update step. `flowMap` accepts the `texture` output of a `ParticleTextureSourceBlock`. An absent or non-texture value leaves the update step installed with no loaded map, so it has no effect.
+Inputs are `particle`, `flowMap`, and `strength`; `strength` defaults to `1`. The block allocates no particle columns and appends one direction-only update step. `flowMap` accepts the `texture` output of a `ParticleTextureSourceBlock` through `ctx.texture`. An unconnected input leaves the update step installed with no loaded map, so it has no effect; a non-texture source rejects the build.
 
 During build, a descriptor with a nonempty URL adds a build promise that calls `loadNpeTextureContent`. A URL with an explicit scheme other than `http`, `https`, `data`, or `blob` resolves to a null map without fetching; relative and scheme-less URLs are fetched as resolved by `ParticleTextureSourceBlock`. The loader fetches the URL and rejects a non-OK response, decodes an `ImageBitmap` with `premultiplyAlpha: "none"` and `colorSpaceConversion: "none"`, and draws it into an `OffscreenCanvas` when available or an HTML canvas otherwise. For `invertY === true`, the canvas transform vertically flips the bitmap before `getImageData`; false preserves source row order. The resulting `{ width, height, data: Uint8ClampedArray }` promise is cached on the texture value. The evaluator catches decode failures and retains a null map, making every update a no-op.
 
@@ -1778,6 +1781,8 @@ The implementation preserves these explicit failures:
 - LocalVariable runtime shape change: `NodeParticle: ParticleLocalVariableBlock <id> changed value type`.
 - Snippet HTTP response: `NodeParticle: snippet fetch failed (<status>)`.
 - Connected value with no installed getter: `NodeParticle: unresolved connection <ClassName>.<inputName>`.
+- Texture output wired into a value input: `NodeParticle: <ClassName>.<inputName> does not accept a texture`.
+- Value output wired into a texture input: `NodeParticle: <ClassName>.<inputName> expects a texture`.
 - Any reachable class without a block-manifest entry: `NodeParticle: unsupported block "<ClassName>"`. The parallel preload throws it before any system is built.
 - Unsupported contextual source: `NodeParticle: unsupported contextual source 0x<lowercase hex>`.
 - Unsupported system source: `NodeParticle: unsupported system source <decimal id>`.
