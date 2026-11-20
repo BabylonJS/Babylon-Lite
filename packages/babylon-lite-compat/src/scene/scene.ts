@@ -55,6 +55,7 @@ import type {
     EngineContext,
     Skeleton as LiteSkeleton,
     ParticleSystem as LiteParticleSystem,
+    AnimationGroup as LiteAnimationGroup,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -165,19 +166,48 @@ export class Scene extends AbstractScene {
      */
     public get animationGroups(): AnimationGroup[] {
         const liteGroups = this._lite.animationGroups ?? [];
-        return liteGroups.map((g) => {
-            let wrapper = this._animationGroupCache.get(g);
-            if (!wrapper) {
-                wrapper = AnimationGroup._fromLite(g, this._engine._lite, this);
-                this._animationGroupCache.set(g, wrapper);
-            }
-            return wrapper;
-        });
+        return liteGroups.map((g) => this._wrapAnimationGroup(g));
     }
 
     /** Babylon.js `scene.getAnimationGroupByName(name)` — first loaded animation group with a matching name, else `null`. */
     public getAnimationGroupByName(name: string): AnimationGroup | null {
         return this.animationGroups.find((g) => g.name === name) ?? null;
+    }
+
+    /** @internal Return the canonical compat wrapper for a loaded Lite animation group. */
+    public _wrapAnimationGroup(
+        lite: LiteAnimationGroup,
+        targetMapper: (target: object | undefined, path: string, componentIndex?: number) => readonly unknown[] = (target, path, componentIndex) =>
+            this._wrapAnimationTargets(target, path, componentIndex),
+        retained?: AnimationGroup
+    ): AnimationGroup {
+        let wrapper = retained ?? this._animationGroupCache.get(lite);
+        if (!wrapper) {
+            wrapper = AnimationGroup._fromLite(lite, this._engine._lite, this, targetMapper);
+        } else if (retained) {
+            wrapper._rebindLiteHost(this._engine._lite, this, targetMapper);
+        }
+        this._animationGroupCache.set(lite, wrapper);
+        return wrapper;
+    }
+
+    /** @internal Map a Lite animation target to Babylon.js node or morph-target wrappers. */
+    public _wrapAnimationTargets(target: object | undefined, path: string, componentIndex?: number): readonly unknown[] {
+        if (!target) {
+            return [target];
+        }
+        if (path !== "weights" || componentIndex === undefined) {
+            return [this._meshWrappers.get(target) ?? target];
+        }
+        const result: unknown[] = [];
+        for (const node of (target as { children?: object[] }).children ?? []) {
+            const wrapper = this._meshWrappers.get(node) as (Mesh & { morphTargetManager?: { getTarget(index: number): unknown } | null }) | undefined;
+            const morphTarget = wrapper?.morphTargetManager?.getTarget(componentIndex);
+            if (morphTarget) {
+                result.push(morphTarget);
+            }
+        }
+        return result.length > 0 ? result : [this._meshWrappers.get(target) ?? target];
     }
 
     public get animatables(): Animatable[] {

@@ -1,6 +1,7 @@
 import { addToScene, disposeUsd, loadUsd } from "babylon-lite";
-import type { AnimationGroup, UsdBinaryInput } from "babylon-lite";
+import type { UsdBinaryInput } from "babylon-lite";
 
+import type { AnimationGroup } from "../animations/animation.js";
 import type { Mesh } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import type { Skeleton } from "../bones/skeleton.js";
@@ -109,7 +110,7 @@ export class USDFileLoader {
                 requireBinary(data),
                 toLiteUsdOptions(resolveUsdOptions({ ...this._options, rootFileName: this._options.rootFileName ?? fileName }), controller.signal, onProgress)
             );
-            const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes);
+            const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes, scene);
             try {
                 controller.signal.throwIfAborted();
                 if (add) {

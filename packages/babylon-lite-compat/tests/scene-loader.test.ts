@@ -28,11 +28,12 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, AssetContainer as LiteAssetContainer, EngineContext, Mesh as LiteMesh } from "babylon-lite";
+import { INTERP_LINEAR, PATH_WEIGHTS } from "../../babylon-lite/src/animation/types";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
-import { AssetContainer } from "../src/loading/scene-loader";
+import { AssetContainer, LoadAssetContainerAsync } from "../src/loading/scene-loader";
 import { PBRMaterial } from "../src/materials/materials";
 import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
@@ -65,7 +66,309 @@ function captureThrown(callback: () => void): { threw: boolean; value: unknown }
     }
 }
 
+function makeLoaderEngine(): EngineContext {
+    const device = {
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const storage = new ArrayBuffer(Number(descriptor.size));
+            return {
+                destroy: vi.fn(),
+                getMappedRange: vi.fn(() => storage),
+                unmap: vi.fn(),
+            } as unknown as GPUBuffer;
+        }),
+        createSampler: vi.fn(() => ({}) as GPUSampler),
+        createTexture: vi.fn(
+            () =>
+                ({
+                    createView: vi.fn(() => ({}) as GPUTextureView),
+                    destroy: vi.fn(),
+                }) as unknown as GPUTexture
+        ),
+        queue: {
+            copyExternalImageToTexture: vi.fn(),
+            writeBuffer: vi.fn(),
+            writeTexture: vi.fn(),
+        },
+    } as unknown as GPUDevice;
+    return { _device: device } as EngineContext;
+}
+
+function makeNestedMorphGltfSource(): string {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const morphPositions = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const indices = new Uint16Array([0, 1, 2, 0]);
+    const animationInput = new Float32Array([0, 1]);
+    const animationOutput = new Float32Array([0, 1]);
+    const chunks = [positions, morphPositions, indices, animationInput, animationOutput];
+    const byteLength = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const bytes = new Uint8Array(byteLength);
+    const byteOffsets: number[] = [];
+    let byteOffset = 0;
+    for (const chunk of chunks) {
+        byteOffsets.push(byteOffset);
+        bytes.set(new Uint8Array(chunk.buffer), byteOffset);
+        byteOffset += chunk.byteLength;
+    }
+    let binary = "";
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+    const json = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [
+            { name: "Parent", mesh: 0, children: [1] },
+            { name: "Child", mesh: 1 },
+        ],
+        meshes: [
+            { name: "ParentMesh", weights: [0], extras: { targetNames: ["ParentMorph"] }, primitives: [{ attributes: { POSITION: 0 }, indices: 2, targets: [{ POSITION: 1 }] }] },
+            { name: "ChildMesh", weights: [0], extras: { targetNames: ["ChildMorph"] }, primitives: [{ attributes: { POSITION: 0 }, indices: 2, targets: [{ POSITION: 1 }] }] },
+        ],
+        animations: [
+            {
+                name: "ParentWeights",
+                samplers: [{ input: 3, output: 4, interpolation: "LINEAR" }],
+                channels: [{ sampler: 0, target: { node: 0, path: "weights" } }],
+            },
+        ],
+        buffers: [{ byteLength, uri: `data:application/octet-stream;base64,${btoa(binary)}` }],
+        bufferViews: chunks.map((chunk, index) => ({ buffer: 0, byteOffset: byteOffsets[index], byteLength: chunk.byteLength })),
+        accessors: [
+            { bufferView: 0, componentType: 5126, count: 3, type: "VEC3" },
+            { bufferView: 1, componentType: 5126, count: 3, type: "VEC3" },
+            { bufferView: 2, componentType: 5123, count: 3, type: "SCALAR" },
+            { bufferView: 3, componentType: 5126, count: 2, type: "SCALAR", min: [0], max: [1] },
+            { bufferView: 4, componentType: 5126, count: 2, type: "SCALAR" },
+        ],
+    };
+    return `data:model/gltf+json,${encodeURIComponent(JSON.stringify(json))}`;
+}
+
+function createLoaderScene(): Scene {
+    const engine = new NullEngine();
+    (engine as unknown as { _lite: EngineContext })._lite = makeLoaderEngine();
+    return new Scene(engine);
+}
+
+function morphTargetsByParentName(meshes: readonly unknown[]): Map<string, unknown> {
+    const morphMeshes = meshes.filter(
+        (mesh): mesh is { parent?: { name: string } | null; morphTargetManager: { getTarget(index: number): unknown } } =>
+            typeof mesh === "object" && mesh !== null && "morphTargetManager" in mesh && mesh.morphTargetManager !== null
+    );
+    return new Map(morphMeshes.map((mesh) => [mesh.parent?.name ?? "", mesh.morphTargetManager.getTarget(0)] as const));
+}
+
 describe("AssetContainer.addAllToScene", () => {
+    it("shares canonical loaded animation-group wrappers with the scene", () => {
+        const scene = new Scene(new NullEngine());
+        const liteGroup = {
+            name: "idle",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+        } as LiteAnimationGroup;
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+        const fromContainer = container.animationGroups[0]!;
+        (scene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = [liteGroup];
+
+        container.addAllToScene(scene);
+
+        expect(scene.animationGroups[0]).toBe(fromContainer);
+        expect(container.animationGroups[0]).toBe(fromContainer);
+    });
+
+    it("rebinds a retained detached animation wrapper when adopted by another scene", () => {
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const liteGroup = {
+            name: "idle",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+        } as LiteAnimationGroup;
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+        const retained = container.animationGroups[0]!;
+        const oldBlend = vi.spyOn(loadScene, "_enableLoadedBlend");
+        const adoptedBlend = vi.spyOn(adoptedScene, "_enableLoadedBlend");
+
+        container.addAllToScene(adoptedScene);
+        (adoptedScene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = [liteGroup];
+        retained.weight = 0.5;
+
+        expect(container.animationGroups[0]).toBe(retained);
+        expect(adoptedScene.animationGroups[0]).toBe(retained);
+        expect(oldBlend).not.toHaveBeenCalled();
+        expect(adoptedBlend).toHaveBeenCalledOnce();
+    });
+
+    it("resolves morph targets only from a glTF node's directly bound primitives", () => {
+        const directPrimitive = {};
+        const childPrimitive = {};
+        const authoredChild = { children: [childPrimitive] };
+        const target = { children: [authoredChild, directPrimitive] };
+        const directMorph = {};
+        const childMorph = {};
+        const liteGroup = {
+            name: "morph",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target, path: "weights" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _gltfMixer: [
+                {
+                    name: "morph",
+                    duration: 1,
+                    frameRate: 60,
+                    samplers: [{ input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }],
+                    channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_WEIGHTS }],
+                },
+                [],
+                [],
+            ],
+        } as unknown as LiteAnimationGroup;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [], animationGroups: [liteGroup] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+        const registry = (container as unknown as { _meshRegistry: Map<object, { morphTargetManager?: { getTarget(index: number): object } }> })._meshRegistry;
+        registry.set(directPrimitive, { morphTargetManager: { getTarget: () => directMorph } });
+        registry.set(childPrimitive, { morphTargetManager: { getTarget: () => childMorph } });
+        const sceneRegistry = (scene as unknown as { _meshWrappers: Map<object, { morphTargetManager?: { getTarget(index: number): object } }> })._meshWrappers;
+        sceneRegistry.set(directPrimitive, { morphTargetManager: { getTarget: () => directMorph } });
+        sceneRegistry.set(childPrimitive, { morphTargetManager: { getTarget: () => childMorph } });
+
+        expect(container.animationGroups[0]!.targetedAnimations[0]!.target).toBe(directMorph);
+        expect(scene._wrapAnimationTargets(target, "weights", 0)).toEqual([directMorph]);
+    });
+
+    it("resolves nested morph targets through real container and scene glTF loads", async () => {
+        const source = makeNestedMorphGltfSource();
+        const containerScene = createLoaderScene();
+        const container = await LoadAssetContainerAsync(source, containerScene);
+        const containerTargets = morphTargetsByParentName(container.meshes);
+        const containerAnimationTarget = container.animationGroups[0]!.targetedAnimations[0]!.target;
+
+        expect(containerTargets.size).toBe(2);
+        expect(containerAnimationTarget).toBe(containerTargets.get("Parent"));
+        expect(containerAnimationTarget).not.toBe(containerTargets.get("Child"));
+
+        const scene = createLoaderScene();
+        const sceneContainer = await LoadAssetContainerAsync(source, scene);
+        sceneContainer.addAllToScene(scene);
+        (scene._lite as { animationGroups?: LiteAnimationGroup[] }).animationGroups = sceneContainer._lite.animationGroups;
+        const sceneTargets = morphTargetsByParentName(scene.meshes);
+        const sceneAnimationTarget = scene.animationGroups[0]!.targetedAnimations[0]!.target;
+
+        expect(sceneTargets.size).toBe(2);
+        expect(sceneAnimationTarget).toBe(sceneTargets.get("Parent"));
+        expect(sceneAnimationTarget).not.toBe(sceneTargets.get("Child"));
+    });
+
+    it("does not collect meshes until loaded animation target resolution needs them", () => {
+        const children = vi.fn(() => [] as object[]);
+        const root = {} as { children?: object[] };
+        Object.defineProperty(root, "children", { get: children });
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: root, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const container = new AssetContainer(
+            { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer,
+            undefined,
+            undefined,
+            new Scene(new NullEngine())
+        );
+
+        expect(container.animationGroups).toHaveLength(1);
+        expect(children).not.toHaveBeenCalled();
+        expect(container.animationGroups[0]!.targetedAnimations).toHaveLength(1);
+        expect(children).toHaveBeenCalled();
+    });
+
+    it("collects meshes only once while resolving multiple animation targets", () => {
+        const children = vi.fn(() => [] as object[]);
+        const root = {} as { children?: object[] };
+        Object.defineProperty(root, "children", { get: children });
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [
+                { target: root, path: "value" },
+                { target: root, path: "otherValue" },
+            ],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                    { sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false },
+                ],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const container = new AssetContainer(
+            { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer,
+            undefined,
+            undefined,
+            new Scene(new NullEngine())
+        );
+
+        expect(container.meshes).toHaveLength(1);
+        const collectionReadCount = children.mock.calls.length;
+
+        expect(container.animationGroups[0]!.targetedAnimations).toHaveLength(2);
+        expect(children).toHaveBeenCalledTimes(collectionReadCount);
+    });
+
+    it("reflects detached loaded meshes", () => {
+        const child = { name: "Cube", children: [], parent: null as object | null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [child], parent: null as object | null };
+        child.parent = root;
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, new Scene(new NullEngine()));
+        const first = container.meshes;
+
+        root.children = [];
+        child.parent = null;
+        first[1]!.dispose();
+
+        expect(container.meshes).toEqual([first[0]]);
+    });
+
     it("clones a hierarchy and gives cloned models independent PBR materials", () => {
         const material = createPbrMaterial();
         const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
@@ -405,11 +708,31 @@ describe("AssetContainer.addAllToScene", () => {
     it("does not create wrappers after disposing an unread asset container", () => {
         const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
         const root = { name: "__root__", children: [mesh] };
-        const lite = { entities: [root] } as unknown as LiteAssetContainer;
-        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+        const liteGroup = {
+            name: "manual",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [{ target: mesh, path: "value" }],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+            _propertyMixer: [
+                [{ sampler: { input: new Float32Array([0, 1]), output: new Float32Array([0, 1]), interpolation: INTERP_LINEAR }, stride: 1, quaternion: false }],
+                60,
+                0,
+                1,
+            ],
+        } as unknown as LiteAnimationGroup;
+        const lite = { entities: [root], animationGroups: [liteGroup] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh], new Scene(new NullEngine()));
+        const retainedGroup = container.animationGroups[0]!;
 
         container.dispose();
 
+        expect(retainedGroup.targetedAnimations).toHaveLength(1);
         expect(container.meshes).toEqual([]);
     });
 });

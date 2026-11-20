@@ -13,6 +13,7 @@ import { Constants } from "../src/misc/engine-constants";
 import { ChannelMask, DivideTexturesAsync, TextureColorSpace } from "../src/textures/texture-processing";
 import { _IsHtmlInCanvasPolyfillInstalled } from "../src/unsupported/unsupported-apis";
 import { Color4 } from "../src/math/color";
+import { BakedVertexAnimationManager, VertexAnimationBaker } from "../src/unsupported/unsupported-apis";
 
 describe("Babylon.js upstream delta surfaces", () => {
     it("exposes the sampled-data-only texture creation flag", () => {
@@ -56,6 +57,19 @@ describe("Babylon.js upstream delta surfaces", () => {
 
     it("reports that compat never installed the unsupported HTML-in-canvas polyfill", () => {
         expect(_IsHtmlInCanvasPolyfillInstalled()).toBe(false);
+    });
+
+    it("exposes the WebGPU asynchronous-pipeline opt-in with its renderer-owned blocker", () => {
+        const engine = new NullEngine();
+        engine.asynchronousPipelineCreation = false;
+        expect(() => {
+            engine.asynchronousPipelineCreation = true;
+        }).toThrow(/pass-replay, mesh-coherence, and snapshot-lifecycle policy/);
+    });
+
+    it("resolves baked-vertex-animation APIs with their renderer-owned structural blocker", () => {
+        expect(() => new VertexAnimationBaker({} as never, {} as never)).toThrow(/per-frame transform-matrix sampling/);
+        expect(() => new BakedVertexAnimationManager({} as never)).toThrow(/baked-animation texture binding contract/);
     });
 
     it("surfaces stable named particle systems registered with the Lite scene", () => {

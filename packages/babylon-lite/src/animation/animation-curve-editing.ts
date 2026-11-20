@@ -1,4 +1,6 @@
 import type { AnimationGroup, TargetedAnimation } from "./animation-group.js";
+import { evaluatePropertySampler, evaluateSampler } from "./evaluate.js";
+import type { AnimationEasing } from "./easing.js";
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP, PATH_POINTER, PATH_ROTATION } from "./types.js";
 import type { AnimationSampler } from "./types.js";
 
@@ -13,10 +15,16 @@ export interface AnimationCurveKey {
 /** A detached keyframe snapshot, aligned with an entry in `targetedAnimations`. */
 export interface AnimationCurveTrack {
     readonly target: TargetedAnimation;
+    /** Runtime source that owns the sampler. */
+    readonly source: "gltf" | "property";
     /** Current sampler mode (`linear`, `step`, or `cubicSpline`). */
     readonly interpolation: string;
     readonly componentCount: number;
     readonly quaternion: boolean;
+    /** Property-track easing applied by Lite playback. */
+    readonly easing?: AnimationEasing;
+    /** True when another channel in this glTF clip references the same sampler. */
+    readonly sharedSampler: boolean;
     readonly keys: readonly AnimationCurveKey[];
 }
 
@@ -25,46 +33,81 @@ interface CurveSource {
     readonly sampler: AnimationSampler;
     readonly componentCount: number;
     readonly quaternion: boolean;
+    readonly easing?: AnimationEasing;
+    readonly sharedSampler?: boolean;
     readonly endTime: number;
+    readonly replaceSampler?: (sampler: AnimationSampler) => void;
 }
 
 type MutableSamplerBuffers = { -readonly [K in "input" | "output"]: AnimationSampler[K] };
 
-function getSources(group: AnimationGroup): CurveSource[] {
+function getSource(group: AnimationGroup, trackIndex: number, inspectSharing: boolean): CurveSource | undefined {
     const gltf = group._gltfMixer;
     if (gltf) {
         const clip = gltf[0];
-        return clip.channels.map((channel, index) => {
-            const sampler = clip.samplers[channel.samplerIdx];
-            const target = group.targetedAnimations[index];
-            if (!sampler || !target) {
-                throw new Error("Animation group has an invalid channel");
-            }
-            const multiplier = sampler.interpolation === INTERP_CUBICSPLINE ? 3 : 1;
-            const componentCount = sampler.output.length / (sampler.input.length * multiplier);
-            return {
-                target,
-                sampler,
-                componentCount,
-                quaternion: channel.path === PATH_ROTATION || (channel.path === PATH_POINTER && channel.pointerQuaternion === true),
-                endTime: (clip._startTime ?? 0) + clip.duration,
-            };
-        });
+        const channel = clip.channels[trackIndex];
+        if (!channel) {
+            return undefined;
+        }
+        const sampler = clip.samplers[channel.samplerIdx];
+        const target = group.targetedAnimations[trackIndex];
+        if (!sampler || !target) {
+            throw new Error("Animation group has an invalid channel");
+        }
+        const multiplier = sampler.interpolation === INTERP_CUBICSPLINE ? 3 : 1;
+        const componentCount = sampler.output.length / (sampler.input.length * multiplier);
+        return {
+            target,
+            sampler,
+            componentCount,
+            quaternion: channel.path === PATH_ROTATION || (channel.path === PATH_POINTER && channel.pointerQuaternion === true),
+            sharedSampler: inspectSharing
+                ? clip.channels.some((candidate, candidateIndex) => candidateIndex !== trackIndex && candidate.samplerIdx === channel.samplerIdx)
+                : undefined,
+            endTime: (clip._startTime ?? 0) + clip.duration,
+        };
     }
     const property = group._propertyMixer;
     if (property) {
         if (property[4] !== undefined) {
             throw new Error("USD animation groups do not expose editable keyframe samplers");
         }
-        return property[0].map((track, index) => {
-            const target = group.targetedAnimations[index];
-            if (!target) {
-                throw new Error("Animation group has an invalid property track");
-            }
-            return { target, sampler: track.sampler, componentCount: track.stride, quaternion: track.quaternion, endTime: property[3] };
-        });
+        const track = property[0][trackIndex];
+        if (!track) {
+            return undefined;
+        }
+        const target = group.targetedAnimations[trackIndex];
+        if (!target) {
+            throw new Error("Animation group has an invalid property track");
+        }
+        return {
+            target,
+            sampler: track.sampler,
+            componentCount: track.stride,
+            quaternion: track.quaternion,
+            easing: track.easing,
+            sharedSampler: false,
+            endTime: property[3],
+            replaceSampler: (sampler) => {
+                (track as { sampler: AnimationSampler }).sampler = sampler;
+            },
+        };
     }
     throw new Error("Animation group does not expose editable keyframe samplers");
+}
+
+function getSources(group: AnimationGroup): CurveSource[] {
+    if (group._gltfMixer) {
+        return group.targetedAnimations.map((_target, index) => getSource(group, index, true)!);
+    }
+    const property = group._propertyMixer;
+    if (!property) {
+        throw new Error("Animation group does not expose editable keyframe samplers");
+    }
+    if (property[4] !== undefined) {
+        throw new Error("USD animation groups do not expose editable keyframe samplers");
+    }
+    return group.targetedAnimations.map((_target, index) => getSource(group, index, true)!);
 }
 
 function interpolationName(sampler: AnimationSampler): string {
@@ -96,7 +139,7 @@ function validateSource(source: CurveSource): void {
 export function getAnimationGroupTracks(group: AnimationGroup): readonly AnimationCurveTrack[] {
     return getSources(group).map((source) => {
         validateSource(source);
-        const { sampler, componentCount, target, quaternion } = source;
+        const { sampler, componentCount, target, quaternion, easing, sharedSampler } = source;
         const cubic = sampler.interpolation === INTERP_CUBICSPLINE;
         const stride = componentCount * (cubic ? 3 : 1);
         const keys = Array.from(sampler.input, (time, index): AnimationCurveKey => {
@@ -111,23 +154,56 @@ export function getAnimationGroupTracks(group: AnimationGroup): readonly Animati
             }
             return { time, value: Array.from(sampler.output.subarray(offset, offset + stride)) };
         });
-        return { target, interpolation: interpolationName(sampler), componentCount, quaternion, keys };
+        return {
+            target,
+            source: group._gltfMixer ? "gltf" : "property",
+            interpolation: interpolationName(sampler),
+            componentCount,
+            quaternion,
+            easing,
+            sharedSampler: sharedSampler ?? false,
+            keys,
+        };
     });
+}
+
+/** Evaluate one editable group track using the same sampler path as Lite playback. */
+export function evaluateAnimationTrack(group: AnimationGroup, trackIndex: number, time: number): readonly number[] {
+    const source = getSource(group, trackIndex, false);
+    if (!source) {
+        throw new Error("Animation track index is out of range");
+    }
+    validateSource(source);
+    const output = new Float32Array(source.componentCount);
+    if (group._propertyMixer) {
+        evaluatePropertySampler(source.sampler, time, source.componentCount, source.quaternion, source.easing, output, 0);
+    } else {
+        evaluateSampler(source.sampler, time, source.componentCount, source.quaternion, output, 0);
+    }
+    return Array.from(output);
+}
+
+export interface SetAnimationTrackKeysOptions {
+    /** Detach a property runtime track from other groups created from the same reusable clip. */
+    readonly detachPropertyTrack?: boolean;
 }
 
 /** Replace a track's keys without changing the clip duration or playback range.
  * Keys must be nonempty, ordered by strictly increasing nonnegative Float32 time,
  * and within the original clip duration; every component must be finite.
  * Cubic keys require both tangents, and other interpolations reject tangents.
- * The edit affects every group or channel sharing the sampler and takes effect
- * on the next evaluation or seek; it does not refresh previously baked VAT data.
+ * By default the edit affects every group or channel sharing the sampler. Property
+ * tracks can opt into detachment for adapter-owned independent editing. Changes take
+ * effect on the next evaluation or seek; they do not refresh previously baked VAT data.
  * @throws If the group, track index, or keys are invalid. */
-export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: readonly AnimationCurveKey[]): void {
-    const sources = getSources(group);
-    if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= sources.length) {
+export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number, keys: readonly AnimationCurveKey[], options?: SetAnimationTrackKeysOptions): void {
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
         throw new Error("Animation track index is out of range");
     }
-    const source = sources[trackIndex]!;
+    const source = getSource(group, trackIndex, false);
+    if (!source) {
+        throw new Error("Animation track index is out of range");
+    }
     validateSource(source);
     if (keys.length === 0) {
         throw new Error("Animation track requires at least one key");
@@ -169,7 +245,11 @@ export function setAnimationTrackKeys(group: AnimationGroup, trackIndex: number,
             write(key.value, offset);
         }
     }
-    const sampler = source.sampler as MutableSamplerBuffers;
-    sampler.input = input;
-    sampler.output = output;
+    if (source.replaceSampler && options?.detachPropertyTrack) {
+        source.replaceSampler({ input, output, interpolation: source.sampler.interpolation });
+    } else {
+        const sampler = source.sampler as MutableSamplerBuffers;
+        sampler.input = input;
+        sampler.output = output;
+    }
 }

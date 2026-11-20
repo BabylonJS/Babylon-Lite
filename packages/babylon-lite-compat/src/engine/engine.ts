@@ -763,7 +763,24 @@ export class Engine extends ThinEngine {
  * (sibling to {@link Engine}). This is the natural engine for the compat layer
  * since Babylon Lite is WebGPU-only.
  */
-export class WebGPUEngine extends AbstractEngine {}
+export class WebGPUEngine extends AbstractEngine {
+    private _asynchronousPipelineCreation = false;
+
+    /** Babylon.js opt-in asynchronous render-pipeline creation. */
+    public get asynchronousPipelineCreation(): boolean {
+        return this._asynchronousPipelineCreation;
+    }
+
+    public set asynchronousPipelineCreation(value: boolean) {
+        if (value) {
+            unsupported(
+                "WebGPUEngine.asynchronousPipelineCreation",
+                "Lite's renderer creates pipelines inside its existing draw and frame-graph hot paths; omitting draws while pipelines compile requires a renderer-owned pass-replay, mesh-coherence, and snapshot-lifecycle policy."
+            );
+        }
+        this._asynchronousPipelineCreation = false;
+    }
+}
 
 /** A degenerate canvas stand-in for the deviceless {@link NullEngine}. */
 const NULL_CANVAS = { width: 0, height: 0 } as unknown as RenderCanvas;

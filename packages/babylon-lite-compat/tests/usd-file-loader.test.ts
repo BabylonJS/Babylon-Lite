@@ -16,9 +16,10 @@ vi.mock("babylon-lite", async (importOriginal) => ({
 }));
 
 import { RegisterUSDFileLoader, USDFileLoader } from "../src/loading/usd-file-loader.js";
+import { NullEngine } from "../src/engine/engine.js";
 import { USD_RUNTIME_BASE_URL } from "../src/loading/usd-options.js";
 import { Observable } from "../src/misc/observable.js";
-import type { Scene } from "../src/scene/scene.js";
+import { Scene } from "../src/scene/scene.js";
 
 function fakeScene(): Scene {
     return {
@@ -72,6 +73,34 @@ describe("USDFileLoader", () => {
         await new USDFileLoader().loadAsync(scene, new Uint8Array([1]), "");
 
         expect(addToScene).toHaveBeenCalledWith(scene._lite, lite);
+    });
+
+    it("preserves animation groups in detached USD containers", async () => {
+        const animationGroup = {
+            name: "Take 001",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: true,
+            weight: 1,
+            _stopped: false,
+        };
+        loadUsd.mockResolvedValueOnce({
+            entities: [],
+            animationGroups: [animationGroup],
+            diagnostics: { timings: {}, statistics: {}, missingAssets: [] },
+            _usdMeshes: [],
+            _usdTextures: [],
+        });
+        const scene = new Scene(new NullEngine());
+
+        const container = await new USDFileLoader().loadAssetContainerAsync(scene, new ArrayBuffer(1), "");
+
+        expect(container.animationGroups).toHaveLength(1);
+        expect(container.animationGroups[0]!.name).toBe("Take 001");
+        expect(scene.animationGroups).toEqual([]);
     });
 
     it("maps four co-located standard runtime URLs to Lite's directory option", async () => {
