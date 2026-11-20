@@ -288,6 +288,7 @@ describe("NPE UpdateNoiseBlock", () => {
             surface: { canvas: { width: 100, height: 100 } },
             _beforeRender: [],
             _deferredBuilders: [],
+            _disposables: [],
         } as unknown as SceneContext;
         const graph = parseNodeParticleSource({
             blocks: [

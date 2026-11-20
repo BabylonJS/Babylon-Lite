@@ -32,6 +32,18 @@ function createFlowScene(
     } as unknown as SceneContext;
 }
 
+/** Mirror scene disposal: run its disposers, then fail the test on any later camera read. */
+function disposeFlowScene(scene: SceneContext): void {
+    for (const dispose of scene._disposables.splice(0)) {
+        dispose();
+    }
+    Object.defineProperty(scene, "camera", {
+        get: () => {
+            throw new Error("flow map read a disposed scene");
+        },
+    });
+}
+
 async function attachFlowMap(
     system: ReturnType<typeof createParticleSystem>,
     map: NpeTextureContent,
@@ -266,6 +278,45 @@ describe("NPE UpdateFlowMapBlock", () => {
 
         expect(firstDelta).not.toBe(0);
         expect(Math.sign(secondDelta)).toBe(-Math.sign(firstDelta));
+    });
+
+    it("keeps the last projection without reading the scene once it is disposed", async () => {
+        const scene = createFlowScene();
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, scene);
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const liveDelta = system.buffer.dirX[0]! - start;
+        disposeFlowScene(scene);
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+
+        expect(liveDelta).not.toBe(0);
+        expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
+    });
+
+    it("registers one detacher per scene and detaches a build still decoding", async () => {
+        const scene = createFlowScene();
+        const map = flowMap([255, 128, 128, 255]);
+        await attachFlowMap(createParticleSystem(1), map, () => 1, scene);
+        let resolveContent!: (content: NpeTextureContent) => void;
+        const pending = createParticleSystem(1);
+        const attached = attachFlowMap(pending, map, () => 1, scene, { url: "flow.png", invertY: false, _content: new Promise((resolve) => (resolveContent = resolve)) });
+        expect(scene._disposables).toHaveLength(1);
+
+        disposeFlowScene(scene);
+        resolveContent(map);
+        await attached;
+        pending._scaledStep = 1;
+        pending.updateSteps[0]!(0);
+
+        expect(pending.buffer.dirX[0]).toBe(0);
     });
 
     it("builds registry and texture wiring through a parsed graph", async () => {
