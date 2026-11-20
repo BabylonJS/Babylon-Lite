@@ -70,7 +70,7 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-`buildNodeParticleSetWithFlowMaps`, `buildNodeParticleSetWithNoiseTextures`, and `buildNodeParticleSetWithTextureUpdates` are `@deprecated` functions that forward their arguments unchanged to `buildNodeParticleSet`. They were explicit opt-in builders before the flat block manifest (section 7.4). `UpdateFlowMapBlock` and `UpdateNoiseBlock` now load through the manifest like every other class, so every builder supports them. The wrappers remain exported as function declarations with their original signatures, so the public API is unchanged, and they carry no separate implementation.
+`buildNodeParticleSetWithFlowMaps`, `buildNodeParticleSetWithNoiseTextures`, and `buildNodeParticleSetWithTextureUpdates` are `@deprecated` functions that forward their arguments unchanged to `buildNodeParticleSet`. They were explicit opt-in builders before the block manifest (section 7.4). `UpdateFlowMapBlock` and `UpdateNoiseBlock` now load through the manifest like every other class, so every builder supports them. The wrappers remain exported as function declarations with their original signatures, so the public API is unchanged, and they carry no separate implementation.
 
 All twenty-seven functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
 
@@ -275,7 +275,9 @@ node/npe-flow-map.ts, node/npe-noise.ts, node/npe-texture-updates.ts
 node/npe-contextual*.ts  contextual source getters and optional columns
 node/npe-local-position.ts
                          local birth seeding and world-position conversion
-node/npe-manifest.ts     flat class-name to lazy block-module manifest
+node/npe-manifest.ts     base class-name to lazy block-module table and loadNpeBlock
+node/npe-manifest-extra.ts
+                         extension class table, fetched on a base-table miss
 node/blocks/*.ts         supported block classes, block-local optional paths, and helpers
 ```
 
@@ -630,7 +632,7 @@ For each root:
 - Every implicit Cylinder evaluator computes its static inverse normally and optionally appends its stable `{ inverse }` state through `state.emitterInverseWorldMatrices?.push(...)`. Explicit-direction cylinders append nothing. A static build leaves the field absent and allocates no collection array. Provider setup installs the fresh list before traversal, so it collects every reachable implicit cylinder in one system without evaluator imports or provider-specific branching.
 - `scene` and `textureBaseUrl` are carried only during the graph walk in `NpeBuildState`.
 - The single walk makes the pre-traversal optional setup call. It does not allocate a containing emitter-state object, import provider code, branch on provider behavior, or retain `NpeBuildState` after the walk.
-- Before the first root is created, `loadReachableBlocks(graph)` walks every connected input from every root id, collects the distinct reachable class names, and resolves each through `loadNpeBlock` in parallel. Each block class is its own lazy chunk, so preloading costs one parallel round of fetches instead of one sequential fetch per class during the depth-first build. An unsupported reachable class rejects this preload, so no system is built for a graph that cannot be fully built.
+- Before the first root is created, `loadReachableBlocks(graph)` walks every connected input from every root id, collects the distinct reachable class names, and resolves each through `loadNpeBlock` in parallel. Each block class is its own lazy chunk, so preloading costs at most two parallel rounds of fetches instead of one sequential fetch per class during the depth-first build: base-table blocks and, when a reachable class is outside the base table, the extension table first, then the extension blocks (section 7.4). An unsupported reachable class rejects this preload, so no system is built for a graph that cannot be fully built.
 - Each root gets its own output map and block-id set. `ParticleTextureSourceBlock` only publishes a static texture descriptor on its `texture` output. Its consumers own loading: `SystemBlock` schedules the GPU upload, and `UpdateFlowMapBlock` and `UpdateNoiseBlock` schedule CPU decoding. One source connected to both a system and a CPU texture update is therefore evaluated once, uploaded once, and decoded once.
 - `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. `buildNodeParticleSetWithBlendModes` accepts provider-wrapped options, so both opt-ins compose without changing the evaluator walk.
 - `buildNodeParticleSetWithBlendModes` is the convenience form `enableNodeParticleBlendModes(await buildNodeParticleSet(...))`. Importing either public enabler is the opt-in boundary for exact particle blend state and advanced rendering; ordinary builders have no runtime import edge to the optional modules.
@@ -683,13 +685,16 @@ Literal parsing is:
 - `BABYLON.Color4` arrays become `{ r: value[0] ?? 0, g: value[1] ?? 0, b: value[2] ?? 0, a: value[3] ?? 1 }`.
 - Other literal forms are ignored.
 
-### 7.4 Flat block manifest
+### 7.4 Block manifest
 
-`npe-manifest.ts` maps every supported serialized Babylon.js class name to one lazy block module, and `loadNpeBlock(className)` resolves it:
+The block manifest maps every supported serialized Babylon.js class name to one lazy block module through two tables split by class, and `loadNpeBlock(className)` in `npe-manifest.ts` resolves it:
 
-- The manifest is one object literal with a `null` prototype. Each entry is `ClassName: () => import("./blocks/<file>.js")`, where every block module has the uniform export `npeBlock: NpeBlockEvaluator`. The null prototype keeps serialized class names such as `constructor` or `toString` from resolving to inherited `Object.prototype` members.
-- It has 30 entries: the 29 ordinary classes and `ParticleLocalVariableBlock`. `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` have no entry, because `normalizeNodeParticleGraph` removes them before a builder runs (section 9.31).
-- Every class name without an entry throws `NodeParticle: unsupported block "<ClassName>"`. `loadReachableBlocks` calls the loader for every reachable class before the first root is built (section 7.1), so an unsupported class fails the build before any system is created.
+- Each table is one object literal with a `null` prototype. Each entry is `ClassName: () => import("./blocks/<file>.js")`, where every block module has the uniform export `npeBlock: NpeBlockEvaluator`. The null prototype keeps serialized class names such as `constructor` or `toString` from resolving to inherited `Object.prototype` members.
+- The base table in `npe-manifest.ts` lists exactly the 11 classes that Babylon.js `ConvertToNodeParticleSystemSetAsync` emits for a default box-emitter `ParticleSystem` without gradients: `SystemBlock`, `CreateParticleBlock`, `BoxShapeBlock`, `UpdatePositionBlock`, `UpdateColorBlock`, `ParticleTextureSourceBlock`, `ParticleInputBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleConverterBlock`, and `ParticleRandomBlock`. The set also covers the editor's default graph (`NodeParticleSystemSet.setToDefault`). `npe-particle-build.test.ts` checks the table against the converted scene 262 graph.
+- The extension table `NPE_EXTRA_BLOCKS` in `npe-manifest-extra.ts` lists the other 19 classes, including `ParticleLocalVariableBlock`. Every newly supported class is added there. Table membership follows this rule, never a per-class size measurement.
+- `loadNpeBlock` reads the base table first and imports the extension table only on a miss. A graph whose reachable classes are all in the base table never fetches the extension chunk. Any other graph fetches it once, then fetches its extension block chunks. The `OPTIONAL_FEATURES` table of `npe-particle-bundle-content.test.ts` lists the canonical scenes allowed to fetch it.
+- `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` have no entry in either table, because `normalizeNodeParticleGraph` removes them before a builder runs (section 9.31).
+- Every class name without an entry in either table throws `NodeParticle: unsupported block "<ClassName>"`. `loadReachableBlocks` calls the loader for every reachable class before the first root is built (section 7.1), so an unsupported class fails the build before any system is created.
 - One manifest entry owns every serialized property of its Babylon.js class. The builder never routes on properties, connection identity, or system locality. A heavy optional path that only some instances of a class need is a lazy import inside that class's block module, behind the serialized property that selects it. Instances that do not select it never fetch it.
 
 The block-local lazy paths are:
@@ -706,7 +711,7 @@ Inline contextual sources are Position, Age, Lifetime, Color, ScaledDirection, a
 
 Shared helpers that several blocks need, such as `npe-texture-content.ts` for `UpdateFlowMapBlock` and `UpdateNoiseBlock`, are ordinary static imports of those block modules. The bundler emits them as shared chunks fetched only by scenes that reach one of those classes.
 
-Adding a block therefore takes one new module that exports `npeBlock`, one manifest line, and, when the block is optional for existing scenes, one row in the `OPTIONAL_FEATURES` isolation table of `npe-particle-bundle-content.test.ts`. No registry tier, variant module, feature bit, builder family, or builder branch is involved.
+Adding a block therefore takes one new module that exports `npeBlock`, one line in the extension table of `npe-manifest-extra.ts`, and, when the block is optional for existing scenes, one row in the `OPTIONAL_FEATURES` isolation table of `npe-particle-bundle-content.test.ts`. No registry tier, variant module, feature bit, builder family, or builder branch is involved.
 
 Every block module is side-effect free and imports only `import type` declarations from `npe-build.ts`, so loading a block never pulls the builder into another chunk.
 
@@ -1549,7 +1554,7 @@ Phase 3C changes the shared Scene 305 graph to thread Elbow, Debug, and a Partic
 
 Phase 3C raises the normalized-builder class count from 31 to 34 and block evaluator/helper files from 46 to 47. Node infrastructure stays at 29 and particle root files stay at 11 because the thin helper/runtime and frame-preparation composition extend existing files.
 
-The flat block manifest (section 7.4) later replaced the registry chain described in these historical slices. `ParticleLocalVariableBlock` now loads through its own manifest entry rather than `npe-registry-extra-values.ts`, the flow-map, noise, and combined texture-update builders became deprecated aliases of the default builder, and `embedded-texture-source-block.ts` and every other registry, variant, and specialized-walk module was removed or folded into its class's block module. That refactor added no Phase 3 behavior and changed no graph-plumbing contract.
+The block manifest (section 7.4) later replaced the registry chain described in these historical slices. `ParticleLocalVariableBlock` now loads through its own manifest entry rather than `npe-registry-extra-values.ts`, the flow-map, noise, and combined texture-update builders became deprecated aliases of the default builder, and `embedded-texture-source-block.ts` and every other registry, variant, and specialized-walk module was removed or folded into its class's block module. That refactor added no Phase 3 behavior and changed no graph-plumbing contract.
 
 The current descriptive sections are synchronized at 34 normalized-builder classes, 11 particle root files, 18 node infrastructure files, and 39 block evaluator/helper files.
 
@@ -2029,7 +2034,7 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure: 18 files
+### 14.2 Node infrastructure: 19 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
@@ -2042,6 +2047,7 @@ packages/babylon-lite/src/particle/node/npe-flow-map.ts
 packages/babylon-lite/src/particle/node/npe-graph-plumbing-runtime.ts
 packages/babylon-lite/src/particle/node/npe-graph-plumbing.ts
 packages/babylon-lite/src/particle/node/npe-local-position.ts
+packages/babylon-lite/src/particle/node/npe-manifest-extra.ts
 packages/babylon-lite/src/particle/node/npe-manifest.ts
 packages/babylon-lite/src/particle/node/npe-noise.ts
 packages/babylon-lite/src/particle/node/npe-parser.ts
@@ -2052,11 +2058,11 @@ packages/babylon-lite/src/particle/node/npe-types.ts
 packages/babylon-lite/src/particle/node/npe-value.ts
 ```
 
-The flat block manifest replaced the eight `npe-registry*.ts` tiers and the flow-map, noise, and texture-update runtime modules with the single `npe-manifest.ts`. `npe-flow-map.ts`, `npe-noise.ts`, and `npe-texture-updates.ts` remain only as `@deprecated` builder aliases.
+The block manifest replaced the eight `npe-registry*.ts` tiers and the flow-map, noise, and texture-update runtime modules with `npe-manifest.ts` and its single extension table `npe-manifest-extra.ts`. `npe-flow-map.ts`, `npe-noise.ts`, and `npe-texture-updates.ts` remain only as `@deprecated` builder aliases.
 
 ### 14.3 Block evaluators and helpers: 39 files
 
-Thirty files are manifest block modules that export `npeBlock`. The other nine are lazy block-local paths: six `*-shape-local.ts` bodies, `particle-input-local-position.ts`, `particle-random-once.ts`, and `particle-random-once-typed.ts`. The flat manifest removed the old variant and wrapper modules: compact math, CPU and embedded texture sources, dynamic emit rate, the extra and local input variants, random-sprite setup, the once-random wrapper blocks, and the `*-shape-local-block.ts` wrappers.
+Thirty files are manifest block modules that export `npeBlock`. The other nine are lazy block-local paths: six `*-shape-local.ts` bodies, `particle-input-local-position.ts`, `particle-random-once.ts`, and `particle-random-once-typed.ts`. The block manifest removed the old variant and wrapper modules: compact math, CPU and embedded texture sources, dynamic emit rate, the extra and local input variants, random-sprite setup, the once-random wrapper blocks, and the `*-shape-local-block.ts` wrappers.
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts

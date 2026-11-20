@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
@@ -237,5 +239,17 @@ describe("NPE build reachability", () => {
         }
 
         expect(system.buffer.alive).toBe(truth.count);
+    });
+});
+
+describe("NPE block manifest", () => {
+    it("keeps exactly the classic converter's default classes in the base table", () => {
+        const manifestSource = readFileSync(resolve(__dirname, "../../../packages/babylon-lite/src/particle/node/npe-manifest.ts"), "utf8");
+        const baseClasses = [...manifestSource.matchAll(/^\s+(\w+): \(\) => import\(/gm)].map((match) => match[1]).sort();
+        // Scene 262 is a box-emitter ParticleSystem without gradients, converted by Babylon.js ConvertToNodeParticleSystemSetAsync.
+        const converterClasses = [...new Set(SCENE262_NPE_JSON.blocks.map((block) => block.customType.replace(/^BABYLON\./, "")))].sort();
+
+        expect(converterClasses).toHaveLength(11);
+        expect(baseClasses).toEqual(converterClasses);
     });
 });

@@ -607,7 +607,7 @@ describe("NPE graph plumbing", () => {
 
     it("keeps graph recognition out of the parser and all owning builders", () => {
         const nodeDirectory = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
-        for (const file of ["npe-parser.ts", "npe-build.ts", "npe-manifest.ts"]) {
+        for (const file of ["npe-parser.ts", "npe-build.ts", "npe-manifest.ts", "npe-manifest-extra.ts"]) {
             const source = readFileSync(resolve(nodeDirectory, file), "utf8");
             expect(source, file).not.toContain("_hasGraphPlumbing");
             expect(source, file).not.toContain("npe-graph-plumbing");
@@ -627,7 +627,7 @@ describe("NPE graph plumbing", () => {
     it("adds no Teleport, Elbow, or Debug evaluator or manifest entry", () => {
         const nodeDirectory = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
         const blockNames = readdirSync(resolve(nodeDirectory, "blocks"));
-        const manifestSource = readFileSync(resolve(nodeDirectory, "npe-manifest.ts"), "utf8");
+        const manifestSource = ["npe-manifest.ts", "npe-manifest-extra.ts"].map((file) => readFileSync(resolve(nodeDirectory, file), "utf8")).join("\n");
 
         expect(blockNames.filter((name) => name.toLowerCase().includes("teleport"))).toEqual([]);
         expect(blockNames.filter((name) => /(?:elbow|debug)/i.test(name))).toEqual([]);

@@ -36,6 +36,8 @@ const OPTIONAL_FEATURES: ReadonlyArray<{ pattern: RegExp; scenes: readonly numbe
     { pattern: /update-flow-map-block/, scenes: [280] },
     { pattern: /update-noise-block/, scenes: [281] },
     { pattern: /npe-texture-content/, scenes: [280, 281] },
+    // Scenes 262, 283, and 284 use only converter-default classes, so fetching the extension table is a leak.
+    { pattern: /npe-manifest-extra/, scenes: [263, 264, 276, 277, 280, 281] },
     {
         pattern:
             /update-(direction|angle)-block|npe-(contextual-extra|emitter-provider|graph-plumbing(?:-runtime)?|live-emitter|local-position)|random-once-typed|sprite-columns-random|particle-(condition|float-to-int|local-variable|vector-length|input-local-position)|-shape-local|(point|cone|cylinder|mesh)-shape-block|math\/mat4-invert/,
