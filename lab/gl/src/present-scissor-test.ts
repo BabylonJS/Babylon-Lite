@@ -56,6 +56,18 @@ function presentAndCheck(label: string): void {
     }
 }
 
+/** Verifies that an empty scissor rectangle prevents clearing. */
+function checkEmptyScissor(label: string): void {
+    disableScissor(engine);
+    restoreDefaultFramebuffer(engine);
+    clearEngine(engine, { color: { r: 1, g: 0, b: 0 } });
+    setScissor(engine, 0, 0, 0, 0);
+    clearEngine(engine, { color: { r: 0, g: 0, b: 1 } });
+    checkPixel(`${label} empty scissor rectangle at the origin`, 0, 0, RED);
+    checkPixel(`${label} empty scissor rectangle inside the earlier rectangle`, 12, 12, RED);
+    checkPixel(`${label} empty scissor rectangle at the canvas center`, 40, 40, RED);
+}
+
 function rendererName(): string {
     const info = gl.getExtension("WEBGL_debug_renderer_info");
     return String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
@@ -64,13 +76,16 @@ function rendererName(): string {
 try {
     canvas.dataset.renderer = rendererName();
     canvas.dataset.samples = String(gl.getParameter(gl.SAMPLES));
+    checkEmptyScissor("fresh state");
     prepare();
     presentAndCheck("cached state");
     prepare();
     wipeGLStateCache(engine);
     presentAndCheck("wiped state");
+    wipeGLStateCache(engine);
+    checkEmptyScissor("wiped state");
     canvas.dataset.result = "passed";
-    result.textContent = "PASS: presentation covers the canvas and the scissor rectangle survives, with cached and wiped state.";
+    result.textContent = "PASS: presentation covers the canvas and the scissor rectangle survives, and an empty scissor rectangle clears nothing, with fresh, cached and wiped state.";
 } catch (error) {
     canvas.dataset.result = "failed";
     result.textContent = `FAIL: ${String(error)}`;

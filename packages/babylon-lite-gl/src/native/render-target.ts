@@ -26,8 +26,11 @@ export interface GLRenderTarget extends NativeResource<"renderTarget"> {
     _disposed: boolean;
 }
 
-/** Creates a composition target around an owned or supplied color attachment; a supplied attachment must be a live texture of this engine. */
+/** Creates a composition target around an owned or supplied color attachment of a live engine; a supplied attachment must be a live texture of this engine. */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
+    if (engine._disposed) {
+        throw new Error("Native Lite GL createRenderTarget requires an engine that has not been disposed.");
+    }
     validateTextureSize(engine, width, height);
     const colorTexture = options?.colorTexture;
     if (colorTexture && (colorTexture._engine !== engine || colorTexture._disposed)) {

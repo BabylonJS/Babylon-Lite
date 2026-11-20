@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("presentation covers the canvas and keeps the scissor rectangle, with cached and wiped state", async ({ page }) => {
+test("presentation covers the canvas and keeps the scissor rectangle, and an empty scissor rectangle clears nothing, with fresh, cached and wiped state", async ({ page }) => {
     await page.goto("/gl/present-scissor-test.html");
     const canvas = page.locator("#renderCanvas");
     await expect(canvas).toHaveAttribute("data-result", /passed|failed/);

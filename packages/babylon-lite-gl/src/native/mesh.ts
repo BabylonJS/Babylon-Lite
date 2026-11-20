@@ -83,11 +83,11 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
 /**
  * Records a mesh's attribute and index bindings independently of shader
  * ownership. Attribute names the effect did not declare are resolved from its
- * program here, once. Throws before any host call for an effect or buffer of
- * another engine or one that has been disposed.
+ * program here, once. Throws before any host call for a disposed engine, or for
+ * an effect or buffer of another engine or one that has been disposed.
  */
 export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly GLMeshVertexBuffer[], indexBuffer: GLIndexBuffer, effect: GLEffect): GLMeshVao {
-    if (!isUsable(engine, effect) || !isUsable(engine, indexBuffer) || !vertexBuffers.every((binding) => isUsable(engine, binding.buffer))) {
+    if (engine._disposed || !isUsable(engine, effect) || !isUsable(engine, indexBuffer) || !vertexBuffers.every((binding) => isUsable(engine, binding.buffer))) {
         throw new Error("Native Lite GL createMeshVao requires an effect and buffers of this engine that have not been disposed.");
     }
     const handle = engine._native.createVertexArray();

@@ -11,6 +11,8 @@ function capacityError(): Error {
 export class CommandStream {
     /** Reusable copy of an array upload, read completely before any of its command is recorded. */
     readonly staging: number[] = [];
+    /** Changes whenever an array upload claims `staging`, so an interrupted upload can detect the overwrite. */
+    private stagingGeneration = 0;
     private readonly words = new Uint32Array(COMMAND_STREAM_WORDS);
     private readonly integers = new Int32Array(this.words.buffer);
     private readonly floats = new Float32Array(this.words.buffer);
@@ -97,10 +99,21 @@ export class CommandStream {
         }
     }
 
-    /** Rejects a float array that cannot be encoded, before any word of its command is written. */
-    checkArray(length: number): void {
+    /** Claims `staging` for an encodable float array of `length` values. */
+    beginStaging(length: number): number {
+        if (!Number.isInteger(length) || length < 0) {
+            throw new RangeError(`Native Lite GL array length must be a nonnegative integer, got ${length}.`);
+        }
         if (length + 1 > this.words.length) {
             throw capacityError();
+        }
+        return ++this.stagingGeneration;
+    }
+
+    /** Rejects an upload whose `staging` claim was taken by a nested upload. */
+    endStaging(generation: number): void {
+        if (generation !== this.stagingGeneration) {
+            throw new Error("Native Lite GL array upload was interrupted by a nested array upload while reading its values.");
         }
     }
 

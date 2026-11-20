@@ -229,7 +229,10 @@ export function setEffectInt(effect: GLEffect, name: string, value: number): voi
     }
 }
 
-/** @internal Uploads a changed declared array uniform; a rejected upload records nothing and changes no cached value. */
+/**
+ * @internal Uploads a changed declared array uniform; a rejected upload records nothing and leaves its own cached value unchanged.
+ * When reading the values makes a nested array upload, the nested upload keeps its result and this upload is rejected.
+ */
 export function setUniformArray(effect: GLEffect, name: string, values: ArrayLike<number>, command: NativeHandle): void {
     const cached = effect._values[name];
     if (!cached || !effect._uniforms[name] || effect._disposed || effect._engine._disposed) {
@@ -237,7 +240,7 @@ export function setUniformArray(effect: GLEffect, name: string, values: ArrayLik
     }
     const commands = effect._engine._commands;
     const length = values.length;
-    commands.checkArray(length);
+    const generation = commands.beginStaging(length);
     // Every element is read once, before anything is recorded or cached, so a throwing read leaves both unchanged.
     const staging = commands.staging;
     let differs = cached.length !== length;
@@ -248,6 +251,7 @@ export function setUniformArray(effect: GLEffect, name: string, values: ArrayLik
             differs = true;
         }
     }
+    commands.endStaging(generation);
     if (!differs) {
         return;
     }

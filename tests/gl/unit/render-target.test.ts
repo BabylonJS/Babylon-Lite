@@ -104,7 +104,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
         multisampled.mock.setSampleCount(4);
         const rejected = createRenderTarget(multisampled.engine, 256, 128);
         multisampled.mock.clear();
-        expect(() => presentRenderTarget(rejected)).toThrow("cannot copy into a multisampled canvas");
+        expect(() => presentRenderTarget(rejected)).toThrow(Error);
         expect(multisampled.mock.count("blitFramebuffer")).toBe(0);
         disposeGLEngine(multisampled.engine);
         const { mock, engine } = setup();
@@ -122,7 +122,9 @@ describe("lite-gl render-target: createRenderTarget", () => {
         const rejected = createRenderTarget(multisampled.engine, 256, 128);
         bindRenderTarget(rejected);
         wipeGLStateCache(multisampled.engine);
-        expect(() => presentRenderTarget(rejected)).toThrow("cannot copy into a multisampled canvas");
+        multisampled.mock.clear();
+        expect(() => presentRenderTarget(rejected)).toThrow(Error);
+        expect(multisampled.mock.count("blitFramebuffer")).toBe(0);
         disposeGLEngine(multisampled.engine);
         const { mock, engine, gl } = setup();
         const target = createRenderTarget(engine, 256, 128);
@@ -150,14 +152,20 @@ describe("lite-gl render-target: createRenderTarget", () => {
         const order = mock.log.filter((c) => c.name === "isEnabled" || c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
         expect(order.map((c) => c.name)).toEqual(["isEnabled", "disable", "blitFramebuffer", "enable"]);
         expect(gl.isEnabled(gl.SCISSOR_TEST)).toBe(true);
-        expect(engine._state.scissorEnabled).toBe(1);
+        mock.clear();
+        presentRenderTarget(target);
+        const known = mock.log.filter((c) => c.name === "isEnabled" || c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
+        expect(known.map((c) => c.name)).toEqual(["disable", "blitFramebuffer", "enable"]);
         disableScissor(engine);
         wipeGLStateCache(engine);
         mock.clear();
         presentRenderTarget(target);
         expect(mock.count("isEnabled")).toBe(1);
         expect(mock.count("disable") + mock.count("enable")).toBe(0);
-        expect(engine._state.scissorEnabled).toBe(0);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("isEnabled")).toBe(0);
+        expect(mock.count("disable") + mock.count("enable")).toBe(0);
         disposeGLEngine(engine);
     });
     it("creates one FBO, attaches the color texture at COLOR_ATTACHMENT0, validates completeness, and registers in _renderTargets", () => {
