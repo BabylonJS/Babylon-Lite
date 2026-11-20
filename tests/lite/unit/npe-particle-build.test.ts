@@ -10,12 +10,18 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 const blockEvents = vi.hoisted(() => [] as string[]);
+// While `hold` is set, each block load stays pending until the test releases it, exposing load concurrency.
+const loadGate = vi.hoisted(() => ({ hold: false, held: new Map<string, () => void>(), resolved: [] as string[] }));
 vi.mock("../../../packages/babylon-lite/src/particle/node/npe-manifest.js", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../../packages/babylon-lite/src/particle/node/npe-manifest")>();
     return {
         loadNpeBlock: async (className: string) => {
             blockEvents.push(`load ${className}`);
+            if (loadGate.hold) {
+                await new Promise<void>((release) => loadGate.held.set(className, release));
+            }
             const evaluator = await actual.loadNpeBlock(className);
+            loadGate.resolved.push(className);
             return {
                 build: (...args: Parameters<typeof evaluator.build>) => {
                     blockEvents.push(`build ${className}`);
@@ -38,7 +44,16 @@ function systemEmitRateInput(source: MutableGraphSource): MutableGraphSource["bl
     return system.inputs.find((input) => input.name === "emitRate")!;
 }
 
+function releaseHeldLoads(classNames: readonly string[]): void {
+    for (const className of classNames) {
+        loadGate.held.get(className)?.();
+        loadGate.held.delete(className);
+    }
+}
+
 afterEach(() => {
+    loadGate.hold = false;
+    releaseHeldLoads([...loadGate.held.keys()]);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
@@ -55,14 +70,31 @@ describe("NPE build reachability", () => {
         expect(set.systems[0]!.name).toBe(SCENE262_NPE_JSON.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!.name);
     });
 
-    it("loads every reachable block class once before building any block", async () => {
+    it("starts every reachable block load concurrently and builds only after all loads resolve", async () => {
         blockEvents.length = 0;
-        await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: { x: 0, y: 0, z: 0 } });
+        loadGate.resolved.length = 0;
+        loadGate.hold = true;
+        const built = buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: { x: 0, y: 0, z: 0 } });
 
+        // A sequential loader would stall here with a single pending load.
+        await vi.waitFor(() => expect(loadGate.held.size).toBeGreaterThan(0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const started = [...loadGate.held.keys()];
+        expect(started.length).toBeGreaterThan(1);
         const loads = blockEvents.filter((event) => event.startsWith("load "));
-        expect(new Set(loads).size).toBe(loads.length);
-        expect(loads.length).toBeGreaterThan(1);
-        expect(blockEvents.findIndex((event) => event.startsWith("build "))).toBe(loads.length);
+        expect(loads).toHaveLength(started.length);
+
+        const [last, ...rest] = started;
+        releaseHeldLoads(rest);
+        await vi.waitFor(() => expect(loadGate.resolved).toHaveLength(rest.length));
+        expect(blockEvents.filter((event) => event.startsWith("build "))).toEqual([]);
+
+        loadGate.hold = false;
+        releaseHeldLoads([last!]);
+        await built;
+        const builtClasses = blockEvents.filter((event) => event.startsWith("build ")).map((event) => event.slice("build ".length));
+        expect(builtClasses.length).toBeGreaterThan(0);
+        expect(new Set(builtClasses)).toEqual(new Set(started));
     });
 
     it.each(["", undefined])("omits an absent SystemBlock name (%s)", async (name) => {
