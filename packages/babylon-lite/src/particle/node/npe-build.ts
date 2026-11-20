@@ -132,6 +132,17 @@ export interface BuildNodeParticleOptions {
 export async function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options: BuildNodeParticleOptions = {}): Promise<NodeParticleSet> {
     const systems: ParticleSystem[] = [];
     const buildPromises: Promise<void>[] = [];
+    // Copy the emitter position before the first await, so a caller reusing one scratch vector across builds cannot move
+    // a pending build. An explicit matrix stays shared by reference, because shape blocks read it while emitting.
+    const explicitMatrix = options.emitterWorldMatrix;
+    const emitterAtStart: Vec3 = { x: 0, y: 0, z: 0 };
+    if (explicitMatrix) {
+        mat4GetTranslationToRef(explicitMatrix, emitterAtStart);
+    } else if (options.emitter) {
+        emitterAtStart.x = options.emitter.x;
+        emitterAtStart.y = options.emitter.y;
+        emitterAtStart.z = options.emitter.z;
+    }
     const evaluators = await loadReachableBlocks(graph);
 
     for (const systemId of graph.systemBlockIds) {
@@ -146,18 +157,8 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             system.name = systemBlock.name;
         }
 
-        let emitterWorldMatrix: Mat4;
-        const emitter: Vec3 = { x: 0, y: 0, z: 0 };
-        if (options.emitterWorldMatrix) {
-            emitterWorldMatrix = options.emitterWorldMatrix;
-            mat4GetTranslationToRef(emitterWorldMatrix, emitter);
-        } else {
-            const e = options.emitter ?? { x: 0, y: 0, z: 0 };
-            emitterWorldMatrix = createTranslationMat4(e.x, e.y, e.z);
-            emitter.x = e.x;
-            emitter.y = e.y;
-            emitter.z = e.z;
-        }
+        const emitter: Vec3 = { ...emitterAtStart };
+        const emitterWorldMatrix = explicitMatrix ?? createTranslationMat4(emitter.x, emitter.y, emitter.z);
         const state: NpeBuildState = {
             system,
             buffer: system.buffer,

@@ -99,6 +99,25 @@ describe("NPE build reachability", () => {
         expect(new Set(builtClasses)).toEqual(new Set(started));
     });
 
+    it("emits from the emitter position passed at call time when the caller mutates its vector during block loading", async () => {
+        loadGate.hold = true;
+        const scratch = { x: 1000, y: 0, z: 0 };
+        const built = buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: scratch });
+        await vi.waitFor(() => expect(loadGate.held.size).toBeGreaterThan(0));
+        scratch.x = -1000;
+        loadGate.hold = false;
+        releaseHeldLoads([...loadGate.held.keys()]);
+
+        const system = (await built).systems[0]!;
+        startParticleSystem(system);
+        for (let frame = 0; frame < 600 && system.buffer.alive === 0; frame++) {
+            animateParticleSystem(system, 1);
+        }
+        const alive = system.buffer.alive;
+        expect(alive).toBeGreaterThan(0);
+        expect(Math.min(...system.buffer.posX.subarray(0, alive))).toBeGreaterThan(500);
+    });
+
     it.each(["", undefined])("omits an absent SystemBlock name (%s)", async (name) => {
         const graph = parseNodeParticleSource({ blocks: [{ customType: "BABYLON.SystemBlock", id: 1, name }] });
         const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);

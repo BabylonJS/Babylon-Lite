@@ -626,8 +626,8 @@ For each root:
 - `createParticleSystem(capacity)` runs before any block evaluator.
 - `isLocal` is true only when `systemBlock.serialized.isLocal === true`.
 - `options.emitterWorldMatrix` has precedence over `options.emitter`. The public build options contain no provider field. Their one internal extension point is an optional `_setupEmitter(state)` callback whose declaration is trimmed from the public package types.
-- With a static matrix, the matrix reference is retained and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3` exactly once, preserving the existing static contract.
-- Without a matrix, the emitter option or an explicit zero vector is copied into the stable emitter value and a translation matrix.
+- The builder copies the static emitter position once, synchronously, before its first await: indices 12, 13, and 14 of a static matrix, otherwise the emitter option, otherwise zero. A caller that reuses one scratch vector across builds therefore cannot move a pending build. Every root gets a fresh emitter `Vec3` from that copy.
+- A static matrix keeps its reference, because shape evaluators read it while emitting. Without a matrix, every root gets its own translation matrix built from the copy.
 - Immediately after constructing `NpeBuildState`, the builder calls `options._setupEmitter?.(state)` and then begins the graph walk. With ordinary options this call does nothing and the system retains no emitter state or provider handle. Provider setup copies its validated initial sample before any evaluator captures the stable emitter references.
 - Every implicit Cylinder evaluator computes its static inverse normally and optionally appends its stable `{ inverse }` state through `state.emitterInverseWorldMatrices?.push(...)`. Explicit-direction cylinders append nothing. A static build leaves the field absent and allocates no collection array. Provider setup installs the fresh list before traversal, so it collects every reachable implicit cylinder in one system without evaluator imports or provider-specific branching.
 - `scene` and `textureBaseUrl` are carried only during the graph walk in `NpeBuildState`.
