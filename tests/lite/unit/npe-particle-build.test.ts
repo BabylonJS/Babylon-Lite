@@ -6,8 +6,9 @@ import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
-import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
-import { animateParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { buildNodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
+import { animateParticleSystem, createParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -185,6 +186,48 @@ describe("NPE build reachability", () => {
         expect(fetchMock).toHaveBeenCalledWith(expectedUrl === "url" ? url : textureDataUrl);
         expect(copyExternalImageToTexture).toHaveBeenCalledWith(expect.objectContaining({ flipY: expectedFlipY }), expect.anything(), expect.anything());
         expect(set.systems[0]!.texture).toMatchObject({ width: 1, height: 1 });
+    });
+
+    it.each([
+        {
+            name: "rejects the build when the texture loader module fails to load",
+            loaderModule: () => {
+                throw new Error("loader chunk failed");
+            },
+            failure: new Error("loader chunk failed"),
+        },
+        {
+            name: "tolerates a failed texture image load",
+            loaderModule: () => ({ loadTexture2D: () => Promise.reject(new Error("image failed")) }),
+            failure: undefined,
+        },
+    ])("$name", async ({ loaderModule, failure }) => {
+        vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", loaderModule);
+        vi.resetModules();
+        try {
+            const { npeBlock: systemBlock } = await import("../../../packages/babylon-lite/src/particle/node/blocks/system-block");
+            const system = createParticleSystem(1);
+            const promises: Promise<void>[] = [];
+            const ctx = {
+                state: { system },
+                isConnected: () => false,
+                input: (_block: unknown, _name: string, fallback?: () => unknown) => fallback,
+                texture: () => ({ url: "particle.png", invertY: true }),
+                addBuildPromise: (promise: Promise<void>) => promises.push(promise),
+            } as unknown as NpeBuildContext;
+            systemBlock.build({ id: 1, className: "SystemBlock", name: "", inputs: [], serialized: {} } as ParsedParticleBlock, ctx);
+
+            // Vitest wraps a throwing mock factory and keeps the original error as its cause.
+            const settled = await Promise.all(promises).then(
+                () => undefined,
+                (error: Error) => error.cause ?? error
+            );
+            expect(settled).toEqual(failure);
+            expect(system.texture).toBeNull();
+        } finally {
+            vi.doUnmock("../../../packages/babylon-lite/src/texture/texture-2d.js");
+            vi.resetModules();
+        }
     });
 
     it.each([
