@@ -40,19 +40,35 @@ const OPTIONAL_FEATURES: ReadonlyArray<{ pattern: RegExp; scenes: readonly numbe
     { pattern: /npe-manifest-extra/, scenes: [263, 264, 276, 277, 280, 281] },
     {
         pattern:
-            /update-(direction|angle)-block|npe-(contextual-extra|emitter-provider|graph-plumbing(?:-runtime)?|live-emitter|local-position)|random-once-typed|sprite-columns-random|particle-(condition|float-to-int|local-variable|vector-length|input-local-position)|-shape-local|(point|cone|cylinder|mesh)-shape-block|math\/mat4-invert/,
+            /update-(direction|angle)-block|npe-(contextual-extra|emitter-provider|graph-plumbing(?:-runtime)?|live-emitter|local-position)|random-once-typed|sprite-columns-random|particle-(condition|float-to-int|local-variable|vector-length|input-local-position)|-shape-local|(point|cone|cylinder|mesh)-shape-block|math\/invert-mat4/,
         scenes: [],
     },
 ];
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
-const REQUIRED_FEATURE_CHUNKS: Readonly<Record<number, readonly string[]>> = {
+const REQUIRED_FEATURE_MODULES: Readonly<Record<number, readonly string[]>> = {
     277: ["update-attractor-block"],
     280: ["update-flow-map-block", "npe-texture-content"],
     281: ["update-noise-block", "npe-texture-content"],
 };
+/** glTF scenes with no particle graph; they must never fetch the NPE block manifest. */
+const NON_NPE_CONTROL_SCENES = [1, 12];
 
 function findUnusedFeatures(sceneId: number, names: readonly string[]): string[] {
     return names.filter((name) => OPTIONAL_FEATURES.some(({ pattern, scenes }) => pattern.test(name) && !scenes.includes(sceneId)));
+}
+
+/** Module ids inside a scene's fetched runtime chunks, or null when bundle-info was not generated. */
+function fetchedModuleIds(sceneId: number, runtimeChunks: readonly string[]): string[] | null {
+    const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
+    if (!existsSync(bundleInfoPath)) {
+        return null;
+    }
+    const fetched = new Set(runtimeChunks);
+    const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf8")) as BundleInfo;
+    return (bundleInfo.chunks ?? [])
+        .filter((chunk) => chunk.file && fetched.has(chunk.file))
+        .flatMap((chunk) => chunk.modules ?? [])
+        .map((module) => (module.id ?? "").replace(/\\/g, "/"));
 }
 
 describe("Particle bundle feature isolation", () => {
@@ -72,23 +88,19 @@ describe("Particle bundle feature isolation", () => {
             const chunks = manifest.runtimeChunks ?? [];
             expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
             expect(findUnusedFeatures(sceneId, chunks), `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
-            for (const required of REQUIRED_FEATURE_CHUNKS[sceneId] ?? []) {
+            const runtimeModuleIds = fetchedModuleIds(sceneId, chunks);
+            // A valid build can fold a required module into another fetched chunk, so chunk names are only the fallback.
+            const delivered = runtimeModuleIds ?? chunks;
+            for (const required of REQUIRED_FEATURE_MODULES[sceneId] ?? []) {
                 expect(
-                    chunks.some((chunk) => chunk.includes(required)),
+                    delivered.some((name) => name.includes(required)),
                     `scene${sceneId} must fetch ${required}`
                 ).toBe(true);
             }
-            const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
-            if (!existsSync(bundleInfoPath)) {
+            if (!runtimeModuleIds) {
                 continue;
             }
 
-            const runtimeChunks = new Set(chunks);
-            const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf8")) as BundleInfo;
-            const runtimeModuleIds = (bundleInfo.chunks ?? [])
-                .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
-                .flatMap((chunk) => chunk.modules ?? [])
-                .map((module) => (module.id ?? "").replace(/\\/g, "/"));
             if (sceneId === 283 || sceneId === 284) {
                 expect(runtimeModuleIds.filter((id) => OPTIONAL_BLEND_MODULE.test(id))).toEqual(
                     expect.arrayContaining([
@@ -101,6 +113,20 @@ describe("Particle bundle feature isolation", () => {
             }
             const particleModules = runtimeModuleIds.filter((id) => /\/(particle|math)\//.test(id));
             expect(findUnusedFeatures(sceneId, particleModules), `scene${sceneId} folds unused optional particle features into runtime chunks`).toEqual([]);
+        }
+    });
+
+    it.skipIf(scenesWithManifests(NON_NPE_CONTROL_SCENES).length === 0)("keeps the NPE block manifest out of non-particle scenes", () => {
+        for (const sceneId of scenesWithManifests(NON_NPE_CONTROL_SCENES)) {
+            const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
+            const chunks = manifest.runtimeChunks ?? [];
+            expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
+            expect(
+                chunks.filter((chunk) => chunk.includes("npe-manifest")),
+                `scene${sceneId} must not fetch an NPE manifest chunk`
+            ).toEqual([]);
+            const manifestModules = (fetchedModuleIds(sceneId, chunks) ?? []).filter((id) => /\/particle\/node\/npe-manifest(-extra)?\.[jt]s$/.test(id));
+            expect(manifestModules, `scene${sceneId} must not fetch an NPE manifest module`).toEqual([]);
         }
     });
 

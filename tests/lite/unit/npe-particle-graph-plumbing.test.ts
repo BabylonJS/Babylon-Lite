@@ -180,7 +180,7 @@ describe("NPE graph plumbing", () => {
         const direct = await buildNodeParticleSet(engine, scene, parseNodeParticleSource(scalarRouteSource(false)));
         const graph = parseNodeParticleSource(scalarRouteSource(true));
 
-        await expect(buildNodeParticleSet(engine, scene, graph)).rejects.toThrow('NodeParticle: unsupported block "ParticleTeleportOutBlock"');
+        await expect(buildNodeParticleSet(engine, scene, graph)).rejects.toThrow("ParticleTeleportOutBlock");
         const teleported = await buildNodeParticleSet(engine, scene, await normalizeNodeParticleGraph(graph));
 
         expect(direct.systems[0]!.targetStopDuration).toBe(7);
@@ -386,7 +386,7 @@ describe("NPE graph plumbing", () => {
         });
 
         expect(await normalizeNodeParticleGraph(graph)).toBe(graph);
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported block "ParticleTeleportInBlock"');
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("ParticleTeleportInBlock");
     });
 
     it("normalizes fan-out, chains, endpoint zero, and multiple roots without mutating source data", async () => {

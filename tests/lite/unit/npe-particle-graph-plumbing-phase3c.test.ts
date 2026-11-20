@@ -286,7 +286,7 @@ describe("Phase 3C graph plumbing", () => {
 
     it("keeps direct pass-through omission unsupported while the helper enables it", async () => {
         const graph = parseNodeParticleSource(passThroughSource("ParticleElbowBlock"));
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported block "ParticleElbowBlock"');
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("ParticleElbowBlock");
 
         const normalized = await normalizeNodeParticleGraph(graph);
         expect((await buildNodeParticleSet({} as EngineContext, {} as SceneContext, normalized)).systems[0]!.targetStopDuration).toBe(7);

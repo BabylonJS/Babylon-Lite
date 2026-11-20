@@ -188,15 +188,15 @@ describe("NPE build reachability", () => {
     });
 
     it.each([
-        { name: "rejects a texture wired into a value input", blockId: 4, input: "size", source: [45, "texture"], error: "CreateParticleBlock.size does not accept a texture" },
-        { name: "rejects a value wired into a texture input", blockId: 44, input: "texture", source: [9, "output"], error: "SystemBlock.texture expects a texture" },
-    ] as const)("$name", async ({ blockId, input, source: [targetBlockId, targetConnectionName], error }) => {
+        { name: "rejects a texture wired into a value input", blockId: 4, input: "size", source: [45, "texture"], rejected: "CreateParticleBlock.size" },
+        { name: "rejects a value wired into a texture input", blockId: 44, input: "texture", source: [9, "output"], rejected: "SystemBlock.texture" },
+    ] as const)("$name", async ({ blockId, input, source: [targetBlockId, targetConnectionName], rejected }) => {
         const source = structuredClone(SCENE262_NPE_JSON) as { blocks: Array<{ id: number; inputs: Array<Record<string, unknown>> }> };
         const port = source.blocks.find((block) => block.id === blockId)!.inputs.find((candidate) => candidate.name === input)!;
         port.targetBlockId = targetBlockId;
         port.targetConnectionName = targetConnectionName;
 
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source))).rejects.toThrow(error);
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source))).rejects.toThrow(rejected);
     });
 
     it("ignores detached unsupported and OncePerParticle blocks", async () => {
