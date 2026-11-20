@@ -227,6 +227,9 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                 textures.set(`${blockId}:${name}`, value);
             },
             addBuildPromise(promise) {
+                // Observe a rejection now, so one that settles before the aggregate below, or after a later block
+                // throws, is not reported as unhandled. The aggregate still rejects with it.
+                promise.catch(() => undefined);
                 buildPromises.push(promise);
             },
         };

@@ -230,6 +230,36 @@ describe("NPE build reachability", () => {
         }
     });
 
+    it("observes a failed texture loader import when a later system rejects the build first", async () => {
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown): void => {
+            unhandled.push(reason);
+        };
+        process.on("unhandledRejection", onUnhandled);
+        vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", () => {
+            throw new Error("loader chunk failed");
+        });
+        vi.resetModules();
+        try {
+            const graph = parseNodeParticleSource({
+                blocks: [
+                    { customType: "BABYLON.ParticleTextureSourceBlock", id: 1, url: "https://assets.example/particle.png", inputs: [] },
+                    { customType: "BABYLON.SystemBlock", id: 2, inputs: [{ name: "texture", targetBlockId: 1, targetConnectionName: "texture" }] },
+                    { customType: "BABYLON.SystemBlock", id: 3, inputs: [{ name: "emitRate", targetBlockId: 1, targetConnectionName: "texture" }] },
+                ],
+            });
+
+            await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("SystemBlock.emitRate");
+            // Let the orphaned loader import settle, so Node reports it here if nothing observed it.
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off("unhandledRejection", onUnhandled);
+            vi.doUnmock("../../../packages/babylon-lite/src/texture/texture-2d.js");
+            vi.resetModules();
+        }
+    });
+
     it.each([
         { name: "rejects a texture wired into a value input", blockId: 4, input: "size", source: [45, "texture"], rejected: "CreateParticleBlock.size" },
         { name: "rejects a value wired into a texture input", blockId: 44, input: "texture", source: [9, "output"], rejected: "SystemBlock.texture" },
