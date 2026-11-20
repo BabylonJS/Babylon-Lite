@@ -6,8 +6,8 @@ import type { Vec3 } from "../../../math/types.js";
 import { finishLocalPosition } from "../npe-local-position.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** Emitter-local `CylinderShapeBlock`. */
-export const cylinderShapeLocalBlock: NpeBlockEvaluator = {
+/** Emitter-local `CylinderShapeBlock` path, lazy-loaded by `cylinder-shape-block.ts` when `SystemBlock.isLocal` is set. */
+export const cylinderShapeLocal: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
         const system = state.system!;

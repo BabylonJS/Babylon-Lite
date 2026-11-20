@@ -19,7 +19,7 @@ function vectorLength(value: NpeValue): number {
 }
 
 /** `ParticleVectorLengthBlock` — return the magnitude of a scalar, vector, or color. */
-export const particleVectorLengthBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const input = ctx.input(block, "input");
         const getter: ScalarGetter = (i) => vectorLength(input(i));

@@ -5,7 +5,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * `UpdateColorBlock` — each step, writes the particle colour columns from the `color` input
  * (typically `currentColour + scaledColorStep`).
  */
-export const updateColorBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

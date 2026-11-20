@@ -4,7 +4,7 @@ import {
     addBillboardSystemToScene,
     animateParticleSystem,
     attachControl,
-    buildNodeParticleSetWithNoiseTextures,
+    buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
     createParticleBillboard,
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
             deterministicEmitter: live,
         })
     );
-    const set = await buildNodeParticleSetWithNoiseTextures(engine, scene, graph, {
+    const set = await buildNodeParticleSet(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",
     });

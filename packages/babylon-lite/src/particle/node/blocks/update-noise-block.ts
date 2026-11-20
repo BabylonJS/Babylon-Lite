@@ -1,7 +1,7 @@
 import { column } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import { loadNpeTextureContent } from "../npe-texture-content.js";
-import type { NpeTextureContent, NpeTextureValue } from "../npe-value.js";
+import type { NpeTextureContent } from "../npe-value.js";
 import type { Vec3 } from "../../../math/types.js";
 
 function sampleRed(map: NpeTextureContent, u: number, v: number): number {
@@ -11,11 +11,11 @@ function sampleRed(map: NpeTextureContent, u: number, v: number): number {
 }
 
 /** `UpdateNoiseBlock` — perturb particle direction from fixed per-particle texture samples. */
-export const updateNoiseBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
-        const source = ctx.input(block, "noiseTexture")(0) as unknown as NpeTextureValue;
+        const source = ctx.texture(block, "noiseTexture");
         const defaultStrength: Vec3 = { x: 100, y: 100, z: 100 };
         const strength = ctx.input(block, "strength", () => defaultStrength)(0) as Vec3 | null;
         if (!strength) {

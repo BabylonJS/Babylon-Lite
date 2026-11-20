@@ -6,7 +6,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * (lifetime/emit-power, size/scale, angle, colour, dead colour + the derived per-step colour ramp) as
  * column writes. The shape block fills position/direction.
  */
-export const createParticleBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
         const system = state.system!;

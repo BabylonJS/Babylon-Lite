@@ -7,10 +7,13 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * `BoxShapeBlock` — emits from a box: the position slot draws a uniform point in
  * `[minEmitBox, maxEmitBox]`, the direction slot a uniform direction between `direction1`/`direction2`,
  * each via `randomRange` (which skips the RNG when min === max). The emitter world matrix is baked into
- * birth position and direction. Local-space graphs use the separate local shape evaluator.
+ * birth position and direction. Emitter-local systems lazy-load the local-space path.
  */
-export const boxShapeBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
+        if (ctx.state.isLocal) {
+            return (await import("./box-shape-local.js")).boxShapeLocal.build(block, ctx);
+        }
         const state = ctx.state;
         const system = state.system!;
         const buffer = state.buffer!;

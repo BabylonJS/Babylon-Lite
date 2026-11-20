@@ -6,11 +6,8 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { buildNodeParticleSetWithBlendModes } from "../../../packages/babylon-lite/src/particle/node/npe-blend-modes";
 import { buildNodeParticleSetWithEmitterProvider } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
-import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
-import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
 import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
 import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/index";
 import type { ParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
@@ -183,7 +180,7 @@ describe("NPE graph plumbing", () => {
         const direct = await buildNodeParticleSet(engine, scene, parseNodeParticleSource(scalarRouteSource(false)));
         const graph = parseNodeParticleSource(scalarRouteSource(true));
 
-        await expect(buildNodeParticleSet(engine, scene, graph)).rejects.toThrow('NodeParticle: unsupported value block "ParticleTeleportOutBlock"');
+        await expect(buildNodeParticleSet(engine, scene, graph)).rejects.toThrow("ParticleTeleportOutBlock");
         const teleported = await buildNodeParticleSet(engine, scene, await normalizeNodeParticleGraph(graph));
 
         expect(direct.systems[0]!.targetStopDuration).toBe(7);
@@ -303,7 +300,7 @@ describe("NPE graph plumbing", () => {
             ],
         });
         const scene = { surface: { canvas: { width: 1, height: 1 } }, _beforeRender: [], _deferredBuilders: [] } as unknown as SceneContext;
-        const set = await buildNodeParticleSetWithFlowMaps({} as EngineContext, scene, await normalizeNodeParticleGraph(graph));
+        const set = await buildNodeParticleSet({} as EngineContext, scene, await normalizeNodeParticleGraph(graph));
 
         expect(fetchMock).toHaveBeenCalledOnce();
         expect(set.systems[0]!.updateSteps).toHaveLength(1);
@@ -389,7 +386,7 @@ describe("NPE graph plumbing", () => {
         });
 
         expect(await normalizeNodeParticleGraph(graph)).toBe(graph);
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported value block "ParticleTeleportInBlock"');
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("ParticleTeleportInBlock");
     });
 
     it("normalizes fan-out, chains, endpoint zero, and multiple roots without mutating source data", async () => {
@@ -562,9 +559,7 @@ describe("NPE graph plumbing", () => {
     });
 
     it.each([
-        ["flow-map", buildNodeParticleSetWithFlowMaps],
-        ["noise", buildNodeParticleSetWithNoiseTextures],
-        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
+        ["default", buildNodeParticleSet],
         ["blend-mode", buildNodeParticleSetWithBlendModes],
     ] as const)("builds one explicitly normalized graph through the %s builder", async (_name, builder) => {
         const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(scalarRouteSource(true)));
@@ -612,7 +607,7 @@ describe("NPE graph plumbing", () => {
 
     it("keeps graph recognition out of the parser and all owning builders", () => {
         const nodeDirectory = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
-        for (const file of ["npe-parser.ts", "npe-build.ts", "npe-flow-map-runtime.ts", "npe-texture-update-runtime.ts"]) {
+        for (const file of ["npe-parser.ts", "npe-build.ts", "npe-manifest.ts", "npe-manifest-extra.ts"]) {
             const source = readFileSync(resolve(nodeDirectory, file), "utf8");
             expect(source, file).not.toContain("_hasGraphPlumbing");
             expect(source, file).not.toContain("npe-graph-plumbing");
@@ -629,17 +624,14 @@ describe("NPE graph plumbing", () => {
         expect(snippetSource).toContain("await normalizeNodeParticleGraph(parseNodeParticleSource(source))");
     });
 
-    it("adds no Teleport, Elbow, or Debug evaluator or registry implementation", () => {
+    it("adds no Teleport, Elbow, or Debug evaluator or manifest entry", () => {
         const nodeDirectory = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
         const blockNames = readdirSync(resolve(nodeDirectory, "blocks"));
-        const registrySource = readdirSync(nodeDirectory)
-            .filter((name) => name.startsWith("npe-registry") && name.endsWith(".ts"))
-            .map((name) => readFileSync(resolve(nodeDirectory, name), "utf8"))
-            .join("\n");
+        const manifestSource = ["npe-manifest.ts", "npe-manifest-extra.ts"].map((file) => readFileSync(resolve(nodeDirectory, file), "utf8")).join("\n");
 
         expect(blockNames.filter((name) => name.toLowerCase().includes("teleport"))).toEqual([]);
         expect(blockNames.filter((name) => /(?:elbow|debug)/i.test(name))).toEqual([]);
         expect(blockNames.filter((name) => name === "particle-local-variable-block.ts")).toEqual(["particle-local-variable-block.ts"]);
-        expect(registrySource).not.toMatch(/Particle(?:Teleport|Elbow|Debug)/);
+        expect(manifestSource).not.toMatch(/Particle(?:Teleport|Elbow|Debug)/);
     });
 });

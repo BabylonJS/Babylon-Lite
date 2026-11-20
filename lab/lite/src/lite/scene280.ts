@@ -4,7 +4,7 @@ import {
     addBillboardSystemToScene,
     animateParticleSystem,
     attachControl,
-    buildNodeParticleSetWithFlowMaps,
+    buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
     createParticleBillboard,
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     attachControl(camera, canvas, scene);
 
     const graph = parseNodeParticleSource(createScene280NpeJson());
-    const set = await buildNodeParticleSetWithFlowMaps(engine, scene, graph, {
+    const set = await buildNodeParticleSet(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",
     });

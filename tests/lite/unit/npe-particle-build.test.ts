@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
@@ -8,6 +10,29 @@ import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particl
 import { animateParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+
+const blockEvents = vi.hoisted(() => [] as string[]);
+// While `hold` is set, each block load stays pending until the test releases it, exposing load concurrency.
+const loadGate = vi.hoisted(() => ({ hold: false, held: new Map<string, () => void>(), resolved: [] as string[] }));
+vi.mock("../../../packages/babylon-lite/src/particle/node/npe-manifest.js", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../../packages/babylon-lite/src/particle/node/npe-manifest")>();
+    return {
+        loadNpeBlock: async (className: string) => {
+            blockEvents.push(`load ${className}`);
+            if (loadGate.hold) {
+                await new Promise<void>((release) => loadGate.held.set(className, release));
+            }
+            const evaluator = await actual.loadNpeBlock(className);
+            loadGate.resolved.push(className);
+            return {
+                build: (...args: Parameters<typeof evaluator.build>) => {
+                    blockEvents.push(`build ${className}`);
+                    return evaluator.build(...args);
+                },
+            };
+        },
+    };
+});
 
 interface MutableGraphSource {
     blocks: Array<{
@@ -21,7 +46,16 @@ function systemEmitRateInput(source: MutableGraphSource): MutableGraphSource["bl
     return system.inputs.find((input) => input.name === "emitRate")!;
 }
 
+function releaseHeldLoads(classNames: readonly string[]): void {
+    for (const className of classNames) {
+        loadGate.held.get(className)?.();
+        loadGate.held.delete(className);
+    }
+}
+
 afterEach(() => {
+    loadGate.hold = false;
+    releaseHeldLoads([...loadGate.held.keys()]);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
@@ -36,6 +70,52 @@ describe("NPE build reachability", () => {
         expect(set.systems).toHaveLength(1);
         expect(set.systems[0]!.buffer.posX).toBeInstanceOf(Float32Array);
         expect(set.systems[0]!.name).toBe(SCENE262_NPE_JSON.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!.name);
+    });
+
+    it("starts every reachable block load concurrently and builds only after all loads resolve", async () => {
+        blockEvents.length = 0;
+        loadGate.resolved.length = 0;
+        loadGate.hold = true;
+        const built = buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: { x: 0, y: 0, z: 0 } });
+
+        // A sequential loader would stall here with a single pending load.
+        await vi.waitFor(() => expect(loadGate.held.size).toBeGreaterThan(0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const started = [...loadGate.held.keys()];
+        expect(started.length).toBeGreaterThan(1);
+        const loads = blockEvents.filter((event) => event.startsWith("load "));
+        expect(loads).toHaveLength(started.length);
+
+        const [last, ...rest] = started;
+        releaseHeldLoads(rest);
+        await vi.waitFor(() => expect(loadGate.resolved).toHaveLength(rest.length));
+        expect(blockEvents.filter((event) => event.startsWith("build "))).toEqual([]);
+
+        loadGate.hold = false;
+        releaseHeldLoads([last!]);
+        await built;
+        const builtClasses = blockEvents.filter((event) => event.startsWith("build ")).map((event) => event.slice("build ".length));
+        expect(builtClasses.length).toBeGreaterThan(0);
+        expect(new Set(builtClasses)).toEqual(new Set(started));
+    });
+
+    it("emits from the emitter position passed at call time when the caller mutates its vector during block loading", async () => {
+        loadGate.hold = true;
+        const scratch = { x: 1000, y: 0, z: 0 };
+        const built = buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(SCENE262_NPE_JSON), { emitter: scratch });
+        await vi.waitFor(() => expect(loadGate.held.size).toBeGreaterThan(0));
+        scratch.x = -1000;
+        loadGate.hold = false;
+        releaseHeldLoads([...loadGate.held.keys()]);
+
+        const system = (await built).systems[0]!;
+        startParticleSystem(system);
+        for (let frame = 0; frame < 600 && system.buffer.alive === 0; frame++) {
+            animateParticleSystem(system, 1);
+        }
+        const alive = system.buffer.alive;
+        expect(alive).toBeGreaterThan(0);
+        expect(Math.min(...system.buffer.posX.subarray(0, alive))).toBeGreaterThan(500);
     });
 
     it.each(["", undefined])("omits an absent SystemBlock name (%s)", async (name) => {
@@ -58,10 +138,10 @@ describe("NPE build reachability", () => {
         { name: "loads an embedded texture with explicit invertY false", url: "", invertY: false, expectedUrl: "embedded", expectedFlipY: true },
         { name: "applies Lite's class-default invertY when the field is omitted", url: "", invertY: undefined, expectedUrl: "embedded", expectedFlipY: false },
         {
-            name: "deliberately prefers URL for serializer-unreachable dual-source input",
+            name: "prefers embedded data for dual-source input like Babylon.js deserialization",
             url: "https://assets.example/particle.png",
             invertY: undefined,
-            expectedUrl: "url",
+            expectedUrl: "embedded",
             expectedFlipY: false,
         },
     ])("$name", async ({ url, invertY, expectedUrl, expectedFlipY }) => {
@@ -105,6 +185,18 @@ describe("NPE build reachability", () => {
         expect(fetchMock).toHaveBeenCalledWith(expectedUrl === "url" ? url : textureDataUrl);
         expect(copyExternalImageToTexture).toHaveBeenCalledWith(expect.objectContaining({ flipY: expectedFlipY }), expect.anything(), expect.anything());
         expect(set.systems[0]!.texture).toMatchObject({ width: 1, height: 1 });
+    });
+
+    it.each([
+        { name: "rejects a texture wired into a value input", blockId: 4, input: "size", source: [45, "texture"], rejected: "CreateParticleBlock.size" },
+        { name: "rejects a value wired into a texture input", blockId: 44, input: "texture", source: [9, "output"], rejected: "SystemBlock.texture" },
+    ] as const)("$name", async ({ blockId, input, source: [targetBlockId, targetConnectionName], rejected }) => {
+        const source = structuredClone(SCENE262_NPE_JSON) as { blocks: Array<{ id: number; inputs: Array<Record<string, unknown>> }> };
+        const port = source.blocks.find((block) => block.id === blockId)!.inputs.find((candidate) => candidate.name === input)!;
+        port.targetBlockId = targetBlockId;
+        port.targetConnectionName = targetConnectionName;
+
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source))).rejects.toThrow(rejected);
     });
 
     it("ignores detached unsupported and OncePerParticle blocks", async () => {
@@ -178,5 +270,17 @@ describe("NPE build reachability", () => {
         }
 
         expect(system.buffer.alive).toBe(truth.count);
+    });
+});
+
+describe("NPE block manifest", () => {
+    it("keeps exactly the classic converter's default classes in the base table", () => {
+        const manifestSource = readFileSync(resolve(__dirname, "../../../packages/babylon-lite/src/particle/node/npe-manifest.ts"), "utf8");
+        const baseClasses = [...manifestSource.matchAll(/^\s+(\w+): \(\) => import\(/gm)].map((match) => match[1]).sort();
+        // Scene 262 is a box-emitter ParticleSystem without gradients, converted by Babylon.js ConvertToNodeParticleSystemSetAsync.
+        const converterClasses = [...new Set(SCENE262_NPE_JSON.blocks.map((block) => block.customType.replace(/^BABYLON\./, "")))].sort();
+
+        expect(converterClasses).toHaveLength(11);
+        expect(baseClasses).toEqual(converterClasses);
     });
 });

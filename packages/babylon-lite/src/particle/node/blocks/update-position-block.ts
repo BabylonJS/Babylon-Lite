@@ -5,7 +5,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * `UpdatePositionBlock` — each step, writes the particle position columns from the `position` input
  * (typically `currentPosition + scaledDirection`).
  */
-export const updatePositionBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

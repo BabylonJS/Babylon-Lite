@@ -1,9 +1,10 @@
 import type { NpeTextureContent, NpeTextureValue } from "./npe-value.js";
 
-/** Decode and cache the CPU RGBA content of a texture-valued NPE source. */
+/** Decode and cache the CPU RGBA content of a texture-valued NPE source. URLs with non-fetchable schemes resolve to null. */
 export function loadNpeTextureContent(source: NpeTextureValue): Promise<NpeTextureContent | null> {
     if (!source._content) {
-        source._content = source.url ? decodeTexture(source) : Promise.resolve(null);
+        const url = source.url;
+        source._content = url && !/^(?!https?:|data:|blob:)[a-z][a-z\d+.-]*:/i.test(url) ? decodeTexture(source) : Promise.resolve(null);
     }
     return source._content;
 }

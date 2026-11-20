@@ -5,7 +5,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 import type { NpeGetter } from "../npe-value.js";
 
 /** `ParticleGradientBlock` — interpolate sorted static stops into reused scratch. */
-export const particleGradientBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const gradientGetter = ctx.input(block, "gradient", () => 1);
         const entries = block.inputs

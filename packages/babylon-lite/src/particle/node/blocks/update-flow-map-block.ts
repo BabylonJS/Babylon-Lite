@@ -5,7 +5,7 @@ import type { Mat4, Mat4Storage, Vec3 } from "../../../math/types.js";
 import type { ParticleBuffer } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import { loadNpeTextureContent } from "../npe-texture-content.js";
-import type { NpeTextureContent, NpeTextureValue } from "../npe-value.js";
+import type { NpeTextureContent } from "../npe-value.js";
 
 /** Apply one screen-space flow-map sample to a particle direction. */
 function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStrength: number, buffer: ParticleBuffer, i: number, screen: Vec3): void {
@@ -24,28 +24,18 @@ function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStre
 }
 
 /** `UpdateFlowMapBlock` — update particle direction from a projected RGBA flow field. */
-export const updateFlowMapBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
         const scene = ctx.state.scene;
-        const sourceValue = ctx.input(block, "flowMap")(0) as unknown as NpeTextureValue;
+        const sourceValue = ctx.texture(block, "flowMap");
         const strengthGetter = ctx.input(block, "strength", () => 1);
         const screen: Vec3 = { x: 0, y: 0, z: 0 };
         const matrix = allocateMat4();
         const matrixStorage = matrix as unknown as Mat4Storage;
         let flowMap: NpeTextureContent | null = null;
         let matrixReady = false;
-
-        if (sourceValue?.url) {
-            ctx.addBuildPromise(
-                loadNpeTextureContent(sourceValue)
-                    .then((content) => {
-                        flowMap = content;
-                    })
-                    .catch(() => undefined)
-            );
-        }
 
         const prepareMatrix = (): void => {
             const camera = scene.camera;
@@ -59,9 +49,28 @@ export const updateFlowMapBlock: NpeBlockEvaluator = {
             matrixStorage.set(getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Mat4Storage);
             matrixReady = true;
         };
-        prepareMatrix();
-        scene._beforeRender.push(prepareMatrix);
 
+        // The system owns the per-frame projection, and only once the map decodes: a failed decode, or a build that is
+        // discarded or rejected, leaves no frame work behind.
+        if (sourceValue?.url) {
+            ctx.addBuildPromise(
+                loadNpeTextureContent(sourceValue)
+                    .then((content) => {
+                        if (!content) {
+                            return;
+                        }
+                        flowMap = content;
+                        const previous = system._prepareFrame;
+                        system._prepareFrame = previous
+                            ? () => {
+                                  previous();
+                                  prepareMatrix();
+                              }
+                            : prepareMatrix;
+                    })
+                    .catch(() => undefined)
+            );
+        }
         system.updateSteps.push((i) => {
             if (!flowMap || !matrixReady) {
                 return;

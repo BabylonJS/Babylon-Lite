@@ -37,7 +37,7 @@ function evaluate(test: number, left: number, right: number, epsilon: number): b
 }
 
 /** `ParticleConditionBlock` — select one of two values from a scalar comparison. */
-export const particleConditionBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const test = typeof block.serialized.test === "number" ? block.serialized.test : TEST_EQUAL;
         const epsilon = typeof block.serialized.epsilon === "number" ? block.serialized.epsilon : 0;

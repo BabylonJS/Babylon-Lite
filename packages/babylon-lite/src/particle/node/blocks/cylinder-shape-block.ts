@@ -6,8 +6,11 @@ import type { Vec3 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `CylinderShapeBlock` — uniform cylinder sampling with directed or radial emission. */
-export const cylinderShapeBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
+        if (ctx.state.isLocal) {
+            return (await import("./cylinder-shape-local.js")).cylinderShapeLocal.build(block, ctx);
+        }
         const state = ctx.state;
         const system = state.system!;
         const buffer = state.buffer!;

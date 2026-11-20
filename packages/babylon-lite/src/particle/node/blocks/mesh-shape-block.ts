@@ -11,8 +11,11 @@ interface CachedVertexData {
 }
 
 /** `MeshShapeBlock` — sample cached triangle geometry and interpolate its vertex data. */
-export const meshShapeBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
+        if (ctx.state.isLocal) {
+            return (await import("./mesh-shape-local.js")).meshShapeLocal.build(block, ctx);
+        }
         const cached = block.serialized.cachedVertexData as CachedVertexData | undefined;
         const positions = cached?.positions;
         const indices = cached?.indices;

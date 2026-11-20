@@ -2,7 +2,7 @@ import type { Vec3 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `UpdateAttractorBlock` — apply a softened inverse-square force to particle direction. */
-export const updateAttractorBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
