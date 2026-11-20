@@ -20,11 +20,15 @@ function getProjectionSource(scene: SceneContext): FlowMapProjectionSource {
     const sources = (projectionSources ??= new WeakMap());
     let source = sources.get(scene);
     if (!source) {
-        const created: FlowMapProjectionSource = { scene };
+        const created: FlowMapProjectionSource = { scene: null };
         sources.set(scene, (source = created));
-        scene._disposables.push(() => {
-            created.scene = null;
-        });
+        // A scene disposed while the build awaited block loads has already run its disposers, so its source starts detached.
+        if (!scene._z) {
+            created.scene = scene;
+            scene._disposables.push(() => {
+                created.scene = null;
+            });
+        }
     }
     return source;
 }

@@ -32,8 +32,9 @@ function createFlowScene(
     } as unknown as SceneContext;
 }
 
-/** Mirror scene disposal: run its disposers, then fail the test on any later camera read. */
+/** Mirror scene disposal: mark it disposed, run its disposers, then fail the test on any later camera read. */
 function disposeFlowScene(scene: SceneContext): void {
+    scene._z = true;
     for (const dispose of scene._disposables.splice(0)) {
         dispose();
     }
@@ -317,6 +318,21 @@ describe("NPE UpdateFlowMapBlock", () => {
         pending.updateSteps[0]!(0);
 
         expect(pending.buffer.dirX[0]).toBe(0);
+    });
+
+    it("starts detached without registering on a scene disposed before its first flow-map build", async () => {
+        const scene = createFlowScene();
+        disposeFlowScene(scene);
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255]), () => 1, scene);
+        startParticleSystem(system);
+        animateParticleSystem(system, 1);
+
+        expect(scene._disposables).toHaveLength(0);
+        expect(system.buffer.dirX[0]).toBe(0);
     });
 
     it("builds registry and texture wiring through a parsed graph", async () => {
