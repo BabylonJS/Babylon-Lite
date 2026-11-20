@@ -860,7 +860,7 @@ The builder has created the system before this evaluator runs. The evaluator:
 - For an unconnected `emitRate`, evaluates the input once at build with fallback `10` and assigns a numeric result.
 - For a connected `emitRate`, installs `_emitRateGetter`. Each call evaluates the graph at particle index `0` and returns its number result, or the system's constant `emitRate` when the result is not numeric. It is not evaluated during build.
 - Evaluates `targetStopDuration` once at build with fallback `0` and assigns a numeric result.
-- For a connected `texture`, reads the `NpeTextureValue` descriptor once at build. A nonempty URL adds a build promise that calls `loadTexture2D(engine, url, { invertY: !descriptor.invertY })` and assigns the result to `system.texture`. Load failures are caught and leave `system.texture` unchanged. An empty URL schedules nothing.
+- For a connected `texture`, reads the `NpeTextureValue` descriptor once at build. A nonempty URL adds a build promise that dynamically imports `loadTexture2D`, calls `loadTexture2D(engine, url, { invertY: !descriptor.invertY })`, and assigns the result to `system.texture`. The loader import lives inside that promise, so the block chunk holds no static cross-chunk import and a graph without a texture never requests the loader. Load failures are caught and leave `system.texture` unchanged. An empty URL schedules nothing.
 
 `capacity` and `isLocal` are builder fields. `billBoardMode` and `isBillboardBased` are ignored. The evaluator installs no output getter.
 

@@ -1,4 +1,3 @@
-import { loadTexture2D } from "../../../texture/texture-2d.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
@@ -42,6 +41,7 @@ export const npeBlock: NpeBlockEvaluator = {
             ctx.addBuildPromise(
                 (async () => {
                     try {
+                        const { loadTexture2D } = await import("../../../texture/texture-2d.js");
                         // Block invertY defaults to true; Lite's opposite billboard V convention maps false to an upload flip.
                         system.texture = await loadTexture2D(ctx.engine, texture.url, { invertY: !texture.invertY });
                     } catch {
