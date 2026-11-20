@@ -1,10 +1,10 @@
 import type { EngineContext } from "../../engine/engine.js";
+import { bumpVisibilityEpoch } from "../../engine/engine.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
-import { invalidateRenderBundles } from "../../mesh/mesh-factories.js";
 import { installPbrBindingDecorator, type ScopedPbrBindingDecorator } from "../pbr/pbr-binding-decorator.js";
 import { enablePbrPluginPasses, isPbrIblColorPass, selectPbrPlugins } from "./pbr-plugin-passes.js";
 import type { MaterialPlugin } from "./material-plugin.js";
@@ -167,7 +167,8 @@ export function enableDynamicPbrBindings(): void {
                     state = held;
                     passStates.set(context, state);
                     lifetime.states.add(state);
-                    invalidateRenderBundles(engine);
+                    // Refresh cached bundles without retiring the automatic pass's bindings.
+                    bumpVisibilityEpoch();
                 }
                 if (owned !== state) {
                     releaseOwned();
@@ -199,7 +200,7 @@ export function enableDynamicPbrBindings(): void {
                     state.versions[i] = watched[i]!._bindingVersion!();
                 }
                 release(engine, old);
-                invalidateRenderBundles(engine);
+                bumpVisibilityEpoch();
             },
             draw(pass) {
                 if (!owned || owned.disposed) {
