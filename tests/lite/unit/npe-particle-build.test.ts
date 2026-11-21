@@ -188,6 +188,78 @@ describe("NPE build reachability", () => {
     });
 
     it.each([
+        {
+            name: "rejects the build when the texture loader module fails to load",
+            loaderModule: () => {
+                throw new Error("loader chunk failed");
+            },
+            outcome: new Error("loader chunk failed"),
+        },
+        {
+            name: "tolerates a failed texture image load",
+            loaderModule: () => ({ loadTexture2D: () => Promise.reject(new Error("image failed")) }),
+            outcome: null,
+        },
+    ])("$name", async ({ loaderModule, outcome }) => {
+        vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", loaderModule);
+        vi.resetModules();
+        try {
+            const graph = parseNodeParticleSource({
+                blocks: [
+                    { customType: "BABYLON.ParticleTextureSourceBlock", id: 1, url: "https://assets.example/particle.png", inputs: [] },
+                    { customType: "BABYLON.SystemBlock", id: 2, inputs: [{ name: "texture", targetBlockId: 1, targetConnectionName: "texture" }] },
+                ],
+            });
+
+            // The build either rejects with the loader error, which Vitest wraps as the cause of a throwing mock
+            // factory, or resolves with the system texture left unset.
+            const settled = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph).then(
+                (set) => set.systems[0]!.texture,
+                (error: Error) => error.cause ?? error
+            );
+            expect(settled).toEqual(outcome);
+        } finally {
+            vi.doUnmock("../../../packages/babylon-lite/src/texture/texture-2d.js");
+            vi.resetModules();
+        }
+    });
+
+    it("observes a failed texture loader import when a later system rejects the build first", async () => {
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown): void => {
+            unhandled.push(reason);
+        };
+        process.on("unhandledRejection", onUnhandled);
+        let loaderImports = 0;
+        vi.doMock("../../../packages/babylon-lite/src/texture/texture-2d.js", () => {
+            loaderImports++;
+            throw new Error("loader chunk failed");
+        });
+        vi.resetModules();
+        try {
+            const graph = parseNodeParticleSource({
+                blocks: [
+                    { customType: "BABYLON.ParticleTextureSourceBlock", id: 1, url: "https://assets.example/particle.png", inputs: [] },
+                    { customType: "BABYLON.SystemBlock", id: 2, inputs: [{ name: "texture", targetBlockId: 1, targetConnectionName: "texture" }] },
+                    { customType: "BABYLON.SystemBlock", id: 3, inputs: [{ name: "emitRate", targetBlockId: 1, targetConnectionName: "texture" }] },
+                ],
+            });
+
+            await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("SystemBlock.emitRate");
+            // Wait for the orphaned loader import to settle, then for the next macrotask, by which Node has reported
+            // any rejection that nothing observed.
+            await vi.dynamicImportSettled();
+            await new Promise((resolve) => setImmediate(resolve));
+            expect(loaderImports).toBe(1);
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off("unhandledRejection", onUnhandled);
+            vi.doUnmock("../../../packages/babylon-lite/src/texture/texture-2d.js");
+            vi.resetModules();
+        }
+    });
+
+    it.each([
         { name: "rejects a texture wired into a value input", blockId: 4, input: "size", source: [45, "texture"], rejected: "CreateParticleBlock.size" },
         { name: "rejects a value wired into a texture input", blockId: 44, input: "texture", source: [9, "output"], rejected: "SystemBlock.texture" },
     ] as const)("$name", async ({ blockId, input, source: [targetBlockId, targetConnectionName], rejected }) => {

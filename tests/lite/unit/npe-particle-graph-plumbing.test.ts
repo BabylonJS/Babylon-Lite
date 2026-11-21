@@ -299,7 +299,7 @@ describe("NPE graph plumbing", () => {
                 { customType: "BABYLON.SystemBlock", id: 6, inputs: [{ name: "particle", targetBlockId: 5, targetConnectionName: "output" }] },
             ],
         });
-        const scene = { surface: { canvas: { width: 1, height: 1 } }, _beforeRender: [], _deferredBuilders: [] } as unknown as SceneContext;
+        const scene = { surface: { canvas: { width: 1, height: 1 } }, _beforeRender: [], _deferredBuilders: [], _disposables: [] } as unknown as SceneContext;
         const set = await buildNodeParticleSet({} as EngineContext, scene, await normalizeNodeParticleGraph(graph));
 
         expect(fetchMock).toHaveBeenCalledOnce();

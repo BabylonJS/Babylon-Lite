@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { createNullEngine } from "../../../packages/babylon-lite/src/engine/null-engine";
+import { _appendTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
+import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
@@ -13,6 +16,7 @@ import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/partic
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { createSceneContext, disposeScene, getFrameGraph } from "../../../packages/babylon-lite/src/scene/scene-core";
 
 function flowMap(data: number[], width = 1, height = 1): NpeTextureContent {
     return { width, height, data: new Uint8ClampedArray(data) };
@@ -30,6 +34,19 @@ function createFlowScene(
         _deferredBuilders: [],
         _disposables: [],
     } as unknown as SceneContext;
+}
+
+/** Mirror scene disposal: mark it disposed, run its disposers, then fail the test on any later camera read. */
+function disposeFlowScene(scene: SceneContext): void {
+    scene._z = true;
+    for (const dispose of scene._disposables.splice(0)) {
+        dispose();
+    }
+    Object.defineProperty(scene, "camera", {
+        get: () => {
+            throw new Error("flow map read a disposed scene");
+        },
+    });
 }
 
 async function attachFlowMap(
@@ -266,6 +283,99 @@ describe("NPE UpdateFlowMapBlock", () => {
 
         expect(firstDelta).not.toBe(0);
         expect(Math.sign(secondDelta)).toBe(-Math.sign(firstDelta));
+    });
+
+    it("keeps the last projection without reading the scene once it is disposed", async () => {
+        const scene = createFlowScene();
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, scene);
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const liveDelta = system.buffer.dirX[0]! - start;
+        disposeFlowScene(scene);
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+
+        expect(liveDelta).not.toBe(0);
+        expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
+    });
+
+    it("keeps the last projection when real scene disposal stops at a throwing task teardown", async () => {
+        const engine = createNullEngine();
+        (engine as { canvas: unknown }).canvas = { width: 100, height: 100 };
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        scene.camera = camera;
+        const teardownFailure = new Error("task teardown failed");
+        _appendTask(getFrameGraph(scene), {
+            name: "failing-teardown",
+            engine,
+            _passes: [],
+            record() {},
+            dispose() {
+                throw teardownFailure;
+            },
+        } as Task);
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        // The left texel pushes +x and the right texel pushes -x.
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, scene);
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const liveDelta = system.buffer.dirX[0]! - start;
+        expect(() => disposeScene(scene)).toThrow(teardownFailure);
+        // Teardown stopped before the camera was cleared, so re-projecting from the scene would reverse the force.
+        camera.alpha = -Math.PI / 2;
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+
+        expect(liveDelta).not.toBe(0);
+        expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
+    });
+
+    it("adds no scene registration on a second build and detaches a build still decoding", async () => {
+        const scene = createFlowScene();
+        const map = flowMap([255, 128, 128, 255]);
+        await attachFlowMap(createParticleSystem(1), map, () => 1, scene);
+        const registrations = scene._disposables.length;
+        let resolveContent!: (content: NpeTextureContent) => void;
+        const pending = createParticleSystem(1);
+        const attached = attachFlowMap(pending, map, () => 1, scene, { url: "flow.png", invertY: false, _content: new Promise((resolve) => (resolveContent = resolve)) });
+        expect(scene._disposables).toHaveLength(registrations);
+
+        disposeFlowScene(scene);
+        resolveContent(map);
+        await attached;
+        pending._scaledStep = 1;
+        pending.updateSteps[0]!(0);
+
+        expect(pending.buffer.dirX[0]).toBe(0);
+    });
+
+    it("starts detached without registering on a scene disposed before its first flow-map build", async () => {
+        const scene = createFlowScene();
+        disposeFlowScene(scene);
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255]), () => 1, scene);
+        startParticleSystem(system);
+        animateParticleSystem(system, 1);
+
+        expect(scene._disposables).toHaveLength(0);
+        expect(system.buffer.dirX[0]).toBe(0);
     });
 
     it("builds registry and texture wiring through a parsed graph", async () => {
