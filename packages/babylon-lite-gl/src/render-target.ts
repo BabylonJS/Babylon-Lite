@@ -29,6 +29,45 @@
 import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
+/**
+ * Presents a retained composition target to the whole canvas without disturbing
+ * its contents; an active scissor rectangle does not clip the presentation.
+ * Presentation copies framebuffers, which WebGL2 forbids into a multisampled
+ * canvas, so it throws for an engine created with `antialias: true`.
+ */
+export function presentRenderTarget(target: GLRenderTarget): void {
+    const engine = target._engine;
+    if (engine._isLost || engine._disposed || target._disposed || !target.isReady) {
+        return;
+    }
+    const gl = engine.gl;
+    const s = engine._state;
+    // A wiped cache records the canvas binding whatever is actually bound, so that binding is reissued.
+    if (s.boundFramebuffer === null) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+    restoreDefaultFramebuffer(engine);
+    // Queried with the canvas framebuffer bound; its sample count is fixed when the context is created.
+    engine._canvasSamples ??= Number(gl.getParameter(gl.SAMPLES));
+    if (engine._canvasSamples > 0) {
+        throw new Error("lite-gl: presentRenderTarget cannot copy into a multisampled canvas; create the engine without antialias");
+    }
+    let scissorEnabled = s.scissorEnabled;
+    if (scissorEnabled === -1) {
+        scissorEnabled = gl.isEnabled(gl.SCISSOR_TEST) ? 1 : 0;
+    }
+    if (scissorEnabled === 1) {
+        gl.disable(gl.SCISSOR_TEST);
+    }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target._framebuffer);
+    gl.blitFramebuffer(0, 0, target.width, target.height, 0, 0, engine.canvas.width, engine.canvas.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    if (scissorEnabled === 1) {
+        gl.enable(gl.SCISSOR_TEST);
+    }
+    s.scissorEnabled = scissorEnabled;
+}
+
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */
 const UNSIGNED_BYTE = 0x1401;
 /** GL `gl.HALF_FLOAT`. */

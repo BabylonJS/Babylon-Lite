@@ -1,34 +1,7 @@
 import type { GLEngineContext } from "./context.js";
+import type { GLEffectOptions } from "./family.js";
 import { compileShader, getLinkError, isLinkComplete, linkProgram } from "./shader.js";
 import { bindTextureRaw, type GLTexture } from "./texture.js";
-
-/** Inputs to `createEffect`: shader sources plus the uniform, sampler and
- *  attribute names whose locations are resolved during readiness finalization. */
-export interface GLEffectOptions {
-    /** Human-readable label, surfaced in compile/link error messages. */
-    name: string;
-    /** GLSL ES 3.00 source, ready for `gl.shaderSource`. */
-    vertexSource: string;
-    /** GLSL ES 3.00 source, ready for `gl.shaderSource`. */
-    fragmentSource: string;
-    /** Declared uniform names. Locations are resolved during readiness
-     *  finalization. Names not declared here are legal but allocate cache
-     *  slots lazily on first setter use. */
-    uniformNames: readonly string[];
-    /** Declared sampler names, in unit-assignment order. Each gets a fixed
-     *  texture unit assigned during readiness finalization, and
-     *  `gl.uniform1i(loc, unit)` is called exactly once per program lifetime
-     *  (re-run after `webglcontextrestored`). */
-    samplerNames: readonly string[];
-    /** Default `["position"]`. The first attribute is bound to location 0 via
-     *  `gl.bindAttribLocation(program, 0, name)` BEFORE link, so the shared
-     *  fullscreen-quad VAO always feeds the same location. */
-    attributeNames?: readonly string[];
-    /** Optional `#define` block. Each unique `defines` string must be paired
-     *  with the same vertex/fragment source via a separate `createEffect` call —
-     *  the package does NOT cache compiled variants. */
-    defines?: string;
-}
 
 /** A compiled + linked shader program with cached uniform, sampler and
  *  attribute locations. Created by `createEffect`; most fields are managed
@@ -552,6 +525,30 @@ export function setEffectFloatArray(effect: GLEffect, name: string, array: Float
         return;
     }
     engine.gl.uniform1fv(loc, array);
+}
+
+/** `gl.uniform2fv` — an array of `vec2`s. Not value-cached. */
+export function setEffectFloatArray2(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
+    if (engine._isLost || !effect.isReady) {
+        return;
+    }
+    const location = effect.uniformLocations[name];
+    if (location !== null && location !== undefined) {
+        engine.gl.uniform2fv(location, array);
+    }
+}
+
+/** `gl.uniform3fv` — an array of `vec3`s. Not value-cached. */
+export function setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
+    if (engine._isLost || !effect.isReady) {
+        return;
+    }
+    const location = effect.uniformLocations[name];
+    if (location !== null && location !== undefined) {
+        engine.gl.uniform3fv(location, array);
+    }
 }
 
 /** `gl.uniform4fv` — an array of `vec4`s (`Effect.setFloatArray4` / `setArray4`).

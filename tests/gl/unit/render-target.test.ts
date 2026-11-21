@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindTexture, createGLEngine, disposeGLEngine, type GLEffect } from "../../../packages/babylon-lite-gl/src/index";
+import { bindTexture, createGLEngine, disposeGLEngine, wipeGLStateCache, type GLEffect } from "../../../packages/babylon-lite-gl/src/index";
 import {
     bindRenderTarget,
     restoreDefaultFramebuffer,
@@ -10,9 +10,11 @@ import {
     readRenderTargetPixels,
     readRenderTargetPixelsToBuffer,
     resizeRenderTarget,
+    presentRenderTarget,
 } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { setEffectTexture } from "../../../packages/babylon-lite-gl/src/effect";
+import { disableScissor, setScissor } from "../../../packages/babylon-lite-gl/src/scissor";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function setup() {
@@ -54,6 +56,118 @@ function lastCall(mock: MockGL, name: string): MockCall | undefined {
 }
 
 describe("lite-gl render-target: createRenderTarget", () => {
+    it("presents a retained image and leaves framebuffer bindings coherent", () => {
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        bindRenderTarget(target);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(callsNamed(mock, "blitFramebuffer")[0]?.args).toEqual([0, 0, 256, 128, 0, 0, 800, 600, gl.COLOR_BUFFER_BIT, gl.NEAREST]);
+        expect(lastCall(mock, "bindFramebuffer")?.args).toEqual([gl.READ_FRAMEBUFFER, null]);
+        expect(engine._state.boundFramebuffer).toBeNull();
+        expect(mock.count("clear")).toBe(0);
+        mock.clear();
+        bindRenderTarget(target);
+        expect(lastCall(mock, "bindFramebuffer")?.args).toEqual([gl.FRAMEBUFFER, target._framebuffer]);
+        disposeRenderTarget(target);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(engine);
+    });
+    it("presents the whole target under an active scissor and then restores it", () => {
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        setScissor(engine, 1, 2, 3, 4);
+        mock.clear();
+        presentRenderTarget(target);
+        const order = mock.log.filter((c) => c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
+        expect(order.map((c) => [c.name, ...c.args.slice(0, 1)])).toEqual([
+            ["disable", gl.SCISSOR_TEST],
+            ["blitFramebuffer", 0],
+            ["enable", gl.SCISSOR_TEST],
+        ]);
+        expect(engine._state.scissorEnabled).toBe(1);
+        mock.clear();
+        setScissor(engine, 1, 2, 3, 4);
+        expect(mock.log).toEqual([]);
+        disableScissor(engine);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("disable")).toBe(0);
+        expect(mock.count("enable")).toBe(0);
+        expect(engine._state.scissorEnabled).toBe(0);
+        disposeGLEngine(engine);
+    });
+    it("rejects presentation into a multisampled canvas and samples the canvas once", () => {
+        const multisampled = setup();
+        multisampled.mock.setSampleCount(4);
+        const rejected = createRenderTarget(multisampled.engine, 256, 128);
+        multisampled.mock.clear();
+        expect(() => presentRenderTarget(rejected)).toThrow(Error);
+        expect(multisampled.mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(multisampled.engine);
+        const { mock, engine } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        presentRenderTarget(target);
+        mock.setSampleCount(4);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("blitFramebuffer")).toBe(1);
+        disposeGLEngine(engine);
+    });
+    it("presents to the canvas after a cache wipe while a target is bound", () => {
+        const multisampled = setup();
+        multisampled.mock.setSampleCount(4);
+        const rejected = createRenderTarget(multisampled.engine, 256, 128);
+        bindRenderTarget(rejected);
+        wipeGLStateCache(multisampled.engine);
+        multisampled.mock.clear();
+        expect(() => presentRenderTarget(rejected)).toThrow(Error);
+        expect(multisampled.mock.count("blitFramebuffer")).toBe(0);
+        disposeGLEngine(multisampled.engine);
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        bindRenderTarget(target);
+        wipeGLStateCache(engine);
+        mock.clear();
+        presentRenderTarget(target);
+        const order = mock.log.filter((c) => c.name === "bindFramebuffer" || c.name === "blitFramebuffer");
+        expect(order.map((c) => [c.name, ...c.args.slice(0, 2)])).toEqual([
+            ["bindFramebuffer", gl.FRAMEBUFFER, null],
+            ["bindFramebuffer", gl.READ_FRAMEBUFFER, target._framebuffer],
+            ["blitFramebuffer", 0, 0],
+            ["bindFramebuffer", gl.READ_FRAMEBUFFER, null],
+        ]);
+        expect(engine._state.boundFramebuffer).toBeNull();
+        disposeGLEngine(engine);
+    });
+    it("restores a scissor test that a cache wipe left unknown", () => {
+        const { mock, engine, gl } = setup();
+        const target = createRenderTarget(engine, 256, 128);
+        setScissor(engine, 1, 2, 3, 4);
+        wipeGLStateCache(engine);
+        mock.clear();
+        presentRenderTarget(target);
+        const order = mock.log.filter((c) => c.name === "isEnabled" || c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
+        expect(order.map((c) => c.name)).toEqual(["isEnabled", "disable", "blitFramebuffer", "enable"]);
+        expect(gl.isEnabled(gl.SCISSOR_TEST)).toBe(true);
+        mock.clear();
+        presentRenderTarget(target);
+        const known = mock.log.filter((c) => c.name === "isEnabled" || c.name === "disable" || c.name === "enable" || c.name === "blitFramebuffer");
+        expect(known.map((c) => c.name)).toEqual(["disable", "blitFramebuffer", "enable"]);
+        disableScissor(engine);
+        wipeGLStateCache(engine);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("isEnabled")).toBe(1);
+        expect(mock.count("disable") + mock.count("enable")).toBe(0);
+        mock.clear();
+        presentRenderTarget(target);
+        expect(mock.count("isEnabled")).toBe(0);
+        expect(mock.count("disable") + mock.count("enable")).toBe(0);
+        disposeGLEngine(engine);
+    });
     it("creates one FBO, attaches the color texture at COLOR_ATTACHMENT0, validates completeness, and registers in _renderTargets", () => {
         const { mock, engine, gl } = setup();
         mock.clear();

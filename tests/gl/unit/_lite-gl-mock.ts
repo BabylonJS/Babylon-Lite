@@ -33,7 +33,7 @@ export interface MockGL {
      *  flipped via `setParallelComplete(true)`. */
     setParallelComplete(ok: boolean): void;
     setParallelAvailable(ok: boolean): void;
-    /** Set the value returned for `gl.SAMPLES`. */
+    /** Set the value returned for `gl.SAMPLES` while the canvas is the draw framebuffer; framebuffers report 0. */
     setSampleCount(samples: number): void;
     /** Toggle availability of a `getExtension(name)` result (e.g. the
      *  color-buffer-float extensions that drive render-target caps). */
@@ -50,6 +50,8 @@ interface Internal {
     linkSuccess: boolean;
     programAllocationSuccess: boolean;
     sampleCount: number;
+    drawFramebuffer: object | null;
+    enabled: Set<number>;
     extensions: Record<string, boolean>;
     timerQuery: { available: boolean; result: number; disjoint: boolean };
 }
@@ -64,6 +66,8 @@ export function createMockGL(): MockGL {
         linkSuccess: true,
         programAllocationSuccess: true,
         sampleCount: 0,
+        drawFramebuffer: null,
+        enabled: new Set(),
         // Default: all color-buffer-float extensions present so render-target
         // float caps report true. Toggle with `setExtensionAvailable`.
         extensions: {
@@ -151,6 +155,8 @@ export function createMockGL(): MockGL {
         UNSIGNED_INT: 0x1405,
         // ──── framebuffer / renderbuffer (render targets) ────────────────
         FRAMEBUFFER: 0x8d40,
+        READ_FRAMEBUFFER: 0x8ca8,
+        DRAW_FRAMEBUFFER: 0x8ca9,
         RENDERBUFFER: 0x8d41,
         COLOR_ATTACHMENT0: 0x8ce0,
         DEPTH_ATTACHMENT: 0x8d00,
@@ -205,7 +211,7 @@ export function createMockGL(): MockGL {
                 return 16;
             }
             if (p === ENUMS.SAMPLES) {
-                return state.sampleCount;
+                return state.drawFramebuffer === null ? state.sampleCount : 0;
             }
             if (p === TIMER_EXT.GPU_DISJOINT_EXT) {
                 return state.timerQuery.disjoint ? 1 : 0;
@@ -382,9 +388,15 @@ export function createMockGL(): MockGL {
         // ──── blend state (setBlendMode) ───────────────────────────────
         enable: (cap: number): void => {
             rec("enable", cap);
+            state.enabled.add(cap);
         },
         disable: (cap: number): void => {
             rec("disable", cap);
+            state.enabled.delete(cap);
+        },
+        isEnabled: (cap: number): boolean => {
+            rec("isEnabled", cap);
+            return state.enabled.has(cap);
         },
         blendFuncSeparate: (srcRGB: number, dstRGB: number, srcAlpha: number, dstAlpha: number): void => {
             rec("blendFuncSeparate", srcRGB, dstRGB, srcAlpha, dstAlpha);
@@ -410,6 +422,12 @@ export function createMockGL(): MockGL {
         uniform1fv: (loc: object, value: unknown): void => {
             rec("uniform1fv", loc, value);
         },
+        uniform2fv: (loc: object, value: unknown): void => {
+            rec("uniform2fv", loc, value);
+        },
+        uniform3fv: (loc: object, value: unknown): void => {
+            rec("uniform3fv", loc, value);
+        },
         uniform4fv: (loc: object, value: unknown): void => {
             rec("uniform4fv", loc, value);
         },
@@ -426,6 +444,12 @@ export function createMockGL(): MockGL {
         },
         bindFramebuffer: (target: number, f: object | null): void => {
             rec("bindFramebuffer", target, f);
+            if (target !== ENUMS.READ_FRAMEBUFFER) {
+                state.drawFramebuffer = f;
+            }
+        },
+        blitFramebuffer: (...args: unknown[]): void => {
+            rec("blitFramebuffer", ...args);
         },
         framebufferTexture2D: (...args: unknown[]): void => {
             rec("framebufferTexture2D", ...args);
