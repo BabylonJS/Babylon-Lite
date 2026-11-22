@@ -10,9 +10,9 @@ updated by the `update-compat-layer` skill.
      `Lite compat package version` is NOT a sync marker -- it tracks the published
      package and changes only when that version changes. -->
 
-- **Last synced BJS commit:** `abaa867956b4a03ebb81054ac5ec0f9ef0320a21`
-- **Last synced Lite commit:** `bc49d21edec69f56be83c977f2459ca25f5d25bb`
-- **Last sync date:** 2026-11-19
+- **Last synced BJS commit:** `47f84cf6dc635e97bfef29408be1cea41279334a`
+- **Last synced Lite commit:** `7d28bfc74260de3cf99d46e6588c71e2164d0e71`
+- **Last sync date:** 2026-11-22
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -77,7 +77,7 @@ file is the live status record for each:
 
 | BJS API                                            | Status     | Module                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts) (incl. BJS `9.22.2`-accurate `Vector2.normalizeToRef` zero/unit-length handling over Lite `normalizeVec2ToRef`)                                                                                                                                                                                                    |
+| `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts) (incl. BJS `9.22.2`-accurate `Vector2.normalizeToRef` zero/unit-length handling over Lite `normalizeVec2ToRef`; BJS `9.36` `Vector3.SlerpToRef` / `SmoothToRef` over Lite `slerpVec3ToRef`, including stable antipodal rotation)                                                                                      |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts) (including BJS `9.36` clamped `toHexString`, with `Color4` RGB-only output support)                                                                                                                                                                                                                                   |
 | `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `createQuatFromRotationMat4`; BJS `9.30` handedness-correct `FromLookDirection{LH,RH}` + `ToRef` over Lite look-direction matrix helpers)                                                                         |
 | `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `createQuatFromRotationMat4`; BJS `9.30` handedness-correct `LookDirection{LH,RH}` + `ToRef`; element-wise `maximizeInPlace*` over Lite `maximizeMat4InPlace`; `setTranslationFromFloats` over Lite `setMat4Translation`) |

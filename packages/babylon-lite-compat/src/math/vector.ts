@@ -7,7 +7,7 @@
  * `asArray()`.
  */
 
-import { normalizeVec2ToRef, projectPointToViewportToRef } from "babylon-lite";
+import { normalizeVec2ToRef, projectPointToViewportToRef, slerpVec3ToRef } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import type { Matrix } from "./matrix.js";
@@ -345,6 +345,14 @@ export class Vector3 {
     public static LerpToRef<T extends Vector3>(start: Vector3, end: Vector3, amount: number, result: T): T {
         result.set(start.x + (end.x - start.x) * amount, start.y + (end.y - start.y) * amount, start.z + (end.z - start.z) * amount);
         return result;
+    }
+
+    public static SlerpToRef<T extends Vector3 = Vector3>(vector0: Vector3, vector1: Vector3, slerp: number, result: T): T {
+        return slerpVec3ToRef(vector0, vector1, slerp, result);
+    }
+
+    public static SmoothToRef<T extends Vector3 = Vector3>(source: Vector3, goal: Vector3, deltaTime: number, lerpTime: number, result: T): T {
+        return Vector3.SlerpToRef(source, goal, lerpTime === 0 ? 1 : deltaTime / lerpTime, result);
     }
 
     /** Midpoint between two vectors. */
