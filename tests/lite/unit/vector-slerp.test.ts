@@ -33,6 +33,36 @@ describe("slerpVec3ToRef", () => {
         }
     });
 
+    it("uses a deterministic half-circle for exact non-axis-aligned opposites", () => {
+        const start = { x: -1, y: 3, z: 0 };
+        const shortEnd = { x: 1, y: -3, z: 0 };
+        const longEnd = { x: 7, y: -21, z: 0 };
+        const shortResult = { x: 0, y: 0, z: 0 };
+        const longResult = { x: 0, y: 0, z: 0 };
+
+        slerpVec3ToRef(start, shortEnd, 0.5, shortResult);
+        slerpVec3ToRef(start, longEnd, 0.5, longResult);
+
+        const shortLength = Math.hypot(shortResult.x, shortResult.y, shortResult.z);
+        const longLength = Math.hypot(longResult.x, longResult.y, longResult.z);
+        expect(longResult.x / longLength).toBeCloseTo(shortResult.x / shortLength);
+        expect(longResult.y / longLength).toBeCloseTo(shortResult.y / shortLength);
+        expect(longResult.z / longLength).toBeCloseTo(shortResult.z / shortLength);
+    });
+
+    it("follows the measured shorter arc for near-antipodal vectors", () => {
+        const angle = Math.PI - 0.04;
+        const start = { x: 1, y: 0, z: 0 };
+        const end = { x: Math.cos(angle), y: Math.sin(angle), z: 0 };
+        const result = { x: 0, y: 0, z: 0 };
+
+        slerpVec3ToRef(start, end, 0.75, result);
+
+        expect(result.x).toBeCloseTo(Math.cos(angle * 0.75));
+        expect(result.y).toBeCloseTo(Math.sin(angle * 0.75));
+        expect(result.z).toBe(0);
+    });
+
     it("interpolates magnitude and clamps the interpolation amount", () => {
         const result = { x: 0, y: 0, z: 0 };
         slerpVec3ToRef({ x: 2, y: 0, z: 0 }, { x: 0, y: 4, z: 0 }, 0.5, result);
@@ -52,6 +82,14 @@ describe("slerpVec3ToRef", () => {
         const result = { x: 0, y: 0, z: 0 };
         slerpVec3ToRef({ x: Number.MIN_VALUE, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 0.5, result);
         expect(result.x).toBeCloseTo(Math.SQRT1_2 * 0.5);
+        expect(result.y).toBe(0);
+        expect(result.z).toBe(0);
+    });
+
+    it("matches Babylon.js attenuation when interpolating from zero length", () => {
+        const result = { x: 0, y: 0, z: 0 };
+        slerpVec3ToRef({ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }, 0.5, result);
+        expect(result.x).toBeCloseTo(Math.SQRT1_2 * 2);
         expect(result.y).toBe(0);
         expect(result.z).toBe(0);
     });

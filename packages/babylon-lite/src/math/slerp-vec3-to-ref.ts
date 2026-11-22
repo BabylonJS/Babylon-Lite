@@ -30,7 +30,7 @@ export function slerpVec3ToRef<T extends Vec3>(start: Vec3, end: Vec3, amount: n
         let axisZ = startX * endY - startY * endX;
         const sinOmega = Math.sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ);
         const omega = Math.atan2(sinOmega, dot);
-        if (sinOmega > 0) {
+        if (sinOmega > Number.EPSILON) {
             axisX /= sinOmega;
             axisY /= sinOmega;
             axisZ /= sinOmega;

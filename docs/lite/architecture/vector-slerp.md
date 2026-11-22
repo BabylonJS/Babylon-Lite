@@ -37,6 +37,7 @@ None.
 - Nearly parallel directions use linear direction weights.
 - Opposite and nearly opposite directions rotate around the measured cross-product axis, or a deterministic perpendicular axis when the inputs are exactly opposite.
 - An interpolation amount of `1` returns the exact end components for the antipodal path.
+- When either input has zero length, Babylon.js's normalized-direction interpolation attenuates the linearly interpolated magnitude. For example, interpolating from zero to a nonzero vector at `0.5` produces `sin(π / 4)` times the otherwise linear half-length.
 
 ## Dependencies
 
@@ -46,7 +47,10 @@ None.
 
 - Preserves magnitude and advances linearly around the sphere for exactly opposite vectors.
 - Follows the side selected by a nearly opposite end direction without numerical blow-up.
+- Uses the same deterministic half-circle for exact non-axis-aligned opposites regardless of endpoint magnitude.
+- Follows the measured shorter arc for a direction just short of a half-turn.
 - Interpolates vector magnitude independently from direction.
+- Matches Babylon.js's zero-to-nonzero attenuation.
 - Clamps amounts below `0` and above `1`.
 - Leaves both operands unchanged and returns the supplied result object.
 
