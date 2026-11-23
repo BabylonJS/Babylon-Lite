@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPbrShadowFragment, preparePbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
-import { createStandardShadowContext, createStdShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-shadow-fragment";
+import { createPbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
+import { createStdShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-shadow-fragment";
 import { createShadowFragment, type ShadowLightSlot } from "../../../packages/babylon-lite/src/shader/fragments/shadow-fragment-core";
 import { loadShadowFragmentFactory } from "../../../packages/babylon-lite/src/shader/fragments/shadow-fragment-builder";
 import { setCsmPbrReceiverFactory, setCsmStdReceiverFactory } from "../../../packages/babylon-lite/src/shadow/csm-receiver-registry";
-import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { ShaderFragment } from "../../../packages/babylon-lite/src/shader/fragment-types";
-import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
 const cases: readonly [string, ShadowLightSlot[]][] = [
     ["empty", []],
@@ -55,14 +52,11 @@ describe("prepared shadow receiver algorithms", () => {
         expect(() => create("shadow", [{ lightIndex: 0, shadowType: "esm" }])).toThrow("ESM shadow receiver was not prepared.");
     });
 
-    it("composes CSM and ESM/PCF receivers in light-slot order", async () => {
-        const csmFragment = (slot: "AD" | "AS"): ShaderFragment => ({
-            _id: "csm-shadow",
-            _bindings: ["csmTex_3", "csmComp_3", "csmInfo_3"].map((name) => ({ _name: name, _type: { _kind: "uniform-buffer" }, _group: "shadow", _visibility: 0x2 })),
-            _fragmentSlots: { [slot]: wgsl`shadowFactors[3] = 1.0;` },
-        });
-        const standardFactory = vi.fn(() => csmFragment("AD"));
-        const pbrFactory = vi.fn(() => csmFragment("AS"));
+    it("forwards only CSM slots to the CSM receiver", () => {
+        const standardFragment = { _id: "std-csm" } as ShaderFragment;
+        const pbrFragment = { _id: "pbr-csm" } as ShaderFragment;
+        const standardFactory = vi.fn(() => standardFragment);
+        const pbrFactory = vi.fn(() => pbrFragment);
         setCsmStdReceiverFactory(standardFactory);
         setCsmPbrReceiverFactory(pbrFactory);
         const slots: ShadowLightSlot[] = [
@@ -70,19 +64,9 @@ describe("prepared shadow receiver algorithms", () => {
             { lightIndex: 3, shadowType: "csm" },
             { lightIndex: 5, shadowType: "pcf" },
         ];
-        const light = (shadowType: ShadowLightSlot["shadowType"]) => ({ shadowGenerator: { _shadowType: shadowType } as ShadowGenerator });
-        const lights = [light("esm"), {}, {}, light("csm"), {}, light("pcf")];
-        // The bind group binds one texture/sampler/uniform triple per shadow light, in light-slot order.
-        const bindings = ["shadowTex_0", "shadowSamp_0", "shadowInfo_0", "csmTex_3", "csmComp_3", "csmInfo_3", "shadowTex_5", "shadowComp_5", "shadowInfo_5"];
 
-        const standard = (await createStandardShadowContext({} as EngineContext, lights))._fragment();
-        const pbr = (await preparePbrShadowFragment(slots))(slots);
-
-        expect(standard._bindings?.map((binding) => binding._name)).toEqual(bindings);
-        expect(pbr._bindings?.map((binding) => binding._name)).toEqual(bindings);
-        expect(standard._fragmentSlots?.AD).toContain("shadowFactors[3] = 1.0;");
-        expect(pbr._fragmentSlots?.AS).toContain("shadowFactors[3] = 1.0;");
-        expect(pbr._fragmentSlots?.AS).toContain("shadowFactors[5] = computeShadowPCF_5(");
+        expect(createStdShadowFragment(slots)).toBe(standardFragment);
+        expect(createPbrShadowFragment(slots)).toBe(pbrFragment);
         expect(standardFactory).toHaveBeenCalledExactlyOnceWith([{ lightIndex: 3 }]);
         expect(pbrFactory).toHaveBeenCalledExactlyOnceWith([{ lightIndex: 3 }]);
     });
