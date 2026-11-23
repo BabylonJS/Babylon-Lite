@@ -10,7 +10,7 @@ import type { PreparedShadowFragmentFactory } from "../../../shader/fragments/sh
 import { getCsmStdReceiverFactory } from "../../../shadow/csm-receiver-registry.js";
 import type { EngineContext } from "../../../engine/engine.js";
 import type { ShadowGenerator } from "../../../shadow/shadow-generator.js";
-import { createMaterialShadowBindings, type MaterialShadowBindings } from "../../../shadow/material-shadow-bindings.js";
+import { createMaterialShadowBindings, shadowVariantKey, type MaterialShadowBindings } from "../../../shadow/material-shadow-bindings.js";
 
 export type { ShadowLightSlot } from "../../../shader/fragments/shadow-fragment-core.js";
 import type { ShadowLightSlot } from "../../../shader/fragments/shadow-fragment-core.js";
@@ -34,27 +34,21 @@ export async function createStandardShadowContext(engine: EngineContext, lights:
             slots.push({ lightIndex: index, shadowType: gen._shadowType, gen });
         }
     }
-    const fallbackSlots = slots.filter((slot) => slot.shadowType !== "csm");
-    let createFragment = (): ShaderFragment => createStdShadowFragment(slots);
-    if (slots.length === 0 || fallbackSlots.length > 0) {
+    let createFallback: PreparedShadowFragmentFactory | undefined;
+    if (!slots.some((slot) => slot.shadowType === "csm")) {
         const builder = await import("../../../shader/fragments/shadow-fragment-builder.js");
-        const createFallback = await builder.loadShadowFragmentFactory(fallbackSlots);
-        createFragment = () => createFallback("std-shadow", slots);
-        if (fallbackSlots.length < slots.length) {
-            // CSM mixed with ESM/PCF lights: compose both receivers so the shader declares every light the bind group binds.
-            createFragment = () => builder.mergeShadowFragments("std-shadow", slots, createStdShadowFragment(slots), createFallback("std-shadow", fallbackSlots));
-        }
+        createFallback = await builder.loadShadowFragmentFactory(slots);
+    } else if (slots.some((slot) => slot.shadowType !== "csm")) {
+        // CSM mixed with ESM/PCF lights: compose both receivers so the shader declares every light the bind group binds.
+        const mixed = await import("../../../shader/fragments/shadow-fragment-mixed.js");
+        createFallback = await mixed.loadMixedShadowFragmentFactory(slots, createStdShadowFragment);
     }
     let fragment: ShaderFragment | undefined;
     return {
-        _key: standardShadowVariantKey(slots),
-        _fragment: () => (fragment ??= createFragment()),
+        _key: shadowVariantKey(slots),
+        _fragment: () => (fragment ??= createFallback ? createFallback("std-shadow", slots) : createStdShadowFragment(slots)),
         _bindings: createMaterialShadowBindings(engine, slots),
     };
-}
-
-function standardShadowVariantKey(shadowLights: readonly ShadowLightSlot[]): string {
-    return shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : sl.shadowType === "csm" ? "c" : "e"}`).join(",");
 }
 
 /**
@@ -63,8 +57,8 @@ function standardShadowVariantKey(shadowLights: readonly ShadowLightSlot[]): str
  * The shadow factor for each light is stored in shadowFactors[lightIndex].
  *
  * If any slot is a cascaded-shadow (`"csm"`) light, the cascaded receiver factory
- * registered by the CSM generator is used for the CSM slots; {@link createStandardShadowContext}
- * composes it with the ESM/PCF receiver when a scene mixes both. Otherwise the prepared ESM/PCF factory is used.
+ * registered by the CSM generator is used for the CSM slots ({@link createStandardShadowContext}
+ * composes it with the ESM/PCF receiver when a scene mixes both). Otherwise the prepared ESM/PCF factory is used.
  */
 export function createStdShadowFragment(shadowLights: ShadowLightSlot[], createFallback?: PreparedShadowFragmentFactory): ShaderFragment {
     const csmSlots = shadowLights.filter((sl) => sl.shadowType === "csm");
