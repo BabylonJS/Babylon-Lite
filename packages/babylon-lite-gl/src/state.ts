@@ -93,17 +93,22 @@ export interface GLState {
     _unpack3DLayoutKnown?: boolean;
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
-    boundVao: WebGLVertexArrayObject | null;
+    /** Bound VAO; `null` = the default VAO, `undefined` = unknown (fresh or wiped
+     *  cache, context loss), so the next VAO bind is always issued. */
+    boundVao: WebGLVertexArrayObject | null | undefined;
     viewportX: number;
     viewportY: number;
     viewportW: number;
     viewportH: number;
     /**
-     * Currently-bound draw framebuffer, or `null` for the default (canvas)
-     * framebuffer. Owned by the render-target module's `bindRenderTarget`
-     * (binding `null` returns to the canvas). Reset to `null` on context-lost.
+     * Currently-bound draw framebuffer, `null` for the default (canvas)
+     * framebuffer, or `undefined` when unknown (fresh or wiped cache — the
+     * context may be shared with a host that left its own framebuffer bound).
+     * Owned by the render-target module's `bindRenderTarget` (binding `null`
+     * returns to the canvas). Reset to `undefined` by `wipeGLStateCache` and on
+     * context loss.
      */
-    boundFramebuffer: WebGLFramebuffer | null;
+    boundFramebuffer: WebGLFramebuffer | null | undefined;
     /**
      * Deferred render-state (blend / depth / cull / stencil / color-mask) packed
      * into a flat `Float64Array(46)`. Slots `0..20` (indexed by the `RS_*`
@@ -225,7 +230,8 @@ function resetRenderStateArray(rs: Float64Array): void {
     applyRenderStateSentinels(rs);
 }
 
-/** Allocate a fresh GLState with unknown texture bindings, sized for `maxTextureUnits`. */
+/** Allocate a fresh GLState with unknown texture, VAO and framebuffer bindings
+ *  (the canvas context may already be in use by a host), sized for `maxTextureUnits`. */
 export function createGLState(maxTextureUnits: number): GLState {
     return {
         currentProgram: null,
@@ -233,12 +239,12 @@ export function createGLState(maxTextureUnits: number): GLState {
         boundTextures: new Array<WebGLTexture | null | undefined>(maxTextureUnits),
         boundArrayBuffer: null,
         boundElementBuffer: null,
-        boundVao: null,
+        boundVao: undefined,
         viewportX: 0,
         viewportY: 0,
         viewportW: 0,
         viewportH: 0,
-        boundFramebuffer: null,
+        boundFramebuffer: undefined,
         rs: createRenderStateArray(),
         statesDirty: false,
         scissorEnabled: -1,
@@ -263,7 +269,9 @@ export function createGLState(maxTextureUnits: number): GLState {
  *  deferred render-state array (BOTH the actual applied values and the DESIRED
  *  twins) plus `statesDirty` — to its unset sentinel, WITHOUT discarding owned
  *  GPU resources (the shared quad). After this, the next setter in each category
- *  is re-issued rather than elided.
+ *  is re-issued rather than elided. The VAO and framebuffer bindings become
+ *  `undefined` (unknown), NOT `null`: `null` is a real binding (default VAO /
+ *  canvas) and would elide the rebind while the host's object is still bound.
  *
  *  Used by `resetGLState` (context-lost) and by `wipeGLStateCache` (a host that
  *  shares the GL context calling in after mutating raw `gl.*` state). The shared
@@ -275,12 +283,12 @@ export function resetGLStateCache(state: GLState): void {
     state.boundTextures.fill(undefined);
     state.boundArrayBuffer = null;
     state.boundElementBuffer = null;
-    state.boundVao = null;
+    state.boundVao = undefined;
     state.viewportX = 0;
     state.viewportY = 0;
     state.viewportW = 0;
     state.viewportH = 0;
-    state.boundFramebuffer = null;
+    state.boundFramebuffer = undefined;
     resetRenderStateArray(state.rs);
     state.statesDirty = false;
     state.scissorEnabled = -1;

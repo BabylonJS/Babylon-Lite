@@ -42,10 +42,6 @@ export function presentRenderTarget(target: GLRenderTarget): void {
     }
     const gl = engine.gl;
     const s = engine._state;
-    // A wiped cache records the canvas binding whatever is actually bound, so that binding is reissued.
-    if (s.boundFramebuffer === null) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
     restoreDefaultFramebuffer(engine);
     // Queried with the canvas framebuffer bound; its sample count is fixed when the context is created.
     engine._canvasSamples ??= Number(gl.getParameter(gl.SAMPLES));
@@ -660,7 +656,8 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
     const gl = engine.gl;
     const s = engine._state;
     const c = rt._config;
-    const prevFb = s.boundFramebuffer;
+    // An unknown (wiped) binding is restored as the canvas.
+    const prevFb = s.boundFramebuffer ?? null;
     let createdTexture: WebGLTexture | null = null;
     let fb: WebGLFramebuffer | null = null;
     let rb: WebGLRenderbuffer | null = null;

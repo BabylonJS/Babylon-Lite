@@ -60,6 +60,8 @@ describe("lite-gl: host-owned recovery", () => {
             { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] },
             { name: "bufferData", args: [engine.gl.ARRAY_BUFFER, vertices, engine.gl.DYNAMIC_DRAW] },
             { name: "createBuffer", args: [] },
+            // The VAO binding is unknown on a fresh engine; the element upload must land in the default VAO.
+            { name: "bindVertexArray", args: [null] },
             { name: "bindBuffer", args: [engine.gl.ELEMENT_ARRAY_BUFFER, ib.handle] },
             { name: "bufferData", args: [engine.gl.ELEMENT_ARRAY_BUFFER, indices, engine.gl.STATIC_DRAW] },
             { name: "bufferSubData", args: [engine.gl.ARRAY_BUFFER, 0, next] },
@@ -86,6 +88,7 @@ describe("lite-gl: host-owned recovery", () => {
             { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] },
             { name: "bufferData", args: [engine.gl.ARRAY_BUFFER, next, engine.gl.STATIC_DRAW] },
             { name: "createBuffer", args: [] },
+            { name: "bindVertexArray", args: [null] },
             { name: "bindBuffer", args: [engine.gl.ELEMENT_ARRAY_BUFFER, ib.handle] },
             { name: "bufferData", args: [engine.gl.ELEMENT_ARRAY_BUFFER, ib._data, engine.gl.STATIC_DRAW] },
         ]);
@@ -130,6 +133,7 @@ describe("lite-gl: host-owned recovery", () => {
         mock.clear();
         bindAttributes(freshBuffer, [{ index: 0, size: 2, divisor: 0 }], freshEffect);
         expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
             { name: "enableVertexAttribArray", args: [0] },
             { name: "vertexAttribPointer", args: [0, 2, replacement.gl.FLOAT, false, 0, 0] },
             { name: "vertexAttribDivisor", args: [0, 0] },

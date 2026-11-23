@@ -86,6 +86,11 @@ bit us:
   Babylon `*_SAMPLINGMODE` by spreading
   `getSamplingModeFilters(GLSamplingMode.X, useMipMaps)` into the options
   (≙ Babylon's `_getSamplingParameters`; later explicit filters win).
+- **Borrowed handles must not be deleted.** `createTextureFromHandle` owns the
+  wrapped `WebGLTexture` by default (`disposeTexture` deletes it). To sample a
+  texture another renderer keeps owning (e.g. a Babylon texture on a shared
+  context), pass `ownsHandle = false` as the sixth argument; disposing the
+  wrapper then only forgets its cached bindings.
 - **Mipmaps are an explicit call.** Babylon's `generateMipMaps` → call
   `generateTextureMipMaps(tex)` once; the chain is then rebuilt after
   every later upload, including dynamic/HTML re-uploads and context restore.

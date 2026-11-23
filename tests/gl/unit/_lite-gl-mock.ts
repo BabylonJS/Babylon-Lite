@@ -196,6 +196,16 @@ export function createMockGL(): MockGL {
         REPEAT: 0x2901,
         QUERY_RESULT: 0x8866,
         QUERY_RESULT_AVAILABLE: 0x8867,
+        PACK_ROW_LENGTH: 0x0d02,
+        PACK_SKIP_ROWS: 0x0d03,
+        PACK_SKIP_PIXELS: 0x0d04,
+        PIXEL_UNPACK_BUFFER: 0x88ec,
+        UNPACK_COLORSPACE_CONVERSION_WEBGL: 0x9243,
+        BROWSER_DEFAULT_WEBGL: 0x9244,
+        CCW: 0x0901,
+        POLYGON_OFFSET_FILL: 0x8037,
+        RASTERIZER_DISCARD: 0x8c89,
+        SAMPLE_COVERAGE: 0x80a0,
     };
 
     const gl = {
@@ -514,6 +524,21 @@ export function createMockGL(): MockGL {
         },
         clearDepth: (d: number): void => {
             rec("clearDepth", d);
+        },
+        clearStencil: (s: number): void => {
+            rec("clearStencil", s);
+        },
+        blendColor: (r: number, g: number, b: number, a: number): void => {
+            rec("blendColor", r, g, b, a);
+        },
+        frontFace: (mode: number): void => {
+            rec("frontFace", mode);
+        },
+        depthRange: (near: number, far: number): void => {
+            rec("depthRange", near, far);
+        },
+        bindSampler: (unit: number, sampler: object | null): void => {
+            rec("bindSampler", unit, sampler);
         },
         clear: (mask: number): void => {
             rec("clear", mask);

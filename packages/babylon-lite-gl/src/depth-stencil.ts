@@ -602,7 +602,8 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
         // not silently redirect subsequent draws to `rt` (during an internal
         // rebuild `prevFb` is `rt._framebuffer`, which the core validates next
         // only when debug validation is enabled).
-        const prevFb = e._state.boundFramebuffer;
+        // An unknown (wiped) binding is restored as the canvas.
+        const prevFb = e._state.boundFramebuffer ?? null;
         const newRb = gl.createRenderbuffer();
         if (newRb === null) {
             throw new Error("lite-gl: gl.createRenderbuffer returned null (render target stencil)");
@@ -674,7 +675,7 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
  */
 function reattachCoreDepthBuffer(engine: GLEngineContext, rt: GLRenderTarget, depthBuffer: WebGLRenderbuffer): void {
     const gl = engine.gl;
-    const prevFb = engine._state.boundFramebuffer;
+    const prevFb = engine._state.boundFramebuffer ?? null;
     gl.bindFramebuffer(FRAMEBUFFER, rt._framebuffer);
     engine._state.boundFramebuffer = rt._framebuffer;
     gl.framebufferRenderbuffer(FRAMEBUFFER, DEPTH_ATTACHMENT, RENDERBUFFER, depthBuffer);

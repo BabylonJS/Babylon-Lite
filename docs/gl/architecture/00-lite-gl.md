@@ -495,7 +495,11 @@ rebinding/uploading another array buffer or recording/binding a named VAO cannot
 change it. These paths preserve the default cache; returning to default first
 binds the correct VAO and array buffer, then compares the full tuple. Named-VAO
 recording never reads/writes the default pointer cache. Raw external GL mutations
-require `wipeGLStateCache` before returning control to lite-gl.
+require `wipeGLStateCache` before returning control to lite-gl; the wipe leaves
+the VAO binding unknown, so the next default-VAO call rebinds VAO `null` before
+touching the element buffer or pointers, even if the host left its own VAO bound.
+`wipeGLStateCache(engine, true)` also disables every vertex attribute array on
+the default VAO (see §4.7).
 
 Divisors remain issued on every descriptor, including a pointer cache hit, as in
 ThinEngine's `bindInstancesBuffer`; `unbindInstanceAttributes` is unchanged.
@@ -1228,12 +1232,13 @@ interface GLState {
     _unpack3DLayoutKnown?: boolean; // owned by optional texture-3d module
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
-    boundVao: WebGLVertexArrayObject | null;
+    boundVao: WebGLVertexArrayObject | null | undefined; // null = default VAO, undefined = unknown
     /** Cached bound framebuffer — null means the default framebuffer (the
-     *  canvas). The single source of truth for the active FBO; `bindRenderTarget`
-     *  (the render-target module) elides redundant `gl.bindFramebuffer`
-     *  against it. Reset to null on context-lost. */
-    boundFramebuffer: WebGLFramebuffer | null;
+     *  canvas), undefined means unknown. The single source of truth for the
+     *  active FBO; `bindRenderTarget` (the render-target module) elides
+     *  redundant `gl.bindFramebuffer` against it. Unknown at creation and after
+     *  `wipeGLStateCache` / context loss. */
+    boundFramebuffer: WebGLFramebuffer | null | undefined;
     viewportX: number;
     viewportY: number;
     viewportW: number;
@@ -1308,7 +1313,8 @@ kept in sync with actual GL state. Two protocols enforce that:
   same slot from being elided as a no-op.
 - **Context lost:** the `webglcontextlost` handler sets `_isLost=true` and
   clears the core `_state` (program=null, active texture unit=-1, 2D texture binding cache filled with undefined,
-  buffers=null, vao=null, boundFramebuffer=null, quad* = null, viewport=0, and
+  buffers=null, vao=undefined, boundFramebuffer=undefined (unknown, see below),
+  quad* = null, viewport=0, and
   the whole `rs` array — BOTH its actual half AND its desired twins — back to the
   unset sentinels with `statesDirty=false`). Resetting both halves means the
   first setter after a restore re-marks `statesDirty` and the next
@@ -1327,6 +1333,28 @@ means **confirmed unbound**, not unknown. Creation uses an unfilled, fixed-lengt
 array (reading any slot yields `undefined`); reset fills the existing array with
 `undefined` without allocating. The optional 3D cache uses the same binding
 sentinels and shares the active-unit cache.
+
+The VAO and framebuffer bindings follow the same rule: `boundVao` and
+`boundFramebuffer` are `undefined` (unknown) at creation, after
+`wipeGLStateCache` and after context loss, because `null` is a real binding (the
+default VAO / the canvas) and a host sharing the context may have its own
+objects bound. Recording `null` after a wipe would elide `bindVertexArray(null)`
+/ `bindFramebuffer(null)` while a host VAO or FBO is still bound, so index-buffer
+binds and uploads would modify the host VAO and draws would land in the host FBO. Helpers that save and
+restore the framebuffer (render-target allocation, stencil attachment) restore
+an unknown binding as the canvas.
+
+`wipeGLStateCache(engine, bruteForce = true)` (Babylon's `wipeCaches(true)`) also
+normalizes, with raw GL calls, the state lite-gl relies on but never caches:
+default VAO with all `MAX_VERTEX_ATTRIBS` arrays disabled, sampler objects
+unbound from every texture unit, `PIXEL_PACK` / `PIXEL_UNPACK` buffers unbound,
+pack / unpack row and skip layout zeroed, `UNPACK_COLORSPACE_CONVERSION_WEBGL`
+back to `BROWSER_DEFAULT_WEBGL`, `frontFace(CCW)`, `depthRange(0, 1)`,
+`clearDepth(1)`, `clearStencil(0)`, `blendColor(0, 0, 0, 0)` and
+`POLYGON_OFFSET_FILL` / `RASTERIZER_DISCARD` / `SAMPLE_COVERAGE` /
+`SAMPLE_ALPHA_TO_COVERAGE` disabled. It costs about
+`MAX_VERTEX_ATTRIBS + maxTextureUnits + 20` calls, so per-draw hand-offs with a
+known host should use the plain wipe plus targeted resets.
 
 The existing bind/upload comparisons handle these sentinels without extra
 branches: a handle or explicit null never matches an unknown binding, and unit
@@ -2469,7 +2497,8 @@ Like the other array setters, they are not value-cached and upload every call.
 
 `presentRenderTarget(target)` copies a ready target to the drawing
 buffer with nearest filtering. It leaves the default framebuffer bound and
-the framebuffer cache coherent, even after `wipeGLStateCache`; it does not clear or modify the retained
+the framebuffer cache coherent, even after `wipeGLStateCache` (the wiped binding
+is unknown, so the canvas is rebound); it does not clear or modify the retained
 offscreen image. Lost contexts and disposed or unavailable resources are
 no-ops. The destination dimensions are the physical canvas size, and an active
 scissor rectangle does not clip the copy; the scissor state is restored

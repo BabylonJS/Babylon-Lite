@@ -290,7 +290,8 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         beginFrame(engine);
         bindAttributes(vb, layout, effect);
         endFrame(engine);
-        expect(mock.log).toEqual([{ name: "enableVertexAttribArray", args: [3] }, pointer, divisor, divisor]);
+        // A fresh engine does not assume the default VAO is bound, so the first bind selects it.
+        expect(mock.log).toEqual([{ name: "bindVertexArray", args: [null] }, { name: "enableVertexAttribArray", args: [3] }, pointer, divisor, divisor]);
         mock.clear();
         disableAttributeByIndex(engine, 3);
         disableAttributeByIndex(engine, 3);
@@ -448,6 +449,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             mock.clear();
             bindAttributes(vb, layout, effect);
             expect(mock.log).toEqual([
+                ...(["wipe", "reset"].includes(mode) ? [{ name: "bindVertexArray", args: [null] }] : []),
                 ...(["wipe", "reset"].includes(mode) ? [{ name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] }] : []),
                 { name: "enableVertexAttribArray", args: [0] },
                 { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
@@ -497,6 +499,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             bindAttributes(vb, layout, effect);
             bindAttributes(vb, layout, effect);
             expect(mock.log).toEqual([
+                { name: "bindVertexArray", args: [null] },
                 { name: "enableVertexAttribArray", args: [0] },
                 { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
                 { name: "vertexAttribDivisor", args: [0, 1] },
@@ -586,6 +589,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         mock.clear();
         bindAttributes(vb, layout, effect);
         expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
             { name: "enableVertexAttribArray", args: [2] },
             { name: "vertexAttribPointer", args: [2, 2, engine.gl.FLOAT, false, 0, 0] },
             { name: "vertexAttribDivisor", args: [2, 1] },
@@ -597,6 +601,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         bindAttributes(vb, layout, effect);
         disableAttributeByIndex(engine, 2);
         expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
             { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] },
             { name: "enableVertexAttribArray", args: [2] },
             { name: "vertexAttribPointer", args: [2, 2, engine.gl.FLOAT, false, 0, 0] },

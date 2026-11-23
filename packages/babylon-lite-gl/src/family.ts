@@ -308,7 +308,7 @@ export interface GLOps<F extends GLFamily> {
     // Engine, render loop and frame timing
     readonly resizeGLEngine: (engine: F["engine"]) => void;
     readonly setGLEngineSize: (engine: F["engine"], width: number, height: number) => void;
-    readonly wipeGLStateCache: (engine: F["engine"]) => void;
+    readonly wipeGLStateCache: (engine: F["engine"], bruteForce?: boolean) => void;
     readonly getRenderWidth: (engine: F["engine"]) => number;
     readonly getRenderHeight: (engine: F["engine"]) => number;
     readonly getTextureCount: (engine: F["engine"]) => number;

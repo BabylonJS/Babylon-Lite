@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+    bindTexture,
     createDynamicTexture,
     createEffect,
     createFloatTexture,
@@ -130,6 +131,20 @@ describe("lite-gl texture registry", () => {
             { name: "deleteTexture", args: [external.handle] },
             { name: "deleteTexture", args: [removed.handle] },
         ]);
+    });
+
+    it("never deletes a borrowed handle (ownsHandle = false) but still forgets its bindings", () => {
+        const { mock, engine } = setup();
+        const borrowed = createTextureFromHandle(engine, {} as WebGLTexture, 1, 1, undefined, false);
+        bindTexture(borrowed, 2);
+        expect(engine._state.boundTextures[2]).toBe(borrowed.handle);
+        mock.clear();
+        disposeTexture(borrowed);
+        disposeTexture(borrowed);
+        expect(mock.log).toEqual([]);
+        expect(borrowed._disposed).toBe(true);
+        expect(engine._state.boundTextures[2]).toBeNull();
+        expect(engine._textures.has(borrowed)).toBe(false);
     });
 
     it("can dispose every mixed 2D/3D texture while traversing the live registry", () => {

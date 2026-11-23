@@ -128,6 +128,13 @@ export interface GLTexture {
      * @internal
      */
     _dynSource?: TexImageSource | null;
+    /**
+     * `true` for a {@link createTextureFromHandle} wrapper created with
+     * `ownsHandle = false`: `disposeTexture` releases the wrapper without
+     * deleting the borrowed `WebGLTexture`.
+     * @internal
+     */
+    _borrowed?: boolean;
     /** `invertY` of the latest raw / dynamic / HTML-element update
      *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `invertY`. @internal */
@@ -542,8 +549,10 @@ export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLen
  *
  * The wrapper does NOT own the underlying handle's upload — it is NOT registered
  * for context-restore replay (the external owner is responsible for that) and is
- * marked ready immediately. `disposeTexture` will still `gl.deleteTexture` it, so
- * only wrap a handle whose deletion you intend lite-gl to manage.
+ * marked ready immediately. By default `disposeTexture` still `gl.deleteTexture`s
+ * the handle; pass `ownsHandle = false` to BORROW a handle the host keeps
+ * owning (e.g. a texture shared with another renderer), so disposal only
+ * releases the wrapper and its cached bindings.
  *
  * @param engine - The engine.
  * @param handle - The external `WebGLTexture`.
@@ -552,9 +561,10 @@ export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLen
  * @param options - Optional sampling state to apply once (min/mag/wrapS/wrapT).
  *  Upload-only options (`invertY`, `premultiplyAlpha`, `unpackAlignment`,
  *  `internalFormat`) do not apply — the handle's pixels are owned externally.
+ * @param ownsHandle - When `false`, `disposeTexture` never deletes `handle`. Default `true`.
  * @returns A {@link GLTexture} wrapping the handle.
  */
-export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTexture, width: number, height: number, options?: GLTextureOptions): GLTexture {
+export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTexture, width: number, height: number, options?: GLTextureOptions, ownsHandle = true): GLTexture {
     const tex: GLTexture = {
         handle,
         target: engine.gl.TEXTURE_2D,
@@ -568,6 +578,9 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
         _upload: () => {},
         _wasReady: true,
     };
+    if (!ownsHandle) {
+        tex._borrowed = true;
+    }
     if (options !== undefined) {
         const gl = engine.gl;
         bindTextureForUpload(engine, handle);
@@ -747,7 +760,9 @@ export function bindTextureForUpload(engine: GLEngineContext, handle: WebGLTextu
  *  Deregistration is expected O(1), independent of the live texture count.
  *  Shared references keep the texture registered until its final release;
  *  repeated disposal is a no-op. Unregistered wrappers keep their existing
- *  handle-deletion semantics without affecting the live registry. */
+ *  handle-deletion semantics without affecting the live registry; borrowed
+ *  wrappers (`createTextureFromHandle(…, ownsHandle = false)`) never delete
+ *  their handle. */
 export function disposeTexture(tex: GLTexture): void {
     if (tex._disposed) {
         return;
@@ -759,7 +774,7 @@ export function disposeTexture(tex: GLTexture): void {
     }
     tex._disposed = true;
     engine._textures.delete(tex);
-    if (!engine._isLost && !engine._disposed) {
+    if (!tex._borrowed && !engine._isLost && !engine._disposed) {
         engine.gl.deleteTexture(tex.handle);
     }
     const bound = engine._state.boundTextures;

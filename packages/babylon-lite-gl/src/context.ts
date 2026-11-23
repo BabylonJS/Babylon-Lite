@@ -433,19 +433,75 @@ export function setGLEngineSize(engine: GLEngineContext, width: number, height: 
  * skip the state changes needed to re-establish the scope, producing corrupted
  * output. Owned GPU resources (the shared quad, render targets, meshes,
  * effects, textures) are preserved — only the cached "current GL state" is
- * reset. Mirrors Babylon's `Engine.wipeCaches()`.
+ * reset. Mirrors Babylon's `Engine.wipeCaches(bruteForce)`.
+ *
+ * After a wipe the VAO / framebuffer bindings are UNKNOWN (not assumed to be
+ * the defaults), so the next mesh / render-target call rebinds them even if the
+ * host left its own objects bound. The current program is forgotten: call
+ * `useEffect` again before drawing.
+ *
+ * `bruteForce` additionally normalizes, with raw GL calls, state lite-gl relies
+ * on but never caches, back to WebGL2 defaults: the default VAO with every
+ * vertex attribute array disabled, sampler objects unbound from every texture
+ * unit, no `PIXEL_PACK` / `PIXEL_UNPACK` buffer, zero pack / unpack row and
+ * skip layout, browser-default unpack colorspace conversion, `frontFace(CCW)`,
+ * `depthRange(0, 1)`, `clearDepth(1)`, `clearStencil(0)`, `blendColor(0, 0, 0, 0)`
+ * and `POLYGON_OFFSET_FILL` / `RASTERIZER_DISCARD` / `SAMPLE_COVERAGE` /
+ * `SAMPLE_ALPHA_TO_COVERAGE` disabled. Use it when the host may leave arbitrary
+ * state behind (it costs roughly `MAX_VERTEX_ATTRIBS + maxTextureUnits + 20`
+ * GL calls); per-draw hand-offs with a known host should prefer the plain wipe
+ * plus targeted resets.
  *
  * No-op while the context is lost or the engine is disposed.
+ *
+ * @param engine - The engine.
+ * @param bruteForce - Also normalize untracked GL state (see above). Default `false`.
  */
-export function wipeGLStateCache(engine: GLEngineContext): void {
+export function wipeGLStateCache(engine: GLEngineContext, bruteForce = false): void {
     if (engine._disposed || engine._isLost) {
         return;
     }
-    resetGLStateCache(engine._state);
+    const s = engine._state;
+    resetGLStateCache(s);
     const invalidators = engine._stateCacheInvalidators;
     if (invalidators) {
         for (const invalidate of invalidators) {
             invalidate();
+        }
+    }
+    if (bruteForce) {
+        const gl = engine.gl;
+        gl.bindVertexArray(null);
+        s.boundVao = null;
+        const attribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+        for (let i = 0; i < attribs; i++) {
+            gl.disableVertexAttribArray(i);
+        }
+        for (let u = 0; u < s.boundTextures.length; u++) {
+            gl.bindSampler(u, null);
+        }
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        for (const p of [
+            gl.UNPACK_ROW_LENGTH,
+            gl.UNPACK_IMAGE_HEIGHT,
+            gl.UNPACK_SKIP_PIXELS,
+            gl.UNPACK_SKIP_ROWS,
+            gl.UNPACK_SKIP_IMAGES,
+            gl.PACK_ROW_LENGTH,
+            gl.PACK_SKIP_PIXELS,
+            gl.PACK_SKIP_ROWS,
+        ]) {
+            gl.pixelStorei(p, 0);
+        }
+        gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.BROWSER_DEFAULT_WEBGL);
+        gl.frontFace(gl.CCW);
+        gl.depthRange(0, 1);
+        gl.clearDepth(1);
+        gl.clearStencil(0);
+        gl.blendColor(0, 0, 0, 0);
+        for (const cap of [gl.POLYGON_OFFSET_FILL, gl.RASTERIZER_DISCARD, gl.SAMPLE_COVERAGE, gl.SAMPLE_ALPHA_TO_COVERAGE]) {
+            gl.disable(cap);
         }
     }
 }
