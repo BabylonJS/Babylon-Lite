@@ -89,8 +89,10 @@ const GL_UNSIGNED_BYTE = 0x1401;
 /** @internal Rejects a texture size the host cannot allocate, before any host call. */
 export function validateTextureSize(engine: GLEngineContext, width: number, height: number): void {
     const max = engine.caps.maxTextureSize;
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > max || height > max) {
-        throw new Error(`Native Lite GL texture size must be positive integers no larger than ${max}, got ${width}x${height}.`);
+    // 0 means the host has not reported a limit, so only the host can bound the size.
+    const limited = max > 0;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || (limited && (width > max || height > max))) {
+        throw new Error(`Native Lite GL texture size must be positive integers${limited ? ` no larger than ${max}` : ""}, got ${width}x${height}.`);
     }
 }
 

@@ -78,7 +78,10 @@ composition. As in Lite GL, `getRenderWidth` / `getRenderHeight` report the
 native output size, `getCurrentRenderTarget` reports the bound target, and
 `engine.caps.maxTextureSize` reports the device texture limit; texture and
 render-target sizes must be positive integers within it and are rejected before
-any host allocation.
+any host allocation. The host reads this limit once, when its engine class is
+defined, and reports 0 if its graphics device has not started yet. Lite GL
+treats 0 as an unknown limit and then rejects only sizes that are not positive
+integers, leaving larger sizes to the host.
 
 `beginFrame(engine)` and `endFrame(engine)` bracket command submission;
 `endFrame` submits the remaining commands, including a partially encoded frame

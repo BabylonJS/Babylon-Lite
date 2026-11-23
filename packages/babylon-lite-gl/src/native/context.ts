@@ -6,7 +6,7 @@ import type { GLRenderTarget } from "./render-target.js";
 
 /** Device limits used by composition producers. */
 export interface GLEngineCaps {
-    /** Largest supported texture dimension. */
+    /** Largest supported texture dimension, or 0 when the host has not reported one. */
     readonly maxTextureSize: number;
 }
 
