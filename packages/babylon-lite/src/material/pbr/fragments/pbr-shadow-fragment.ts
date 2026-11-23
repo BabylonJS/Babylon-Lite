@@ -10,27 +10,25 @@ import type { PreparedShadowFragmentFactory } from "../../../shader/fragments/sh
 import type { ShadowLightSlot } from "../../../shader/fragments/shadow-fragment-core.js";
 import { getCsmPbrReceiverFactory } from "../../../shadow/csm-receiver-registry.js";
 
-export { createMaterialShadowBindings } from "../../../shadow/material-shadow-bindings.js";
+export { createMaterialShadowBindings, shadowVariantKey } from "../../../shadow/material-shadow-bindings.js";
 
 /** Type alias preserving the existing PBR-specific name. */
 export type PbrShadowLightSlot = ShadowLightSlot;
 
 /** @internal Prepare a scene-local synchronous PBR receiver factory. */
 export async function preparePbrShadowFragment(shadowLights: PbrShadowLightSlot[]): Promise<(slots: PbrShadowLightSlot[]) => ShaderFragment> {
-    const fallbackLights = shadowLights.filter((slot) => slot.shadowType !== "csm");
-    if (shadowLights.length > 0 && fallbackLights.length === 0) {
-        return createPbrShadowFragment;
+    if (shadowLights.some((slot) => slot.shadowType === "csm")) {
+        if (shadowLights.every((slot) => slot.shadowType === "csm")) {
+            return createPbrShadowFragment;
+        }
+        // CSM mixed with ESM/PCF lights: compose both receivers so the shader declares every light the bind group binds.
+        const mixed = await import("../../../shader/fragments/shadow-fragment-mixed.js");
+        const createMixed = await mixed.loadMixedShadowFragmentFactory(shadowLights, createPbrShadowFragment, toPbrShadowFragment);
+        return (slots) => createMixed("pbr-shadow", slots);
     }
     const builder = await import("../../../shader/fragments/shadow-fragment-builder.js");
-    const createFallback = await builder.loadShadowFragmentFactory(fallbackLights);
-    if (fallbackLights.length === shadowLights.length) {
-        return (slots) => toPbrShadowFragment(createFallback("pbr-shadow", slots));
-    }
-    // CSM mixed with ESM/PCF lights: compose both receivers so the shader declares every light the bind group binds.
-    return (slots) => {
-        const fallbackSlots = slots.filter((slot) => slot.shadowType !== "csm");
-        return builder.mergeShadowFragments("pbr-shadow", slots, createPbrShadowFragment(slots), toPbrShadowFragment(createFallback("pbr-shadow", fallbackSlots)));
-    };
+    const createFallback = await builder.loadShadowFragmentFactory(shadowLights);
+    return (slots) => toPbrShadowFragment(createFallback("pbr-shadow", slots));
 }
 
 /**
@@ -39,8 +37,8 @@ export async function preparePbrShadowFragment(shadowLights: PbrShadowLightSlot[
  * The shadow factor for each light is stored in shadowFactors[lightIndex].
  *
  * If any slot is a cascaded-shadow (`"csm"`) light, the cascaded receiver factory
- * registered by the CSM generator is used for the CSM slots (it already emits into slot `AS`);
- * {@link preparePbrShadowFragment} composes it with the ESM/PCF receiver when a scene mixes both.
+ * registered by the CSM generator is used for the CSM slots (it already emits into slot `AS`;
+ * {@link preparePbrShadowFragment} composes it with the ESM/PCF receiver when a scene mixes both).
  * Otherwise the prepared ESM/PCF factory is used and its `AD` slot is remapped to `AS`.
  */
 export function createPbrShadowFragment(
