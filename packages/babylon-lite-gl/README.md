@@ -120,13 +120,18 @@ still compile but alter behavior, so check them by hand:
 
 ## Entry points
 
-The entire public API is available from the single `@babylonjs/lite-gl` entry:
+The entire WebGL2 API is available from the `@babylonjs/lite-gl` entry:
 engine + render loop, effects & uniform setters, textures (incl. float / HDR +
 dynamic), the `EffectWrapper` fullscreen-quad renderer, render targets, meshes /
 vertex-index buffers + instancing, depth / stencil / color-mask / clear, scissor,
 blend modes, the sprite renderer, and HTML-element textures. The package is
 `sideEffects: false`, so a bundler tree-shakes away whichever features you don't
-use.
+use. A separate, **experimental and temporary** `@babylonjs/lite-gl/native` entry targets Babylon Native (see
+[below](#babylon-native-babylonjslite-glnative)); the two entries share no
+modules, so importing one never bundles the other. The type-only
+`@babylonjs/lite-gl/family` entry describes the operations both backends share,
+so code can be written once for either backend
+([below](#shared-code-for-both-backends-babylonjslite-glfamily)).
 
 ### Core API (`@babylonjs/lite-gl`)
 
@@ -252,6 +257,97 @@ size. If a retained source was closed anyway, restore logs an error and falls
 back to transparent black for that texture only. Mipmaps requested with
 `generateTextureMipMaps` are rebuilt after the restored upload. No source is
 closed by lite-gl.
+
+### Babylon Native (`@babylonjs/lite-gl/native`)
+
+> **Experimental and temporary.** This backend is a temporary implementation
+> for evaluation, not a stable API or a long-term backend commitment. Its API
+> and implementation may change, be replaced, or be removed.
+
+The same function-based style, encoded into the Babylon Native engine protocol
+(protocol 9) instead of a `WebGL2RenderingContext`. The native runtime is read
+only when `createNativeEngine()` is called, never at import time. For the
+operations it implements, the entry uses the web entry's `GL*` type names and
+options; `NativeGLFamily` records where its signatures are narrower than the
+web backend's. Engine creation, frames, and borrowed host textures are
+native-specific.
+
+```ts
+import { createNativeEngine, beginFrame, endFrame, createEffect, setEffectFloat, createVertexBuffer, createIndexBuffer, createMeshVao, drawMesh } from "@babylonjs/lite-gl/native";
+
+const engine = createNativeEngine();
+const effect = createEffect(engine, { name: "gradient", vertexSource, fragmentSource, attributeNames: ["position"], uniformNames: ["uTime"], samplerNames: [] });
+const vertices = createVertexBuffer(engine, new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]));
+const indices = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 0, 2, 3]));
+const quad = createMeshVao(engine, [{ buffer: vertices, attributes: [{ name: "position", size: 2, divisor: 0 }] }], indices, effect);
+
+beginFrame(engine);
+setEffectFloat(effect, "uTime", time);
+drawMesh(quad);
+endFrame(engine);
+```
+
+- **Engine / frames** — `createNativeEngine`, `disposeNativeEngine`,
+  `beginFrame` / `endFrame` (`endFrame` submits the remaining commands),
+  `getRenderWidth`, `getRenderHeight` (native output size),
+  `getCurrentRenderTarget`, and `engine.caps.maxTextureSize`.
+- **Effects** — `createEffect` (accepts Lite GL `#version 300 es` sources;
+  uniform setters affect only declared names),
+  `useEffect`, `isEffectReady`, `getEffectCompilationError` (always `null`:
+  compilation errors throw from `createEffect`), `disposeEffect`,
+  and the cached setters `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` /
+  `…Int` / `…Matrix` / `…FloatArray` / `…FloatArray2` / `…FloatArray3` /
+  `…FloatArray4` / `…Texture`.
+- **Geometry** — `createVertexBuffer`, `createIndexBuffer`, `createMeshVao`,
+  `bindMeshVao`, `drawMesh` (non-instanced: `instanceCount` must be `0`),
+  `disposeBuffer`, `disposeMeshVao`. A mesh vertex array owns only itself, so
+  several meshes can share one vertex/index buffer.
+- **Textures / targets** — `wrapNativeTexture` (borrows host storage),
+  `createRawTexture` (owns sampled-only storage; `RGBA` / `UNSIGNED_BYTE` only;
+  creating one inside a frame first submits the commands recorded so far, so create raw
+  textures before `beginFrame` when the submission count matters), `disposeTexture`
+  (owned storage is deleted after the commands already recorded are submitted),
+  `createRenderTarget` (`width, height, { colorTexture? }`; not a raw texture), `bindRenderTarget` /
+  `restoreDefaultFramebuffer` (also set a full-target viewport), `updateWrappedNativeTexture`
+  (replaces a borrowed handle and rebuilds its framebuffers; call it only when the host storage changed;
+  if it throws, retry it or restore the host storage before using the texture or its targets),
+  `disposeRenderTarget`.
+- **State** — `setViewport` (pixel `GLViewport`), `setScissor` (an empty rectangle
+  clips everything, as in WebGL), `disableScissor`,
+  `setBlendMode`, `clearEngine` (`GLClearOptions`).
+
+The ownership and device-reset contract is documented in
+`docs/gl/architecture/03-native-lite-gl.md`.
+
+### Shared code for both backends (`@babylonjs/lite-gl/family`)
+
+The `family` entry is types only and needs no DOM library. `GLOps<F>` describes
+every backend-neutral operation over a backend family `F` (`WebGLFamily` from
+the web entry, `NativeGLFamily` from the native entry). Shared code names the
+operations it uses as a `GLKit`, and each composition root fills the kit with
+direct references to one backend's functions, so bundles keep only those
+functions:
+
+```ts
+import type { GLFamily, GLKit } from "@babylonjs/lite-gl/family";
+
+type QuadOps = "useEffect" | "setEffectTexture" | "drawMesh";
+function drawLayer<F extends GLFamily>(gl: GLKit<F, QuadOps>, effect: F["effect"], mesh: F["meshVao"], layer: F["texture"]) {
+    gl.useEffect(effect);
+    gl.setEffectTexture(effect, "layer", layer);
+    gl.drawMesh(mesh);
+}
+
+// Browser root; a native root imports the same names from "@babylonjs/lite-gl/native" with NativeGLFamily.
+import { useEffect, setEffectTexture, drawMesh, type WebGLFamily } from "@babylonjs/lite-gl";
+const webKit: GLKit<WebGLFamily, QuadOps> = { useEffect, setEffectTexture, drawMesh };
+```
+
+Each backend keeps its own signatures: for example the native `drawMesh` is
+non-instanced and its `setEffectTexture` does not accept `null`. Engine creation
+and host interop such as `createGLEngine` or `wrapNativeTexture` are
+backend-specific and listed in `WebGLHostOps` / `NativeGLHostOps`. See
+`docs/gl/architecture/04-backend-family.md`.
 
 ## Demos
 

@@ -156,6 +156,7 @@ export interface GLState {
     _flushColorMask?: (engine: GLEngineContext) => void;
     /** Scissor-test enable tri-state (`-1` unset, `0` off, `1` on). */
     scissorEnabled: number;
+    /** Cached scissor rectangle; a `scissorW` of `-1` marks it unknown. */
     scissorX: number;
     scissorY: number;
     scissorW: number;
@@ -237,7 +238,7 @@ export function createGLState(maxTextureUnits: number): GLState {
         scissorEnabled: -1,
         scissorX: 0,
         scissorY: 0,
-        scissorW: 0,
+        scissorW: -1,
         scissorH: 0,
         unpackAlignment: -1,
         unpackFlipY: -1,
@@ -277,10 +278,7 @@ export function resetGLStateCache(state: GLState): void {
     resetRenderStateArray(state.rs);
     state.statesDirty = false;
     state.scissorEnabled = -1;
-    state.scissorX = 0;
-    state.scissorY = 0;
-    state.scissorW = 0;
-    state.scissorH = 0;
+    state.scissorW = -1;
     state.unpackAlignment = -1;
     state.unpackFlipY = -1;
     state.unpackPremultiplyAlpha = -1;

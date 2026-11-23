@@ -8,6 +8,8 @@ import {
     setEffectMatrix,
     setEffectMatrix3x3,
     setEffectFloatArray,
+    setEffectFloatArray2,
+    setEffectFloatArray3,
     setEffectFloatArray4,
     setEffectIntArray,
     setEffectTexture,
@@ -97,6 +99,23 @@ describe("lite-gl effect: extended uniform setters", () => {
         mock.clear();
         setEffectIntArray(eff, "u_iarr", a);
         expect(callsNamed(mock, "uniform1iv")[0]?.args[1]).toBe(a);
+    });
+
+    it("uploads vec2 and vec3 arrays without losing in-place changes", () => {
+        const { mock, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        const values = new Float32Array([1, 2, 3, 4, 5, 6]);
+        mock.clear();
+        setEffectFloatArray2(eff, "u_arr", values);
+        setEffectFloatArray3(eff, "u_arr", values);
+        values[0] = 9;
+        setEffectFloatArray3(eff, "u_arr", values);
+        expect(callsNamed(mock, "uniform2fv")[0]?.args[1]).toBe(values);
+        expect(callsNamed(mock, "uniform3fv")).toHaveLength(2);
+        setEffectFloatArray2(eff, "__missing", values);
+        setEffectFloatArray3(eff, "__missing", values);
+        expect(callsNamed(mock, "uniform2fv")).toHaveLength(1);
+        expect(callsNamed(mock, "uniform3fv")).toHaveLength(2);
     });
 
     it("setEffectTexture unbinds a sampler unit when passed null", () => {
