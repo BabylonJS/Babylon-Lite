@@ -11,8 +11,8 @@ updated by the `update-compat-layer` skill.
      package and changes only when that version changes. -->
 
 - **Last synced BJS commit:** `47f84cf6dc635e97bfef29408be1cea41279334a`
-- **Last synced Lite commit:** `7d28bfc74260de3cf99d46e6588c71e2164d0e71`
-- **Last sync date:** 2026-11-22
+- **Last synced Lite commit:** `76d7889b97ce573352c2ae9cc7f9837eaed4a2bb`
+- **Last sync date:** 2026-11-23
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
