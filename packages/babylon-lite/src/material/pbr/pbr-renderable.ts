@@ -208,6 +208,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.
     let _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null = null;
     let shadowBindings: MaterialShadowBindings | undefined;
+    let shadowKey = "";
     let _singleLightWGSL = "";
     let _getSingleLightBlock: ((type: string) => string) | null = null;
     const singleLightBlocks: Partial<Record<SingleLightType, () => string>> = {};
@@ -243,6 +244,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
             _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
             shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
+            shadowKey = shadowMod.shadowVariantKey(shadowLights);
         }
     };
     /** Whether a light path the current selection needs has not been loaded yet. */
@@ -420,7 +422,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             meshFeatures,
             sceneFeatures,
             composed,
-            `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${toneMapping?.id ?? 0}:${pluginIndex}`,
+            `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${toneMapping?.id ?? 0}:${pluginIndex}:${receiveShadows ? shadowKey : ""}`,
             mat.stencil ?? null
         );
 
