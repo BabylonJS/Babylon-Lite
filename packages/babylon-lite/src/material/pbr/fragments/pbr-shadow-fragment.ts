@@ -17,12 +17,20 @@ export type PbrShadowLightSlot = ShadowLightSlot;
 
 /** @internal Prepare a scene-local synchronous PBR receiver factory. */
 export async function preparePbrShadowFragment(shadowLights: PbrShadowLightSlot[]): Promise<(slots: PbrShadowLightSlot[]) => ShaderFragment> {
-    if (shadowLights.some((slot) => slot.shadowType === "csm")) {
+    const fallbackLights = shadowLights.filter((slot) => slot.shadowType !== "csm");
+    if (shadowLights.length > 0 && fallbackLights.length === 0) {
         return createPbrShadowFragment;
     }
     const builder = await import("../../../shader/fragments/shadow-fragment-builder.js");
-    const createFallback = await builder.loadShadowFragmentFactory(shadowLights);
-    return (slots) => toPbrShadowFragment(createFallback("pbr-shadow", slots));
+    const createFallback = await builder.loadShadowFragmentFactory(fallbackLights);
+    if (fallbackLights.length === shadowLights.length) {
+        return (slots) => toPbrShadowFragment(createFallback("pbr-shadow", slots));
+    }
+    // CSM mixed with ESM/PCF lights: compose both receivers so the shader declares every light the bind group binds.
+    return (slots) => {
+        const fallbackSlots = slots.filter((slot) => slot.shadowType !== "csm");
+        return builder.mergeShadowFragments("pbr-shadow", slots, createPbrShadowFragment(slots), toPbrShadowFragment(createFallback("pbr-shadow", fallbackSlots)));
+    };
 }
 
 /**
@@ -31,7 +39,8 @@ export async function preparePbrShadowFragment(shadowLights: PbrShadowLightSlot[
  * The shadow factor for each light is stored in shadowFactors[lightIndex].
  *
  * If any slot is a cascaded-shadow (`"csm"`) light, the cascaded receiver factory
- * registered by the CSM generator is used (it already emits into slot `AS`).
+ * registered by the CSM generator is used for the CSM slots (it already emits into slot `AS`);
+ * {@link preparePbrShadowFragment} composes it with the ESM/PCF receiver when a scene mixes both.
  * Otherwise the prepared ESM/PCF factory is used and its `AD` slot is remapped to `AS`.
  */
 export function createPbrShadowFragment(
