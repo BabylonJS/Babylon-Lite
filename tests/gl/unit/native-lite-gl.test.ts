@@ -522,6 +522,27 @@ describe("Native Lite GL protocol", () => {
         expect(createRenderTarget(engine, 2048, 1).width).toBe(2048);
     });
 
+    it("leaves the upper size bound to the host when it reports no texture limit", () => {
+        const mock = makeRuntime();
+        mock.Engine.CAPS_LIMITS_MAX_TEXTURE_SIZE = 0;
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        for (const [width, height] of [
+            [0, 1],
+            [1.5, 1],
+            [Number.NaN, 1],
+        ] as const) {
+            expect(() => createRawTexture(engine, new Uint8Array(4), width, height)).toThrow(Error);
+            expect(() => createRenderTarget(engine, width, height)).toThrow(Error);
+        }
+        expect(native.createTexture).not.toHaveBeenCalled();
+        expect(native.createFrameBuffer).not.toHaveBeenCalled();
+        createRawTexture(engine, new Uint8Array(4), 1, 1);
+        expect(native.loadRawTexture).toHaveBeenCalledWith(expect.anything(), expect.any(Uint8Array), 1, 1, expect.any(Number), false, false);
+        createRenderTarget(engine, 4096, 1);
+        expect(native.initializeTexture).toHaveBeenLastCalledWith(expect.anything(), 4096, 1, false, expect.any(Number), true, false, 1);
+    });
+
     it("rejects raw texture formats it cannot upload", () => {
         makeRuntime();
         const engine = createNativeEngine();
