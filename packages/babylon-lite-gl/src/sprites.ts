@@ -234,10 +234,10 @@ export interface GLSpriteRenderer {
     /** @internal Preallocated CPU-side vertex scratch — reused every frame
      *  (`renderSprites` performs zero allocations). */
     _vertexData: Float32Array;
-    /** @internal Preallocated index data, uploaded once. */
-    _indices: Uint16Array;
+    /** @internal Static index data, retained only for automatic recovery after upload. */
+    _indices: Uint16Array | null;
     /** @internal Context-restored handler — rebuilds the GPU buffers. */
-    _restore: () => void;
+    _restore?: () => void;
     /** @internal True once disposed; subsequent calls are no-ops. */
     _disposed: boolean;
 }
@@ -250,7 +250,8 @@ export interface GLSpriteRenderer {
  * Preallocates the CPU vertex scratch and the index buffer at `capacity`, so
  * {@link renderSprites} performs no allocations. The sprite GPU buffers are
  * rebuilt automatically on `webglcontextrestored` (the owned effect is rebuilt
- * by the engine's context-restore protocol).
+ * by the engine's context-restore protocol), unless `doNotHandleContextLost`
+ * is set. That mode also releases the static CPU index data after upload.
  *
  * @param engine - The engine to create GL resources on.
  * @param options - See {@link GLSpriteRendererOptions}.
@@ -308,15 +309,19 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
         _ibo: null,
         _vertexData: new Float32Array(capacity * VERTS_PER_SPRITE * FLOATS_PER_VERTEX),
         _indices: indices,
-        _restore: () => {},
         _disposed: false,
     };
 
-    renderer._restore = (): void => {
-        buildSpriteBuffers(engine, renderer);
-    };
-    onContextRestored(engine, renderer._restore);
+    if (!engine._noRestore) {
+        renderer._restore = (): void => {
+            buildSpriteBuffers(engine, renderer);
+        };
+        onContextRestored(engine, renderer._restore);
+    }
     buildSpriteBuffers(engine, renderer);
+    if (engine._noRestore) {
+        renderer._indices = null;
+    }
     return renderer;
 }
 
@@ -518,7 +523,9 @@ export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void {
         return;
     }
     renderer._disposed = true;
-    offContextRestored(engine, renderer._restore);
+    if (renderer._restore) {
+        offContextRestored(engine, renderer._restore);
+    }
     disposeEffect(renderer._effect);
     if (!engine._isLost && !engine._disposed) {
         const gl = engine.gl;
@@ -599,5 +606,5 @@ function buildSpriteBuffers(engine: GLEngineContext, renderer: GLSpriteRenderer)
     renderer._ibo = ibo;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     s.boundElementBuffer = ibo;
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, renderer._indices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, renderer._indices!, gl.STATIC_DRAW);
 }

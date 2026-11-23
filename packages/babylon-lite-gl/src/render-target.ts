@@ -19,7 +19,7 @@
  * carries the `RGBA16F` / `RGBA32F` table, so RGBA8 consumers tree-shake it
  * away).
  *
- * The full color/depth/stencil GPU set is rebuilt automatically on
+ * Unless `doNotHandleContextLost` is set, the full color/depth/stencil GPU set is rebuilt automatically on
  * `webglcontextrestored` — the render target registers itself with the engine's
  * `_renderTargets` registry, and the context-restore protocol calls its
  * `_restore` closure AFTER the standalone texture replay. A caller-supplied
@@ -183,7 +183,7 @@ export interface GLRenderTarget {
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal Rebuild the FBO + renderbuffer (+ owned color texture) into
      *  fresh handles after `webglcontextrestored`. */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
 }
 
 /**
@@ -201,7 +201,8 @@ export interface GLRenderTarget {
  * @returns The new {@link GLRenderTarget}.
  * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
  *  positive integers, a GL handle could not be allocated, or the resulting
- *  framebuffer is not complete. On failure every partial GPU object (including
+ *  framebuffer is not complete when `setFramebufferValidation(engine, true)` is
+ *  enabled. Completeness queries are disabled by default. On failure every partial GPU object (including
  *  an owned color texture) is released first.
  */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
@@ -541,7 +542,6 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
-        _restore: () => {},
     };
 
     rt._deleteGpu = (glc: WebGL2RenderingContext): void => {
@@ -568,14 +568,16 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         rt.isReady = false;
     };
 
-    rt._restore = (target: GLEngineContext): void => {
-        // Resilient: a restore failure must not break the engine's restore loop.
-        try {
-            allocateRenderTargetGpu(target, rt);
-        } catch (err) {
-            console.error("lite-gl: render target restore failed", err);
-        }
-    };
+    if (!engine._noRestore) {
+        rt._restore = (target: GLEngineContext): void => {
+            // Resilient: a restore failure must not break the engine's restore loop.
+            try {
+                allocateRenderTargetGpu(target, rt);
+            } catch (err) {
+                console.error("lite-gl: render target restore failed", err);
+            }
+        };
+    }
 
     allocateRenderTargetGpu(engine, rt);
     engine._renderTargets.push(rt);
@@ -604,7 +606,7 @@ function validateSize(width: number, height: number): void {
 
 /**
  * (Re)allocate the color texture (iff owned), framebuffer and depth/stencil
- * renderbuffer into fresh handles, attach them, and validate completeness.
+ * renderbuffer into fresh handles, attach them, and optionally validate completeness.
  * Shared by create / resize / context-restore. No-op on a lost/disposed context.
  *
  * ATOMIC: captures the previously-bound framebuffer and restores it in a
@@ -672,10 +674,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         // A helper-attached stencil replaces/augments the depth-only buffer.
         rt._rebuildDepthStencil?.(engine);
 
-        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-            throw new Error(`lite-gl: render target framebuffer incomplete (status 0x${status.toString(16)})`);
-        }
+        engine._validateFramebuffer?.(gl, false);
         rt.isReady = true;
     } catch (e) {
         // Free whatever depth/stencil renderbuffer is currently attached. After a

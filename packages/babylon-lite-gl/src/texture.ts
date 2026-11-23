@@ -270,7 +270,8 @@ export interface GLRawTextureOptions extends GLTextureOptions {
  * RGBA8 by default; set {@link GLRawTextureOptions.format} / `type` for other
  * layouts. The pixel data can be replaced later via {@link updateRawTexture};
  * the sampling and wrap can be changed via {@link updateTextureSamplingMode} /
- * {@link updateTextureWrapMode}.
+ * {@link updateTextureWrapMode}. Upload data is retained by reference for
+ * automatic recovery unless the engine sets `doNotHandleContextLost`.
  *
  * @param engine - The engine.
  * @param data - Initial pixels matching `format` / `type`, or `null` for an
@@ -305,15 +306,17 @@ export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView 
     // `upload`, so the context-restore replay (which calls the same `upload`)
     // always reproduces the latest contents.
     let curData = data;
-    let curWidth = width;
-    let curHeight = height;
     let curAlign = opts.unpackAlignment ?? 4;
 
-    const upload = (target: GLEngineContext): void => {
+    const upload = (target: GLEngineContext, pixels = curData, w = tex.width, h = tex.height, alignment = curAlign): void => {
+        curData = target._noRestore ? null : pixels;
+        curAlign = alignment;
+        tex.width = w;
+        tex.height = h;
         const g = target.gl;
-        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiply, curAlign);
+        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiply, alignment);
         bindTextureForUpload(target, tex.handle);
-        g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
+        g.texImage2D(g.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, pixels);
     };
 
     const initializeParameters = (target: GLEngineContext): void => {
@@ -330,17 +333,9 @@ export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView 
         _disposed: false,
         _refCount: 1,
         _upload: upload,
+        _updateRaw: upload,
         _initializeParameters: initializeParameters,
         _wasReady: true,
-    };
-    tex._updateRaw = (target: GLEngineContext, newData: ArrayBufferView | null, newWidth: number, newHeight: number, unpackAlignment: number): void => {
-        curData = newData;
-        curWidth = newWidth;
-        curHeight = newHeight;
-        curAlign = unpackAlignment;
-        tex.width = newWidth;
-        tex.height = newHeight;
-        upload(target);
     };
     upload(engine);
     initializeParameters(engine);
@@ -584,7 +579,9 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
 /** Asynchronous image upload.The returned texture is immediately usable (1×1
  *  transparent placeholder); `isReady` flips true once the image has been
  *  decoded and uploaded. The decoded `ImageBitmap` is retained on the texture
- *  for offline-safe `webglcontextrestored` replay. `invertY` and
+ *  for offline-safe `webglcontextrestored` replay by default; with
+ *  `doNotHandleContextLost`, it is closed/released after the upload (also when
+ *  decoding finishes during loss). `invertY` and
  *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
  *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
  *  ignored for `ImageBitmap` sources. */
@@ -603,7 +600,6 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
     const premultiplyAlpha = opts.premultiplyAlpha ?? false;
 
     let bitmap: ImageBitmap | null = null;
-    const placeholderPixels = new Uint8Array([0, 0, 0, 0]);
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
@@ -618,7 +614,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
             tex.width = bitmap.width;
             tex.height = bitmap.height;
         } else {
-            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, placeholderPixels);
+            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, new Uint8Array(4));
         }
     };
 
@@ -660,13 +656,16 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
                 return;
             }
             bitmap = bm;
-            // If the context is lost mid-flight, defer the upload — the restore
-            // handler will call _upload again, which will then see `bitmap !== null`
-            // and replay the real image.
+            // Default recovery defers an in-flight image until restore; an
+            // opted-out host recreates resources instead.
             if (!engine._isLost) {
                 // Through `tex._upload` so a retained mip chain is rebuilt.
                 tex._upload(engine);
                 tex.isReady = true;
+            }
+            if (engine._noRestore) {
+                bitmap = null;
+                bm.close();
             }
             tex._wasReady = true;
             if (onLoad !== undefined) {

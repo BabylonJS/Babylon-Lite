@@ -137,6 +137,7 @@ export function createMockGL(): MockGL {
         COMPILE_STATUS: 0x8b81,
         LINK_STATUS: 0x8b82,
         MAX_TEXTURE_SIZE: 0x0d33,
+        MAX_VERTEX_ATTRIBS: 0x8869,
         MAX_COMBINED_TEXTURE_IMAGE_UNITS: 0x8b4d,
         SAMPLES: 0x80a9,
         SAMPLE_ALPHA_TO_COVERAGE: 0x809e,
@@ -195,6 +196,9 @@ export function createMockGL(): MockGL {
         ...ENUMS,
         // ──── context / caps ────────────────────────────────────────────
         getParameter: (p: number): number => {
+            if (p === ENUMS.MAX_VERTEX_ATTRIBS) {
+                return 16;
+            }
             if (p === ENUMS.MAX_TEXTURE_SIZE) {
                 return 4096;
             }
@@ -409,6 +413,9 @@ export function createMockGL(): MockGL {
         },
         uniform1fv: (loc: object, value: unknown): void => {
             rec("uniform1fv", loc, value);
+        },
+        uniform3fv: (loc: object, value: unknown): void => {
+            rec("uniform3fv", loc, value);
         },
         uniform4fv: (loc: object, value: unknown): void => {
             rec("uniform4fv", loc, value);

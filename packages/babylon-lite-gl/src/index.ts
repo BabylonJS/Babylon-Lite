@@ -29,6 +29,7 @@ export {
     offContextRestored,
 } from "./context.js";
 export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.js";
+export { setFramebufferValidation } from "./framebuffer-validation.js";
 
 // ─── Alpha-to-coverage (optional) ───────────────────────────────────
 export { getAlphaToCoverage, getCurrentSampleCount, setAlphaToCoverage } from "./alpha-to-coverage.js";
@@ -61,6 +62,7 @@ export {
     setEffectMatrix,
     setEffectMatrix3x3,
     setEffectFloatArray,
+    setEffectFloatArray3,
     setEffectFloatArray4,
     setEffectIntArray,
 } from "./effect.js";
@@ -138,6 +140,8 @@ export {
     disposeBuffer,
     bindIndexBuffer,
     bindAttributes,
+    disableAttributeByIndex,
+    unbindAllAttributes,
     unbindInstanceAttributes,
     drawIndexed,
     createMeshVao,

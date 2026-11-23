@@ -22,6 +22,8 @@ import {
     setEffectTexture,
     setViewport,
     useEffect,
+    unbindTexture,
+    updateRawTexture,
     wipeGLStateCache,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -192,6 +194,113 @@ describe("lite-gl cache: uniform setters", () => {
 });
 
 describe("lite-gl cache: textures + samplers", () => {
+    it("initial texture state forces an explicit unit-zero null unbind, then elides repeats", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        mock.clear();
+        unbindTexture(engine, 0);
+        unbindTexture(engine, 0);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
+    it.each(["bind", "unbind"] as const)("wipe forces unit-zero %s after a nonzero active unit, then elides repeats", (operation) => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        bindTexture(tex, 7);
+        wipeGLStateCache(engine);
+        mock.clear();
+        for (let i = 0; i < 2; i++) {
+            if (operation === "bind") {
+                bindTexture(tex, 0);
+            } else {
+                unbindTexture(engine, 0);
+            }
+        }
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, operation === "bind" ? tex.handle : null] },
+        ]);
+        mock.clear();
+        if (operation === "bind") {
+            bindTexture(tex, 0);
+        } else {
+            unbindTexture(engine, 0);
+        }
+        expect(mock.log).toEqual([]);
+    });
+
+    it("wipe forces a null unbind on an unknown nonzero unit without clearing other cached bindings", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        bindTexture(tex, 5);
+        wipeGLStateCache(engine);
+        bindTexture(tex, 0);
+        mock.clear();
+        unbindTexture(engine, 5);
+        unbindTexture(engine, 5);
+        bindTexture(tex, 0);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0 + 5] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
+    it("wipe forces an upload to select and bind unit zero before texImage2D", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const data = new Uint8Array([255, 0, 0, 255]);
+        const tex = createRawTexture(engine, data, 1, 1);
+        bindTexture(tex, 7);
+        wipeGLStateCache(engine);
+        mock.clear();
+        updateRawTexture(tex, data);
+        expect(mock.log.filter((call) => ["activeTexture", "bindTexture", "texImage2D"].includes(call.name))).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+            { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data] },
+        ]);
+        mock.clear();
+        updateRawTexture(tex, data);
+        expect(mock.count("activeTexture")).toBe(0);
+        expect(mock.count("bindTexture")).toBe(0);
+        expect(mock.count("texImage2D")).toBe(1);
+    });
+
+    it("restore reselects unit zero before replaying uploads and leaves untouched units unknown", () => {
+        const { mock, canvas, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const data = new Uint8Array([255, 0, 0, 255]);
+        const tex = createRawTexture(engine, data, 1, 1);
+        bindTexture(tex, 7);
+        const oldHandle = tex.handle;
+        fireLost(canvas);
+        mock.clear();
+        bindTexture(tex, 0);
+        unbindTexture(engine, 7);
+        updateRawTexture(tex, data);
+        expect(mock.log).toEqual([]);
+        fireRestored(canvas);
+        expect(tex.handle).not.toBe(oldHandle);
+        expect(mock.log.filter((call) => ["activeTexture", "bindTexture", "texImage2D"].includes(call.name))).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+            { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data] },
+        ]);
+        mock.clear();
+        bindTexture(tex, 0);
+        unbindTexture(engine, 7);
+        unbindTexture(engine, 7);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0 + 7] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
     it("sampler uniforms assigned exactly once at finalization (not per setEffectTexture call)", () => {
         const { mock, engine, effect } = makeReadyEffect();
         // After finalization, there should be exactly 2 uniform1i calls — one per sampler.

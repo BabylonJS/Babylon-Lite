@@ -19,7 +19,9 @@ export interface GLManagedBuffer {
     /** @internal */
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
+    /** Retained upload source, absent when replay is disabled or disposed. @internal */
+    _data?: ArrayBufferView;
 }
 
 /**
@@ -38,7 +40,7 @@ export interface GLFrameHooks {
     _dispose: () => void;
 }
 
-/** Constructor options forwarded to `canvas.getContext('webgl2', …)`. */
+/** WebGL2 context attributes and immutable resource-recovery policy. */
 export interface GLEngineOptions {
     /** Default: true. */
     alpha?: boolean;
@@ -56,6 +58,11 @@ export interface GLEngineOptions {
     powerPreference?: WebGLPowerPreference;
     /** Default: false. */
     failIfMajorPerformanceCaveat?: boolean;
+    /** Disable automatic context restoration and replay-source retention.
+     * Default false. Loss still stops rendering and notifies onContextLost, but
+     * does not call preventDefault or install a restored listener (ThinEngine
+     * semantics). The host must dispose/recreate this engine and its resources. */
+    doNotHandleContextLost?: boolean;
 }
 
 /** Read-only WebGL2 capability limits, queried at creation and refreshed after
@@ -185,11 +192,14 @@ export interface GLEngineContext {
     /** @internal */
     _onRestored: (() => void)[];
     /**
-     * True between `webglcontextlost` and `webglcontextrestored`. While
-     * true, every `setEffect*` / `bindTexture` / `drawEffect` is a no-op.
+     * True after `webglcontextlost` until automatic recovery completes, or
+     * permanently when recovery is disabled. While true, every `setEffect*` /
+     * `bindTexture` / `drawEffect` is a no-op.
      * @internal
      */
     _isLost: boolean;
+    /** Immutable host-owned recovery policy; not cached GL state. @internal */
+    _noRestore: boolean;
     /**
      * True once the context has been disposed; subsequent calls become no-ops.
      * @internal
@@ -224,12 +234,17 @@ export interface GLEngineContext {
     /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
      * @internal */
     _gpuFrameTime?: GLPerfCounter;
+    /** Optional debug validation installed by `setFramebufferValidation`.
+     * Configuration, not cached GL state: retained across cache wipes/restores.
+     * @internal */
+    _validateFramebuffer?: (gl: WebGL2RenderingContext, stencil: boolean) => void;
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
  *  Accepts an `HTMLCanvasElement` or an `OffscreenCanvas` (worker render paths —
  *  e.g. the Lottie player — which size the drawing buffer via `setGLEngineSize`).
- *  Throws if WebGL2 is unsupported. */
+ *  Throws if WebGL2 is unsupported. Automatic resource recovery is enabled unless
+ *  `options.doNotHandleContextLost` is true; then the host recreates the engine. */
 export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext {
     const o = options ?? {};
     const attrs: WebGLContextAttributes = {
@@ -267,17 +282,18 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         _onLost: [],
         _onRestored: [],
         _isLost: false,
+        _noRestore: !!o.doNotHandleContextLost,
         _disposed: false,
-        _lostHandler: () => {},
-        _restoredHandler: () => {},
+        _lostHandler: (e: Event) => handleContextLost(engine, e),
+        _restoredHandler: () => handleContextRestored(engine),
         _wasLoopActive: false,
         _scheduleFrame: null,
     };
 
-    engine._lostHandler = (e: Event) => handleContextLost(engine, e);
-    engine._restoredHandler = () => handleContextRestored(engine);
     canvas.addEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
-    canvas.addEventListener("webglcontextrestored", engine._restoredHandler, false);
+    if (!engine._noRestore) {
+        canvas.addEventListener("webglcontextrestored", engine._restoredHandler, false);
+    }
 
     return engine;
 }
@@ -339,6 +355,7 @@ export function disposeGLEngine(engine: GLEngineContext): void {
         if (!buf._disposed) {
             buf._disposed = true;
             buf._deleteGpu(gl);
+            buf._data = buf._restore = undefined;
         }
     }
     engine._buffers.length = 0;
@@ -475,7 +492,8 @@ export function offContextLost(engine: GLEngineContext, cb: () => void): void {
     }
 }
 
-/** Register a `webglcontextrestored` callback. Duplicate registrations are ignored. */
+/** Register an automatic `webglcontextrestored` callback. Never fires when
+ *  `doNotHandleContextLost` is set. Duplicate registrations are ignored. */
 export function onContextRestored(engine: GLEngineContext, cb: () => void): void {
     if (engine._onRestored.indexOf(cb) === -1) {
         engine._onRestored.push(cb);
@@ -495,7 +513,9 @@ export function offContextRestored(engine: GLEngineContext, cb: () => void): voi
 function handleContextLost(engine: GLEngineContext, e: Event): void {
     // Opt-in to restore. Without preventDefault() the browser will NOT fire
     // webglcontextrestored later.
-    e.preventDefault();
+    if (!engine._noRestore) {
+        e.preventDefault();
+    }
     if (engine._isLost || engine._disposed) {
         return;
     }
@@ -542,7 +562,7 @@ function handleContextRestored(engine: GLEngineContext): void {
     Object.assign(engine.caps, queryCaps(engine.gl));
     for (const eff of engine._effects) {
         if (!eff._disposed) {
-            eff._restore(engine);
+            eff._restore!(engine);
         }
     }
     for (const tex of engine._textures) {
@@ -566,13 +586,13 @@ function handleContextRestored(engine: GLEngineContext): void {
     // RT, not the `_textures` registry).
     for (const rt of engine._renderTargets) {
         if (!rt._disposed) {
-            rt._restore(engine);
+            rt._restore!(engine);
         }
     }
     // Mesh buffers re-upload their retained CPU data into fresh GL buffers.
     for (const buf of engine._buffers) {
         if (!buf._disposed) {
-            buf._restore(engine);
+            buf._restore!(engine);
         }
     }
     if (engine._wasLoopActive && engine._loops.length > 0 && engine._scheduleFrame !== null) {

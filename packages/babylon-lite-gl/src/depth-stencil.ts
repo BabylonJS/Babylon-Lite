@@ -93,8 +93,6 @@ const STENCIL_ATTACHMENT = 0x8d20;
 /** GL `gl.DEPTH_ATTACHMENT` — where the render-target core attaches its depth-only
  *  renderbuffer (re-established when rolling back a failed stencil attach). */
 const DEPTH_ATTACHMENT = 0x8d00;
-/** GL `gl.FRAMEBUFFER_COMPLETE`. */
-const FRAMEBUFFER_COMPLETE = 0x8cd5;
 
 /** Depth-buffer configuration for {@link setDepthState}. Omitted fields are
  *  left unchanged. */
@@ -594,8 +592,9 @@ function flushColorMask(engine: GLEngineContext): void {
  *  — the common case, and the correct choice when the target was created with
  *  `generateDepthBuffer: true`. When `false` the attachment is stencil-only
  *  (`STENCIL_INDEX8` on `STENCIL_ATTACHMENT`).
- * @throws If a renderbuffer handle could not be allocated or the framebuffer is
- *  incomplete after attaching.
+ * @throws If a renderbuffer handle could not be allocated, or the framebuffer is
+ *  incomplete after attaching when `setFramebufferValidation(engine, true)` is
+ *  enabled. Completeness queries are disabled by default.
  */
 export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { depth?: boolean }): void {
     const engine = rt._engine;
@@ -610,7 +609,8 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
         const gl = e.gl;
         // Capture the caller's draw target so this helper is STATE-NEUTRAL: it must
         // not silently redirect subsequent draws to `rt` (during an internal
-        // rebuild `prevFb` is `rt._framebuffer`, which the core re-checks next).
+        // rebuild `prevFb` is `rt._framebuffer`, which the core validates next
+        // only when debug validation is enabled).
         const prevFb = e._state.boundFramebuffer;
         const newRb = gl.createRenderbuffer();
         if (newRb === null) {
@@ -624,11 +624,8 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
             gl.renderbufferStorage(RENDERBUFFER, format, rt.width, rt.height);
             gl.framebufferRenderbuffer(FRAMEBUFFER, attachment, RENDERBUFFER, newRb);
             gl.bindRenderbuffer(RENDERBUFFER, null);
-            const status = gl.checkFramebufferStatus(FRAMEBUFFER);
-            if (status !== FRAMEBUFFER_COMPLETE) {
-                throw new Error(`lite-gl: render target framebuffer incomplete after stencil attach (status 0x${status.toString(16)})`);
-            }
-            // Commit only after a complete attachment: release the buffer we
+            e._validateFramebuffer?.(gl, true);
+            // Commit only after attachment succeeds (and debug validation passes): release the buffer we
             // replaced (the core depth-only one, or our own from a prior rebuild).
             if (rt._depthStencil !== null) {
                 gl.deleteRenderbuffer(rt._depthStencil);

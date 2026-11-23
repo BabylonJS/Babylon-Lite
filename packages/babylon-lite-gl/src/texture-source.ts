@@ -4,7 +4,8 @@ import { bindTextureForUpload, disposeTexture, setBoundTextureParams, setUnpackS
 /** Upload and sampling options for {@link createTextureFromSource}. */
 export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internalFormat"> {
     /**
-     * Keep the source for automatic context-restore replay. Default true.
+     * Keep the source for automatic context-restore replay. Default true;
+     * overridden by the engine's `doNotHandleContextLost` policy.
      * With false, release the reference after upload and restore transparent
      * black at the original size instead; the caller must recreate content
      * (for example from an `onContextRestored` callback).
@@ -27,7 +28,8 @@ export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internal
  * source reference is dropped after upload and restoration creates a ready,
  * transparent-black texture at the original size; re-upload content from an
  * `onContextRestored` callback. This function never closes a bitmap or video
- * frame.
+ * frame. An engine with `doNotHandleContextLost` always drops the source after
+ * upload, regardless of `retainSource`, and does not restore the texture.
  *
  * Restoration replays level 0 and the sampling parameters. When using a
  * mipmapped `minFilter`, call `generateTextureMipMaps` once after creation:
@@ -131,7 +133,7 @@ export function createTextureFromSource(engine: GLEngineContext, source: TexImag
         disposeTexture(tex);
         throw error;
     }
-    if (options.retainSource === false) {
+    if (engine._noRestore || options.retainSource === false) {
         retainedSource = null;
     }
     engine._textures.add(tex);

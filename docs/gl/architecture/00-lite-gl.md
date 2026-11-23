@@ -186,6 +186,8 @@ export interface GLEngineOptions {
     powerPreference?: WebGLPowerPreference;
     /** Default: false. */
     failIfMajorPerformanceCaveat?: boolean;
+    /** Default false. Host owns resource rebuilding after loss; no replay sources retained. */
+    doNotHandleContextLost?: boolean;
 }
 
 export interface GLEngineCaps {
@@ -250,6 +252,36 @@ export function offContextLost(engine: GLEngineContext, cb: () => void): void;
 export function onContextRestored(engine: GLEngineContext, cb: () => void): void;
 export function offContextRestored(engine: GLEngineContext, cb: () => void): void;
 ```
+
+#### 3.1.1 Framebuffer validation (optional debugging)
+
+```ts
+export function setFramebufferValidation(engine: GLEngineContext, enabled: boolean): void;
+```
+
+Framebuffer completeness queries are **off by default**, matching ThinEngine's
+render-target creation path. `checkFramebufferStatus` synchronizes with the GPU
+process; neither initial allocation, stencil attachment, resize nor restore
+performs that query unless validation is explicitly enabled.
+
+`setFramebufferValidation(engine, true)` installs an optional engine-owned
+validator; `false` removes it. It affects subsequent allocations/attachments,
+not already-built targets or draws, and is a no-op on a lost/disposed engine.
+The installed hook survives state-cache wipes and context restoration because
+this is configuration, not cached GL state. No numeric `rs` slot is needed.
+The validator and error formatting live entirely in the side-effect-free
+`framebuffer-validation.ts` module; the allocation sites contain only an
+optional hook call. Non-debug consumers tree-shake the query code out, and
+non-render-target consumers retain no extra runtime code.
+
+In debug mode, the existing incomplete-status errors and cleanup are preserved:
+core allocation deletes its partial owned GPU set and restores the previous
+framebuffer; stencil replacement validates before releasing the old buffer or
+committing the resize/restore hook, and rolls back on failure. With validation
+off, the same ordering applies without the query: successful attachment calls
+precede release/commit. Allocation failures and JavaScript GL exceptions still
+follow the existing rollback paths in both modes. Restore failures remain
+logged and local to the failing render target.
 
 ### 3.2 Render loop
 
@@ -390,8 +422,109 @@ export function setEffectFloat4(effect: GLEffect, name: string, x: number, y: nu
 export function setEffectColor3(effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void;
 export function setEffectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void;
 export function setEffectInt(effect: GLEffect, name: string, x: number): void;
+export function setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void;
 export function setEffectTexture(effect: GLEffect, samplerName: string, tex: GLTexture): void;
 ```
+
+`setEffectFloatArray3` uploads packed XYZ triples through `gl.uniform3fv`,
+matching `Effect.setFloatArray3` / `setArray3`. Like the other array setters,
+it passes the supplied array directly and never value-caches it: identical
+references and in-place edits upload on every call. The caller must bind the
+effect first and supply complete triples. It is a no-op while the effect is
+unready, the effect/engine is disposed, the context is lost, or the uniform
+location is null/undefined. After restore, finalize and bind the effect again
+before uploading to its replacement program.
+
+### 3.3.1 Manual vertex-attribute disabling
+
+```ts
+export function disableAttributeByIndex(engine: GLEngineContext, location: number): void;
+export function unbindAllAttributes(engine: GLEngineContext): void;
+```
+
+These mesh-module functions operate on the default (null) VAO, like
+`bindAttributes`; they never modify a quad, sprite, text or recorded mesh VAO.
+`enabledAttribs[location]` is the existing per-engine cache of default-VAO
+enables. `bindAttributes` enables only false/unset slots.
+`disableAttributeByIndex` skips false/unset slots; otherwise it binds the
+default VAO through the existing binding cache, disables the array and sets
+the slot false. `unbindAllAttributes` visits enabled locations in ascending
+order and disables them through the same helper. Both skip all work on a
+lost/disposed engine, elide repeated disables across frames, and allocate
+nothing per call. No additional `rs` slot or named state field is needed.
+
+ThinEngine's `disableAttributeByIndex` and `unbindAllAttributes` do **not**
+reset divisors. These functions likewise preserve `instanceLocations` and
+leave divisor cleanup to the existing `unbindInstanceAttributes` path.
+Named VAOs retain their own enables/divisors across switches. `resetGLState`
+and `resetGLStateCache` clear the existing enable/instance arrays in place;
+the first `bindAttributes` after restoration or cache invalidation replays
+enables, pointers and divisors. A frame boundary alone does not clear them.
+Both APIs are explicit root-barrel exports; the package has no public
+sub-entries.
+
+### 3.3.2 Default-VAO vertex pointer cache
+
+`bindAttributes` caches `(buffer handle, size, type, normalized, stride, offset)`
+per location, like ThinEngine's `_vertexAttribPointer`. Its first valid use
+allocates a fixed-size buffer-reference array and a `Float64Array` with five
+numeric slots per `MAX_VERTEX_ATTRIBS` location; subsequent binds allocate
+nothing. These two arrays share a tuple container (`_attributePointers[0]` for
+handles, `[1]` for numerics), avoiding named numeric state fields and property
+names for the sub-arrays. Direct numeric comparisons avoid temporary tuples.
+Numeric slots `location * 5 + [0..4]` contain size, type, normalization (`0`/`1`),
+stride and offset, respectively. This optional state is absent in consumers
+that only use named VAOs. Keeping pointer storage separate from `rs` avoids
+coupling its lifetime/capacity to lazy two-sided-stencil storage.
+The existing enable flag is also the tuple-validity flag: disabled/unset
+locations always replay their pointer. Therefore disable/bulk-disable,
+`resetGLStateCache`, wipe and context loss invalidate pointers without adding
+invalidation work to non-mesh consumers. Buffer deletion clears matching
+references; a replacement/restored buffer handle fails identity comparison.
+Updating storage under the same handle does not invalidate its captured layout.
+
+Pointer state belongs to the default VAO, not the global `ARRAY_BUFFER` binding:
+rebinding/uploading another array buffer or recording/binding a named VAO cannot
+change it. These paths preserve the default cache; returning to default first
+binds the correct VAO and array buffer, then compares the full tuple. Named-VAO
+recording never reads/writes the default pointer cache. Raw external GL mutations
+require `wipeGLStateCache` before returning control to lite-gl.
+
+Divisors remain issued on every descriptor, including a pointer cache hit, as in
+ThinEngine's `bindInstancesBuffer`; `unbindInstanceAttributes` is unchanged.
+
+### 3.3.3 Host-owned context recovery
+
+`createGLEngine(canvas, { doNotHandleContextLost: true })` disables automatic
+resource replay; the immutable internal `_noRestore` policy defaults to false.
+This lifecycle option adds no feature dependency. Like ThinEngine
+(`thinEngine.pure.ts:336–360`), the opted-out engine still listens for loss but
+does not call `preventDefault` and does not install a restored listener.
+Unlike ThinEngine's minimal opted-out listener, lite-gl still marks the engine
+lost, stops its loop, invalidates caches/readiness and notifies `onContextLost`
+to preserve its guarded no-op contract. The host must dispose this engine and
+create a new one with fresh resources (and own any browser restoration request).
+An opted-out old engine never resumes, even if a host restores its raw context.
+
+Vertex/index buffers retain no upload source (`_data` is undefined) and allocate
+no per-buffer restore callback in this mode. Full vertex updates preserve size
+metadata but do not retain their input; all GL uploads/binds/deletes are unchanged.
+Default buffers keep their existing by-reference source and restore callback.
+Final buffer/engine disposal clears both source and restore references in both
+modes, without extra GL calls; deletion ownership/registries remain active.
+
+Other resources follow the same policy: replay-only program/RT/mesh-VAO/sprite
+hooks are omitted; raw 2D/3D and decoded-source textures release replay-only pixel
+inputs. Async image loads release owned decoded bitmaps after upload; dynamic
+textures forget their latest source after each upload. HTML element textures
+must keep their element because the public update API takes no source, and
+effects keep public options and names for readiness/cache diagnostics. Render
+targets retain configuration for resize/deletion; mesh VAOs retain their index
+buffer for drawing but release resolved restore-only bindings after recording.
+Sprites release their static CPU index data; sprite vertex/text scratch arrays
+remain where needed for subsequent uploads. Text GPU
+capacity detection uses buffer byte length rather than restore-only `_data`.
+No existing upload/update API loses functionality when replay is disabled.
 
 ### 3.4 Textures
 
@@ -1037,7 +1170,7 @@ export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGL
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
   (+ optional depth). It is failure-atomic: on a bad size, a null GL handle, or an
-  incomplete framebuffer it frees the color texture and any partial FBO/renderbuffer
+  incomplete framebuffer (when debug validation is enabled) it frees the color texture and any partial FBO/renderbuffer
   (and restores the previously-bound framebuffer) before throwing, so a failed create
   leaks nothing.
 - **`bindRenderTarget`** is the cached framebuffer bind — the analogue of Babylon's
@@ -1082,8 +1215,8 @@ from any bundle that doesn't use it.
 ```ts
 interface GLState {
     currentProgram: WebGLProgram | null;
-    activeTextureUnit: number; // last gl.activeTexture(...)
-    boundTextures: (WebGLTexture | null)[]; // 2D per-unit, length = caps.maxTextureUnits
+    activeTextureUnit: number; // last gl.activeTexture(...), -1 = unknown
+    boundTextures: (WebGLTexture | null | undefined)[]; // 2D per-unit: undefined = unknown, null = confirmed unbound
     _boundTextures3D?: (WebGLTexture | null | undefined)[]; // undefined means unknown after wipe
     _unpack3DLayoutKnown?: boolean; // owned by optional texture-3d module
     boundArrayBuffer: WebGLBuffer | null;
@@ -1167,7 +1300,7 @@ kept in sync with actual GL state. Two protocols enforce that:
   iff it pointed at the disposed program. This prevents the next-bind to the
   same slot from being elided as a no-op.
 - **Context lost:** the `webglcontextlost` handler sets `_isLost=true` and
-  clears the core `_state` (program=null, 2D texture binding cache filled with null,
+  clears the core `_state` (program=null, active texture unit=-1, 2D texture binding cache filled with undefined,
   buffers=null, vao=null, boundFramebuffer=null, quad* = null, viewport=0, and
   the whole `rs` array — BOTH its actual half AND its desired twins — back to the
   unset sentinels with `statesDirty=false`). Resetting both halves means the
@@ -1179,22 +1312,46 @@ kept in sync with actual GL state. Two protocols enforce that:
   (and a cache invalidator when the host calls `wipeGLStateCache`). Setters
   become no-ops while `_isLost`. See §4.7.
 
+Texture state starts **unknown**, both at engine creation and after
+`wipeGLStateCache` / context-loss reset. `activeTextureUnit = -1` means the active
+unit must be selected before the next binding or upload; each
+`boundTextures[unit]` is `undefined` until a 2D binding is issued. A `null` slot
+means **confirmed unbound**, not unknown. Creation uses an unfilled, fixed-length
+array (reading any slot yields `undefined`); reset fills the existing array with
+`undefined` without allocating. The optional 3D cache uses the same binding
+sentinels and shares the active-unit cache.
+
+The existing bind/upload comparisons handle these sentinels without extra
+branches: a handle or explicit null never matches an unknown binding, and unit
+zero never matches the unknown active unit. Thus a unit-0 bind, null unbind, or
+upload after a wipe cannot target a stale nonzero active unit. Uploads always
+select unit zero when needed, even on a known binding cache hit; sampling binds
+can still elide the whole operation for a known matching binding regardless of
+the current active unit. Successful calls update the cache; subsequent identical
+calls remain elided across frames. Restore uploads replay against these unknown
+sentinels and populate only the units they actually touch.
+
 ### 4.2 Cache contract — which GL calls are elided
 
 | Operation                                  | Cache key                                       | Elided when                                                                   |
 | ------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | `gl.useProgram`                            | `_state.currentProgram`                         | Same program already current                                                  |
-| `gl.activeTexture`                         | `_state.activeTextureUnit`                      | Already on that unit                                                          |
+| `gl.activeTexture`                         | `_state.activeTextureUnit` (`-1` = unknown)     | Already on that unit (uploads must select their unit even on binding hits)     |
 | `gl.pixelStorei` (2D unpack flags)         | `_state.unpackFlipY/PremultiplyAlpha/Alignment` | Same flag/alignment already applied, including decoded-source uploads         |
-| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`                    | Same 2D texture already on that unit                                          |
+| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]` (`undefined` = unknown, `null` = unbound) | Same known 2D binding, including a confirmed null unbind          |
 | `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`                 | Same 3D texture already on that unit                                          |
 | `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                      | Always — never re-issued per frame                                            |
 | `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`             | Value bit-equal to last                                                       |
 | `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                          | Value equal to last                                                           |
+| `gl.uniform3fv` (vec3 arrays)              | None                                           | Never value-cached; lifecycle/readiness/missing-location guards only           |
+| `gl.enableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`               | Location already enabled; named VAOs keep their own recorded state            |
+| `gl.vertexAttribPointer` (default VAO)     | Optional per-location handle + five numeric slots | Enabled location has the same buffer, size, type, normalization, stride and offset |
+| `gl.disableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`              | Location already disabled/unset; divisors are left unchanged                  |
 | `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
 | `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
 | `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
 | `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget` / `restoreDefaultFramebuffer`)     |
+| `gl.checkFramebufferStatus`                | Optional engine validator, not GL state          | Omitted by default; only queried on allocation/attachment in debug mode       |
 | `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
 | blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 
@@ -1542,16 +1699,18 @@ both, without duplicate abort/loss checks.
 
 ### 4.7 Context lost / restored protocol
 
-The package owns this end-to-end because NeonBrush relies on Babylon's
-silent rebuild behaviour today.
+By default the package owns this end-to-end because NeonBrush relies on
+Babylon's silent rebuild behaviour. `doNotHandleContextLost: true` opts out:
+only the lost listener is installed, step 1 below is skipped, and the host must
+dispose/recreate the engine/resources. See §3.3.3 for retention exceptions.
 
 #### `webglcontextlost` handler
 
-1. `event.preventDefault()` — opt in to restore.
+1. `event.preventDefault()` — opt in to restore (automatic mode only).
 2. `engine._isLost = true`.
-3. Zero the entire `_state`: `currentProgram=null`, `boundTextures.fill(null)`,
+3. Reset the entire `_state`: `currentProgram=null`, `boundTextures.fill(undefined)`,
    `boundArrayBuffer/ElementBuffer/Vao=null`, `quadVbo/Ibo/Vao=null`,
-   `viewport*=0`, `activeTextureUnit=0`.
+   `viewport*=0`, `activeTextureUnit=-1`.
 4. For each `effect` in `engine._effects`: `effect.isReady=false`,
    `effect._samplersAssigned=false`, `effect.uniformLocations={}`,
    `effect.attributeLocations={}`, clear `_lastF1`/`_lastVec`/`_lastI1`.
@@ -1565,6 +1724,8 @@ While `_isLost`, every public function checks the flag and returns early.
 The application's `onContextLost` callback may e.g. hide the canvas.
 
 #### `webglcontextrestored` handler
+
+Installed only in automatic mode; opted-out engines remain lost permanently.
 
 1. For each `effect` in `engine._effects`: re-compile vs/fs from
    `effect.options.vertexSource/fragmentSource/defines`, re-attach,
@@ -1836,7 +1997,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
    pre-pass (lite-gl has no depth attachment — `disableDepthWrite` is inert).
 4. No shader-store, no `#include`, no runtime preprocessor beyond `options.defines` injection.
 5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
-6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
+6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray3` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
 7. Depth / stencil / cull / color-mask state setters ARE shipped via the
    depth-stencil module (`setDepthState` / `setStencilState` /
    `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
@@ -2207,6 +2368,7 @@ packages/babylon-lite-gl/
     src/
         index.ts            re-exports (core API + blend)
         context.ts          createGLEngine/disposeGLEngine/resizeGLEngine, lost/restored handlers, registries
+        framebuffer-validation.ts optional debug validator installed by setFramebufferValidation
         state.ts            GLState types
         render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation

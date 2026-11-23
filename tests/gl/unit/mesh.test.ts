@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createGLEngine, disposeGLEngine } from "../../../packages/babylon-lite-gl/src/context";
+import { createGLEngine, disposeGLEngine, wipeGLStateCache } from "../../../packages/babylon-lite-gl/src/context";
+import { drawEffect } from "../../../packages/babylon-lite-gl/src/effect-renderer";
 import { createEffect, isEffectReady, useEffect } from "../../../packages/babylon-lite-gl/src/effect";
 import {
     createVertexBuffer,
@@ -8,6 +9,8 @@ import {
     disposeBuffer,
     bindIndexBuffer,
     bindAttributes,
+    disableAttributeByIndex,
+    unbindAllAttributes,
     unbindInstanceAttributes,
     drawIndexed,
     createMeshVao,
@@ -15,6 +18,8 @@ import {
     disposeMeshVao,
     type GLAttributeDescriptor,
 } from "../../../packages/babylon-lite-gl/src/mesh";
+import { beginFrame, endFrame } from "../../../packages/babylon-lite-gl/src/render-loop";
+import { resetGLState } from "../../../packages/babylon-lite-gl/src/state";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function makeEngine() {
@@ -223,6 +228,364 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         mock.clear();
         bindAttributes(vb, [{ index: -1, size: 2, offset: 0 }], eff);
         expect(callsNamed(mock, "vertexAttribPointer")).toHaveLength(0);
+    });
+});
+
+describe("lite-gl mesh: cached attribute disabling", () => {
+    it("elides repeated enables/disables across frames and re-enables after a disable", () => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        const layout: GLAttributeDescriptor[] = [{ index: 3, size: 2, divisor: 0 }];
+        const pointer = { name: "vertexAttribPointer", args: [3, 2, engine.gl.FLOAT, false, 0, 0] };
+        const divisor = { name: "vertexAttribDivisor", args: [3, 0] };
+        const enabled = engine._state.enabledAttribs;
+        mock.clear();
+        disableAttributeByIndex(engine, 3);
+        unbindAllAttributes(engine);
+        expect(mock.log).toEqual([]);
+        beginFrame(engine);
+        bindAttributes(vb, layout, effect);
+        endFrame(engine);
+        beginFrame(engine);
+        bindAttributes(vb, layout, effect);
+        endFrame(engine);
+        expect(mock.log).toEqual([{ name: "enableVertexAttribArray", args: [3] }, pointer, divisor, divisor]);
+        mock.clear();
+        disableAttributeByIndex(engine, 3);
+        disableAttributeByIndex(engine, 3);
+        endFrame(engine);
+        beginFrame(engine);
+        unbindAllAttributes(engine);
+        endFrame(engine);
+        expect(mock.log).toEqual([{ name: "disableVertexAttribArray", args: [3] }]);
+        mock.clear();
+        bindAttributes(vb, layout, effect);
+        expect(mock.log).toEqual([{ name: "enableVertexAttribArray", args: [3] }, pointer, divisor]);
+        expect(engine._state.enabledAttribs).toBe(enabled);
+    });
+
+    describe("lite-gl mesh: default-VAO pointer tuple cache", () => {
+        it.each(["lost", "disposed-engine", "disposed-buffer", "unready-effect"] as const)("%s skips calls and pointer-cache setup", (mode) => {
+            const { mock, canvas, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            if (mode === "lost") {
+                fireLost(canvas);
+            } else if (mode === "disposed-engine") {
+                disposeGLEngine(engine);
+            } else if (mode === "disposed-buffer") {
+                disposeBuffer(vb);
+            } else {
+                effect.isReady = false;
+            }
+            mock.clear();
+            bindAttributes(vb, [{ index: 0, size: 2 }], effect);
+            expect(mock.log).toEqual([]);
+            expect(engine._state._attributePointers).toBeUndefined();
+        });
+
+        it("elides identical pointers independently per location across frames but never elides divisors", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [
+                { index: 1, size: 2, divisor: 0 },
+                { index: 3, size: 2, offset: 8 },
+            ];
+            bindAttributes(vb, layout, effect);
+            const cache = engine._state._attributePointers;
+            mock.clear();
+            for (let frame = 0; frame < 2; frame++) {
+                beginFrame(engine);
+                bindAttributes(vb, layout, effect);
+                endFrame(engine);
+            }
+            expect(mock.log).toEqual([
+                { name: "vertexAttribDivisor", args: [1, 0] },
+                { name: "vertexAttribDivisor", args: [3, 1] },
+                { name: "vertexAttribDivisor", args: [1, 0] },
+                { name: "vertexAttribDivisor", args: [3, 1] },
+            ]);
+            expect(engine._state._attributePointers).toBe(cache);
+        });
+
+        it.each([{ size: 3 }, { type: 0x1403 }, { normalized: true }, { offset: 8 }])("replays only the changed tuple field %j", (change) => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const original: GLAttributeDescriptor = { index: 1, size: 2, divisor: 0 };
+            bindAttributes(vb, [original, { index: 2, size: 2 }], effect);
+            mock.clear();
+            const next = { ...original, ...change };
+            bindAttributes(vb, [next, { index: 2, size: 2 }], effect);
+            bindAttributes(vb, [next], effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [1, next.size, next.type ?? engine.gl.FLOAT, next.normalized ?? false, 0, next.offset ?? 0] },
+                { name: "vertexAttribDivisor", args: [1, 0] },
+                { name: "vertexAttribDivisor", args: [2, 1] },
+                { name: "vertexAttribDivisor", args: [1, 0] },
+            ]);
+        });
+
+        it("replays stride changes while equivalent explicit/default tuple values are cache hits", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0 }], effect);
+            mock.clear();
+            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0, type: engine.gl.FLOAT, normalized: false, offset: 0 }], effect);
+            expect(mock.log).toEqual([{ name: "vertexAttribDivisor", args: [0, 0] }]);
+            mock.clear();
+            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0 }], effect, true);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 8, 0] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+        });
+
+        it("tracks captured buffer identity, not ARRAY_BUFFER rebinds or same-handle uploads", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const a = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributes(a, layout, effect);
+            const b = createVertexBuffer(engine, new Float32Array(16));
+            updateVertexBuffer(a, new Float32Array(16));
+            updateVertexBuffer(b, new Float32Array(16));
+            mock.clear();
+            bindAttributes(a, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, a.handle] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+            mock.clear();
+            bindAttributes(b, layout, effect);
+            bindAttributes(a, layout, effect);
+            expect(callsNamed(mock, "vertexAttribPointer")).toHaveLength(2);
+            disposeBuffer(a);
+            expect(engine._state._attributePointers?.[0][0]).toBeNull();
+            const replacement = createVertexBuffer(engine, new Float32Array(16));
+            mock.clear();
+            bindAttributes(replacement, layout, effect);
+            expect(callsNamed(mock, "vertexAttribPointer").map((call) => call.args)).toEqual([[0, 2, engine.gl.FLOAT, false, 0, 0]]);
+        });
+
+        it("replays a recreated handle even when the vertex-buffer wrapper and layout are unchanged", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributes(vb, layout, effect);
+            const oldHandle = vb.handle;
+            vb._restore!(engine);
+            expect(vb.handle).not.toBe(oldHandle);
+            mock.clear();
+            bindAttributes(vb, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+        });
+
+        it.each(["wipe", "reset", "single-disable", "all-disable"] as const)("%s invalidates an otherwise identical tuple", (mode) => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributes(vb, layout, effect);
+            if (mode === "wipe") {
+                engine.gl.bindBuffer(engine.gl.ARRAY_BUFFER, engine.gl.createBuffer());
+                engine.gl.vertexAttribPointer(0, 3, engine.gl.FLOAT, false, 12, 0);
+                wipeGLStateCache(engine);
+            } else if (mode === "reset") {
+                resetGLState(engine._state);
+            } else if (mode === "single-disable") {
+                disableAttributeByIndex(engine, 0);
+            } else {
+                unbindAllAttributes(engine);
+            }
+            mock.clear();
+            bindAttributes(vb, layout, effect);
+            expect(mock.log).toEqual([
+                ...(["wipe", "reset"].includes(mode) ? [{ name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] }] : []),
+                { name: "enableVertexAttribArray", args: [0] },
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+        });
+
+        it("named mesh recording and raw quad setup cannot poison default-VAO tuples", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const a = createVertexBuffer(engine, new Float32Array(16));
+            const b = createVertexBuffer(engine, new Float32Array(16));
+            const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributes(a, layout, effect);
+            const cache = engine._state._attributePointers;
+            const vao = createMeshVao(engine, [{ buffer: b, attributes: [{ index: 0, size: 3 }] }], ib, effect);
+            drawMesh(vao);
+            drawEffect(engine);
+            mock.clear();
+            bindAttributes(a, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "bindVertexArray", args: [null] },
+                { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, a.handle] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+            expect(engine._state._attributePointers).toBe(cache);
+            expect(cache?.[0][0]).toBe(a.handle);
+            mock.clear();
+            drawMesh(vao);
+            expect(mock.count("vertexAttribPointer")).toBe(0);
+        });
+
+        it("restore replays the pointer once with a fresh handle, then resumes elision", () => {
+            const { mock, canvas, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2 }];
+            bindAttributes(vb, layout, effect);
+            fireLost(canvas);
+            mock.clear();
+            bindAttributes(vb, layout, effect);
+            expect(mock.log).toEqual([]);
+            fireRestored(canvas);
+            isEffectReady(effect);
+            mock.clear();
+            bindAttributes(vb, layout, effect);
+            bindAttributes(vb, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "enableVertexAttribArray", args: [0] },
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 1] },
+                { name: "vertexAttribDivisor", args: [0, 1] },
+            ]);
+        });
+    });
+
+    it("bulk-disables only enabled locations in ascending order, preserving instance cleanup", () => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        bindAttributes(
+            vb,
+            [
+                { index: 5, size: 2 },
+                { index: 1, size: 2, divisor: 2 },
+                { index: 3, size: 2, divisor: 0 },
+            ],
+            effect
+        );
+        disableAttributeByIndex(engine, 1);
+        const instances = engine._state.instanceLocations;
+        mock.clear();
+        unbindAllAttributes(engine);
+        unbindAllAttributes(engine);
+        disableAttributeByIndex(engine, 5);
+        expect(mock.log).toEqual([
+            { name: "disableVertexAttribArray", args: [3] },
+            { name: "disableVertexAttribArray", args: [5] },
+        ]);
+        expect(engine._state.instanceLocations).toBe(instances);
+        expect(instances).toEqual([5, 1]);
+        mock.clear();
+        unbindInstanceAttributes(engine);
+        unbindInstanceAttributes(engine);
+        expect(mock.log).toEqual([
+            { name: "vertexAttribDivisor", args: [5, 0] },
+            { name: "vertexAttribDivisor", args: [1, 0] },
+        ]);
+    });
+
+    it.each(["single", "all"] as const)("%s disable switches to the default VAO without modifying a recorded mesh VAO", (mode) => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2 }];
+        bindAttributes(vb, layout, effect);
+        const vao = createMeshVao(engine, [{ buffer: vb, attributes: layout }], ib, effect);
+        drawMesh(vao);
+        mock.clear();
+        if (mode === "single") {
+            disableAttributeByIndex(engine, 0);
+        } else {
+            unbindAllAttributes(engine);
+        }
+        expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
+            { name: "disableVertexAttribArray", args: [0] },
+        ]);
+        expect(engine._state.boundVao).toBeNull();
+        expect(engine._state.boundElementBuffer).toBeNull();
+        mock.clear();
+        drawMesh(vao);
+        disableAttributeByIndex(engine, 0);
+        unbindAllAttributes(engine);
+        expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [vao.handle] },
+            { name: "drawElements", args: [engine.gl.TRIANGLES, 3, engine.gl.UNSIGNED_SHORT, 0] },
+        ]);
+    });
+
+    it("replays attribute enables after context restoration and resetGLState, reusing the cache arrays", () => {
+        const { mock, canvas, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        const layout: GLAttributeDescriptor[] = [{ index: 2, size: 2 }];
+        const enabled = engine._state.enabledAttribs;
+        const instances = engine._state.instanceLocations;
+        bindAttributes(vb, layout, effect);
+        fireLost(canvas);
+        expect(enabled).toEqual([]);
+        expect(instances).toEqual([]);
+        fireRestored(canvas);
+        isEffectReady(effect);
+        mock.clear();
+        bindAttributes(vb, layout, effect);
+        expect(mock.log).toEqual([
+            { name: "enableVertexAttribArray", args: [2] },
+            { name: "vertexAttribPointer", args: [2, 2, engine.gl.FLOAT, false, 0, 0] },
+            { name: "vertexAttribDivisor", args: [2, 1] },
+        ]);
+        resetGLState(engine._state);
+        expect(enabled).toEqual([]);
+        expect(instances).toEqual([]);
+        mock.clear();
+        bindAttributes(vb, layout, effect);
+        disableAttributeByIndex(engine, 2);
+        expect(mock.log).toEqual([
+            { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] },
+            { name: "enableVertexAttribArray", args: [2] },
+            { name: "vertexAttribPointer", args: [2, 2, engine.gl.FLOAT, false, 0, 0] },
+            { name: "vertexAttribDivisor", args: [2, 1] },
+            { name: "disableVertexAttribArray", args: [2] },
+        ]);
+        expect(engine._state.enabledAttribs).toBe(enabled);
+        expect(engine._state.instanceLocations).toBe(instances);
+    });
+
+    it.each(["lost", "disposed"] as const)("both disable APIs and bindAttributes are no-ops on a %s engine", (state) => {
+        const { mock, canvas, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        const layout: GLAttributeDescriptor[] = [{ index: 2, size: 2 }];
+        bindAttributes(vb, layout, effect);
+        if (state === "lost") {
+            fireLost(canvas);
+        } else {
+            disposeGLEngine(engine);
+        }
+        // Keep a populated cache to prove the lifecycle guard, not just elision.
+        engine._state.enabledAttribs[2] = true;
+        mock.clear();
+        disableAttributeByIndex(engine, 2);
+        unbindAllAttributes(engine);
+        bindAttributes(vb, layout, effect);
+        expect(mock.log).toEqual([]);
+        expect(engine._state.enabledAttribs[2]).toBe(true);
     });
 });
 

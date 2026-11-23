@@ -15,8 +15,8 @@
  *
  * The mesh path runs on the DEFAULT (null) VAO — every buffer/attribute op binds
  * `gl.bindVertexArray(null)` first, so it never corrupts the quad / sprite VAOs.
- * Vertex and index buffers retain their CPU data and re-upload automatically on
- * `webglcontextrestored`.
+ * Unless `doNotHandleContextLost` is set, vertex/index buffers retain their CPU
+ * data and re-upload automatically on `webglcontextrestored`.
  */
 import type { GLEngineContext } from "./context.js";
 import { onContextRestored, offContextRestored } from "./context.js";
@@ -55,10 +55,10 @@ export interface GLVertexBuffer {
     /** @internal Delete the underlying GL buffer. */
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal Re-create + re-upload the retained CPU data into a fresh handle. */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
     /** @internal Retained CPU data for context-restore replay (the creation /
      *  last full-buffer upload). */
-    _data: Float32Array;
+    _data?: Float32Array;
     /** @internal `true` for `DYNAMIC_DRAW` (updated via `updateVertexBuffer`). */
     _dynamic: boolean;
 }
@@ -80,9 +80,9 @@ export interface GLIndexBuffer {
     /** @internal Delete the underlying GL buffer. */
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal Re-create + re-upload the retained CPU data into a fresh handle. */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
     /** @internal Retained CPU data for context-restore replay. */
-    _data: Uint16Array | Uint32Array;
+    _data?: Uint16Array | Uint32Array;
 }
 
 /**
@@ -118,7 +118,7 @@ export interface GLAttributeDescriptor {
  * Create a GPU vertex buffer from interleaved float data.
  *
  * @param engine - The engine.
- * @param data - The vertex data. Retained by reference for context-restore — do
+ * @param data - The vertex data. Retained by reference unless the engine opts out of context restoration — do
  *  not mutate it in place; use {@link updateVertexBuffer} to change contents.
  * @param dynamic - Hint that the buffer will be updated frequently
  *  (`DYNAMIC_DRAW`). Default `false` (`STATIC_DRAW`).
@@ -133,26 +133,26 @@ export function createVertexBuffer(engine: GLEngineContext, data: Float32Array, 
     const vb: GLVertexBuffer = {
         handle,
         byteLength: data.byteLength,
-        _data: data,
         _dynamic: dynamic,
         _engine: engine,
         _disposed: false,
-        _deleteGpu: () => {},
-        _restore: () => {},
+        _deleteGpu: (g: WebGL2RenderingContext): void => {
+            g.deleteBuffer(vb.handle);
+        },
     };
-    vb._deleteGpu = (g: WebGL2RenderingContext): void => {
-        g.deleteBuffer(vb.handle);
-    };
-    vb._restore = (target: GLEngineContext): void => {
-        const g = target.gl;
-        const fresh = g.createBuffer();
-        if (fresh === null) {
-            return;
-        }
-        vb.handle = fresh;
-        bindArrayBufferRaw(target, fresh);
-        g.bufferData(ARRAY_BUFFER, vb._data, vb._dynamic ? DYNAMIC_DRAW : STATIC_DRAW);
-    };
+    if (!engine._noRestore) {
+        vb._data = data;
+        vb._restore = (target: GLEngineContext): void => {
+            const g = target.gl;
+            const fresh = g.createBuffer();
+            if (fresh === null) {
+                return;
+            }
+            vb.handle = fresh;
+            bindArrayBufferRaw(target, fresh);
+            g.bufferData(ARRAY_BUFFER, vb._data!, vb._dynamic ? DYNAMIC_DRAW : STATIC_DRAW);
+        };
+    }
     bindArrayBufferRaw(engine, handle);
     gl.bufferData(ARRAY_BUFFER, data, dynamic ? DYNAMIC_DRAW : STATIC_DRAW);
     engine._buffers.push(vb);
@@ -162,7 +162,7 @@ export function createVertexBuffer(engine: GLEngineContext, data: Float32Array, 
 /**
  * Upload new contents into (part of) a vertex buffer via `bufferSubData`. A
  * full-buffer update from offset 0 also refreshes the retained CPU data used
- * for context-restore.
+ * for context-restore unless the engine opts out. Neither mode copies the input.
  *
  * @param vb - The vertex buffer to update.
  * @param data - The new float data.
@@ -176,7 +176,9 @@ export function updateVertexBuffer(vb: GLVertexBuffer, data: Float32Array, dstBy
     bindArrayBufferRaw(engine, vb.handle);
     engine.gl.bufferSubData(ARRAY_BUFFER, dstByteOffset, data);
     if (dstByteOffset === 0 && data.byteLength >= vb.byteLength) {
-        vb._data = data;
+        if (!engine._noRestore) {
+            vb._data = data;
+        }
         vb.byteLength = data.byteLength;
     }
 }
@@ -187,7 +189,7 @@ export function updateVertexBuffer(vb: GLVertexBuffer, data: Float32Array, dstBy
  * VAO element bindings.
  *
  * @param engine - The engine.
- * @param data - The index data. Retained by reference for context-restore.
+ * @param data - The index data. Retained by reference unless the engine opts out of context restoration.
  * @returns The new {@link GLIndexBuffer}.
  */
 export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | Uint32Array): GLIndexBuffer {
@@ -201,27 +203,27 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
         handle,
         count: data.length,
         is32Bits: is32,
-        _data: data,
         _engine: engine,
         _disposed: false,
-        _deleteGpu: () => {},
-        _restore: () => {},
+        _deleteGpu: (g: WebGL2RenderingContext): void => {
+            g.deleteBuffer(ib.handle);
+        },
     };
-    ib._deleteGpu = (g: WebGL2RenderingContext): void => {
-        g.deleteBuffer(ib.handle);
-    };
-    ib._restore = (target: GLEngineContext): void => {
-        const g = target.gl;
-        const fresh = g.createBuffer();
-        if (fresh === null) {
-            return;
-        }
-        ib.handle = fresh;
-        bindDefaultVao(target);
-        g.bindBuffer(ELEMENT_ARRAY_BUFFER, fresh);
-        target._state.boundElementBuffer = fresh;
-        g.bufferData(ELEMENT_ARRAY_BUFFER, ib._data, STATIC_DRAW);
-    };
+    if (!engine._noRestore) {
+        ib._data = data;
+        ib._restore = (target: GLEngineContext): void => {
+            const g = target.gl;
+            const fresh = g.createBuffer();
+            if (fresh === null) {
+                return;
+            }
+            ib.handle = fresh;
+            bindDefaultVao(target);
+            g.bindBuffer(ELEMENT_ARRAY_BUFFER, fresh);
+            target._state.boundElementBuffer = fresh;
+            g.bufferData(ELEMENT_ARRAY_BUFFER, ib._data!, STATIC_DRAW);
+        };
+    }
     bindDefaultVao(engine);
     gl.bindBuffer(ELEMENT_ARRAY_BUFFER, handle);
     engine._state.boundElementBuffer = handle;
@@ -231,13 +233,15 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
 }
 
 /** Dispose a vertex or index buffer (delete the GL buffer + unregister). Clears
- *  the array/element-buffer cache slot if it pointed at this buffer. Idempotent. */
+ *  the array/element-buffer cache slot if it pointed at this buffer and releases
+ *  retained upload/restore references in both recovery modes. Idempotent. */
 export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
     const engine = buffer._engine;
     if (buffer._disposed) {
         return;
     }
     buffer._disposed = true;
+    buffer._data = buffer._restore = undefined;
     const i = engine._buffers.indexOf(buffer);
     if (i !== -1) {
         engine._buffers.splice(i, 1);
@@ -251,6 +255,14 @@ export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
     }
     if (s.boundElementBuffer === buffer.handle) {
         s.boundElementBuffer = null;
+    }
+    const pointers = s._attributePointers?.[0];
+    if (pointers) {
+        for (let location = 0; location < pointers.length; location++) {
+            if (pointers[location] === buffer.handle) {
+                pointers[location] = null;
+            }
+        }
     }
 }
 
@@ -280,7 +292,8 @@ export function bindIndexBuffer(ib: GLIndexBuffer): void {
  * Configure vertex attributes from `vb`, reproducing Babylon's
  * `bindInstancesBuffer` exactly. For each descriptor: resolves the location
  * (explicit `index` or via the effect), enables the attribute array, issues
- * `vertexAttribPointer`, and sets the vertex divisor (`undefined → 1`). Each
+ * `vertexAttribPointer` only when its buffer/layout tuple changes, and sets
+ * the vertex divisor (`undefined → 1`, not cached, matching ThinEngine). Each
  * instanced location (divisor ≠ 0) is tracked once so {@link unbindInstanceAttributes}
  * can reset its divisor afterwards; per-vertex locations already have divisor 0 and are
  * not tracked, so callers that never instance can rebind every frame without growth.
@@ -292,7 +305,10 @@ export function bindIndexBuffer(ib: GLIndexBuffer): void {
  * - `true` → stride = Σ(`size`·4 bytes): interleaved per-vertex/per-instance.
  *
  * Runs on the default (null) VAO — never corrupts the quad / sprite VAOs.
- * No-op on a lost/disposed context or before the effect is ready.
+ * The fixed-size pointer cache is allocated once on first use; subsequent binds
+ * allocate nothing. Disable/reset invalidates tuples; fresh buffer handles replay
+ * them. Named VAOs retain independent state. No-op on a lost/disposed context or
+ * before the effect is ready.
  *
  * @param vb - The buffer supplying the attribute data.
  * @param descriptors - The attribute layout.
@@ -308,6 +324,12 @@ export function bindAttributes(vb: GLVertexBuffer, descriptors: readonly GLAttri
     const s = engine._state;
     bindDefaultVao(engine);
     bindArrayBufferRaw(engine, vb.handle);
+    let pointers = s._attributePointers;
+    if (!pointers) {
+        const count = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+        pointers = s._attributePointers = [new Array<WebGLBuffer | null>(count), new Float64Array(count * 5)];
+    }
+    const values = pointers[1];
 
     let stride = 0;
     if (computeStride) {
@@ -322,15 +344,76 @@ export function bindAttributes(vb: GLVertexBuffer, descriptors: readonly GLAttri
         if (loc < 0) {
             continue;
         }
-        if (!s.enabledAttribs[loc]) {
+        const enabled = s.enabledAttribs[loc];
+        if (!enabled) {
             gl.enableVertexAttribArray(loc);
             s.enabledAttribs[loc] = true;
         }
-        gl.vertexAttribPointer(loc, d.size, d.type ?? FLOAT, d.normalized ?? false, stride, d.offset ?? 0);
+        const type = d.type ?? FLOAT;
+        const normalized = d.normalized ?? false;
+        const offset = d.offset ?? 0;
+        const slot = loc * 5;
+        if (
+            !enabled ||
+            pointers[0][loc] !== vb.handle ||
+            values[slot] !== d.size ||
+            values[slot + 1] !== type ||
+            values[slot + 2] !== +normalized ||
+            values[slot + 3] !== stride ||
+            values[slot + 4] !== offset
+        ) {
+            gl.vertexAttribPointer(loc, d.size, type, normalized, stride, offset);
+            pointers[0][loc] = vb.handle;
+            values[slot] = d.size;
+            values[slot + 1] = type;
+            values[slot + 2] = +normalized;
+            values[slot + 3] = stride;
+            values[slot + 4] = offset;
+        }
         const divisor = d.divisor ?? 1;
         gl.vertexAttribDivisor(loc, divisor);
         if (divisor !== 0 && !s.instanceLocations.includes(loc)) {
             s.instanceLocations.push(loc);
+        }
+    }
+}
+
+/**
+ * Disable an enabled attribute on the default VAO, eliding redundant calls.
+ * Leaves its divisor unchanged, like ThinEngine's `disableAttributeByIndex`;
+ * use {@link unbindInstanceAttributes} for divisor cleanup. Named VAOs are
+ * untouched. No-op on a lost/disposed engine. The enable cache is cleared on
+ * context loss or cache reset, so subsequent binds replay their enables.
+ *
+ * @param engine - The engine.
+ * @param location - The attribute location to disable.
+ */
+export function disableAttributeByIndex(engine: GLEngineContext, location: number): void {
+    if (engine._isLost || engine._disposed || !engine._state.enabledAttribs[location]) {
+        return;
+    }
+    bindDefaultVao(engine);
+    engine.gl.disableVertexAttribArray(location);
+    engine._state.enabledAttribs[location] = false;
+}
+
+/**
+ * Disable all enabled default-VAO attributes in ascending location order.
+ * Cached across frames and allocation-free; named VAOs and instance divisors
+ * are unchanged (ThinEngine's `unbindAllAttributes` semantics). No-op on a
+ * lost/disposed engine. Context loss/cache reset clears the enable cache;
+ * subsequent {@link bindAttributes} calls replay their enables.
+ *
+ * @param engine - The engine.
+ */
+export function unbindAllAttributes(engine: GLEngineContext): void {
+    if (engine._isLost || engine._disposed) {
+        return;
+    }
+    const enabled = engine._state.enabledAttribs;
+    for (let location = 0; location < enabled.length; location++) {
+        if (enabled[location]) {
+            disableAttributeByIndex(engine, location);
         }
     }
 }
@@ -412,7 +495,8 @@ export interface GLMeshVertexBuffer {
 /** A recorded Vertex Array Object capturing a static mesh's attribute layout +
  *  index binding. Bind + draw it with {@link drawMesh} each frame — the GPU
  *  replays the entire attribute setup from one `bindVertexArray`. Re-recorded
- *  automatically on `webglcontextrestored`. */
+ *  automatically on `webglcontextrestored` unless the engine opts out with
+ *  `doNotHandleContextLost`. */
 export interface GLMeshVao {
     /** The live `WebGLVertexArrayObject`. Swapped on `webglcontextrestored`. */
     handle: WebGLVertexArrayObject;
@@ -426,7 +510,7 @@ export interface GLMeshVao {
     /** @internal Resolved attribute bindings, reused to re-record on restore. */
     _bindings: _ResolvedBinding[];
     /** @internal `webglcontextrestored` re-record hook. */
-    _restore: () => void;
+    _restore?: () => void;
 }
 
 /** @internal A single attribute with its location resolved once at record time
@@ -500,20 +584,25 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
         }
         bindings.push({ buffer: vbb.buffer, attrs });
     }
-    const vao: GLMeshVao = { handle, _engine: engine, _disposed: false, _indexBuffer: indexBuffer, _bindings: bindings, _restore: () => {} };
-    vao._restore = (): void => {
-        if (engine._isLost || engine._disposed || vao._disposed) {
-            return;
-        }
-        const fresh = engine.gl.createVertexArray();
-        if (fresh === null) {
-            return;
-        }
-        vao.handle = fresh;
-        recordMeshVao(engine, vao);
-    };
+    const vao: GLMeshVao = { handle, _engine: engine, _disposed: false, _indexBuffer: indexBuffer, _bindings: bindings };
+    if (!engine._noRestore) {
+        vao._restore = (): void => {
+            if (engine._isLost || engine._disposed || vao._disposed) {
+                return;
+            }
+            const fresh = engine.gl.createVertexArray();
+            if (fresh === null) {
+                return;
+            }
+            vao.handle = fresh;
+            recordMeshVao(engine, vao);
+        };
+        onContextRestored(engine, vao._restore);
+    }
     recordMeshVao(engine, vao);
-    onContextRestored(engine, vao._restore);
+    if (engine._noRestore) {
+        bindings.length = 0;
+    }
     return vao;
 }
 
@@ -576,7 +665,9 @@ export function disposeMeshVao(vao: GLMeshVao): void {
         return;
     }
     vao._disposed = true;
-    offContextRestored(engine, vao._restore);
+    if (vao._restore) {
+        offContextRestored(engine, vao._restore);
+    }
     if (!engine._isLost && !engine._disposed) {
         const s = engine._state;
         engine.gl.deleteVertexArray(vao.handle);

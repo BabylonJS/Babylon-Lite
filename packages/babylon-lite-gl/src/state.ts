@@ -78,9 +78,15 @@ export const RS_DESIRED = 21;
  */
 export interface GLState {
     currentProgram: WebGLProgram | null;
+    /** Active texture unit, or -1 when unknown. */
     activeTextureUnit: number;
-    /** Per-unit TEXTURE_2D binding; length === caps.maxTextureUnits. */
-    boundTextures: (WebGLTexture | null)[];
+    /** Default-VAO pointer tuples, allocated once by bindAttributes. Enabled
+     *  attributes validate these slots; disabling/resetting invalidates them.
+     *  @internal */
+    _attributePointers?: [(WebGLBuffer | null)[], Float64Array];
+    /** Per-unit TEXTURE_2D binding; undefined = unknown, null = confirmed unbound.
+     *  Length === caps.maxTextureUnits. */
+    boundTextures: (WebGLTexture | null | undefined)[];
     /** Per-unit TEXTURE_3D binding, allocated only when first used. @internal */
     _boundTextures3D?: (WebGLTexture | null | undefined)[];
     /** Cached zero WebGL2 unpack row/image/skip layout for 3D uploads. @internal */
@@ -218,12 +224,12 @@ function resetRenderStateArray(rs: Float64Array): void {
     applyRenderStateSentinels(rs);
 }
 
-/** Allocate a fresh, fully-null GLState sized for `maxTextureUnits`. */
+/** Allocate a fresh GLState with unknown texture bindings, sized for `maxTextureUnits`. */
 export function createGLState(maxTextureUnits: number): GLState {
     return {
         currentProgram: null,
-        activeTextureUnit: 0,
-        boundTextures: new Array<WebGLTexture | null>(maxTextureUnits).fill(null),
+        activeTextureUnit: -1,
+        boundTextures: new Array<WebGLTexture | null | undefined>(maxTextureUnits),
         boundArrayBuffer: null,
         boundElementBuffer: null,
         boundVao: null,
@@ -264,8 +270,8 @@ export function createGLState(maxTextureUnits: number): GLState {
  *  here to avoid leaking + needlessly rebuilding them every render scope. */
 export function resetGLStateCache(state: GLState): void {
     state.currentProgram = null;
-    state.activeTextureUnit = 0;
-    state.boundTextures.fill(null);
+    state.activeTextureUnit = -1;
+    state.boundTextures.fill(undefined);
     state.boundArrayBuffer = null;
     state.boundElementBuffer = null;
     state.boundVao = null;

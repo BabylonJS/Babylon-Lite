@@ -102,7 +102,12 @@ describe("babylon-lite-gl build output", () => {
             "createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture"
         );
         expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(effect: GLEffect): string | null");
+        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void");
+        expect(readFileSync(resolve(DIST, "mesh.d.ts"), "utf-8")).toContain("disableAttributeByIndex(engine: GLEngineContext, location: number): void");
+        expect(readFileSync(resolve(DIST, "mesh.d.ts"), "utf-8")).toContain("unbindAllAttributes(engine: GLEngineContext): void");
+        expect(readFileSync(resolve(DIST, "context.d.ts"), "utf-8")).toContain("doNotHandleContextLost?: boolean");
         expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain("waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>");
+        expect(readFileSync(resolve(DIST, "framebuffer-validation.d.ts"), "utf-8")).toContain("setFramebufferValidation(engine: GLEngineContext, enabled: boolean): void");
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -113,6 +118,7 @@ describe("babylon-lite-gl build output", () => {
             "resizeGLEngine",
             "setGLEngineSize",
             "wipeGLStateCache",
+            "setFramebufferValidation",
             "runRenderLoop",
             "stopRenderLoop",
             "beginFrame",
@@ -129,6 +135,7 @@ describe("babylon-lite-gl build output", () => {
             "setEffectTexture",
             "setEffectMatrix",
             "setEffectMatrix3x3",
+            "setEffectFloatArray3",
             // textures (LDR core + HDR opt-in + extensions)
             "createRawTexture",
             "createTextureFromSource",
@@ -172,6 +179,8 @@ describe("babylon-lite-gl build output", () => {
             "createIndexBuffer",
             "disposeBuffer",
             "bindAttributes",
+            "disableAttributeByIndex",
+            "unbindAllAttributes",
             "drawIndexed",
             "createMeshVao",
             "bindMeshVao",

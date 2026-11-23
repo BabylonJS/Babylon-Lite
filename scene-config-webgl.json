@@ -171,7 +171,7 @@
         "description": "One mixed-winding geometry draw applies INCR_WRAP to front faces and DECR_WRAP to back faces, then visualizes stencil values 1 and 255 with red and blue cover passes.",
         "tags": ["stencil", "mesh"],
         "maxMad": 0.5,
-        "maxRawKB": 16.5,
+        "maxRawKB": 17,
         "skipParity": false,
         "skipPerf": false
     },

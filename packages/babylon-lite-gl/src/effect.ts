@@ -110,7 +110,7 @@ export interface GLEffect {
      * poll.
      * @internal
      */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
 }
 
 /** Submit compilation + linking without querying their results. `isReady`
@@ -161,24 +161,25 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
         _refCount: 1,
         _cacheKey: cacheKey,
         _onCompiled: [],
-        _restore: () => {},
     };
 
-    effect._restore = (target: GLEngineContext): void => {
-        const restored = compileEffectProgram(target.gl, options, attribs);
-        if (typeof restored === "string") {
-            recordCompilationError(effect, `context-restore: ${restored}`);
-            return;
-        }
-        effect.program = restored.program;
-        effect._vs = restored.vs;
-        effect._fs = restored.fs;
-        effect.isReady = false;
-        effect._samplersAssigned = false;
-        effect.uniformLocations = {};
-        effect.attributeLocations = {};
-        effect._compileError = null;
-    };
+    if (!engine._noRestore) {
+        effect._restore = (target: GLEngineContext): void => {
+            const restored = compileEffectProgram(target.gl, options, attribs);
+            if (typeof restored === "string") {
+                recordCompilationError(effect, `context-restore: ${restored}`);
+                return;
+            }
+            effect.program = restored.program;
+            effect._vs = restored.vs;
+            effect._fs = restored.fs;
+            effect.isReady = false;
+            effect._samplersAssigned = false;
+            effect.uniformLocations = {};
+            effect.attributeLocations = {};
+            effect._compileError = null;
+        };
+    }
 
     engine._effects.push(effect);
     engine._effectCache.set(cacheKey, effect);
@@ -552,6 +553,28 @@ export function setEffectFloatArray(effect: GLEffect, name: string, array: Float
         return;
     }
     engine.gl.uniform1fv(loc, array);
+}
+
+/**
+ * Upload packed XYZ triples with `gl.uniform3fv` (`Effect.setFloatArray3` /
+ * `setArray3`). Not value-cached; in-place edits are uploaded on every call.
+ * Bind the effect first. No-op on a lost/disposed engine, a disposed/unready
+ * effect, or a missing uniform. After restore, finalize/bind the effect again.
+ *
+ * @param effect - The effect receiving the uniform.
+ * @param name - The uniform name.
+ * @param array - Packed triples; its length must be a multiple of three.
+ */
+export function setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
+    if (engine._isLost || engine._disposed || !effect.isReady || effect._disposed) {
+        return;
+    }
+    const loc = effect.uniformLocations[name];
+    if (loc === null || loc === undefined) {
+        return;
+    }
+    engine.gl.uniform3fv(loc, array);
 }
 
 /** `gl.uniform4fv` — an array of `vec4`s (`Effect.setFloatArray4` / `setArray4`).
