@@ -81,7 +81,7 @@ render-target sizes must be positive integers within it and are rejected before
 any host allocation.
 
 `beginFrame(engine)` and `endFrame(engine)` bracket command submission;
-`endFrame` submits everything recorded, including a partially encoded frame
+`endFrame` submits the remaining commands, including a partially encoded frame
 being unwound after a caller error. Resource operations outside a frame submit
 immediately. Nested or unmatched frame scopes are errors. A command that cannot
 fit in the stream, such as an oversized uniform array, is rejected before any of
@@ -175,10 +175,13 @@ binding.
 borrowed texture in place and rebuilds every framebuffer that renders into it.
 The replacement must have the same dimensions; a shape change is rejected.
 Every replacement framebuffer is created before any existing one is released,
-so if the host fails, the texture and its targets keep their original storage.
-Because a host can recreate the storage behind the same handle object, a call
-with the current handle rebuilds the framebuffers too; call it only when the
-host has replaced the storage, not every frame.
+so if the host fails, the texture and its targets keep their previous handles
+and framebuffers. Lite GL cannot restore host storage that already changed
+behind those handles; after a failure, retry the update or restore the host
+storage before using the texture or its targets. Because a host can recreate
+the storage behind the same handle object, a call with the current handle
+rebuilds the framebuffers too; call it only when the host has replaced the
+storage, not every frame.
 
 ### 2.5 State
 

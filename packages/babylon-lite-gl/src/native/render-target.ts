@@ -116,8 +116,10 @@ const NO_FRAMEBUFFERS: readonly NativeHandle[] = [];
 
 /**
  * Repoints a borrowed texture while preserving its render-target identities.
- * The swap is all-or-nothing: if the host cannot create a replacement
- * framebuffer, the texture and its targets keep their original storage.
+ * If the host cannot create a replacement framebuffer, the texture and its
+ * targets keep their previous handles, but Lite GL cannot restore host storage
+ * that already changed behind them; retry the update or restore the host
+ * storage before using the texture or its targets.
  * A host can replace the storage behind the same handle object, so every call
  * rebuilds the framebuffers; call it only when the storage has changed.
  */

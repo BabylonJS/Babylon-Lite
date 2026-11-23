@@ -288,7 +288,7 @@ endFrame(engine);
 ```
 
 - **Engine / frames** — `createNativeEngine`, `disposeNativeEngine`,
-  `beginFrame` / `endFrame` (one command submission per frame),
+  `beginFrame` / `endFrame` (`endFrame` submits the remaining commands),
   `getRenderWidth`, `getRenderHeight` (native output size),
   `getCurrentRenderTarget`, and `engine.caps.maxTextureSize`.
 - **Effects** — `createEffect` (accepts Lite GL `#version 300 es` sources;
@@ -304,11 +304,13 @@ endFrame(engine);
   several meshes can share one vertex/index buffer.
 - **Textures / targets** — `wrapNativeTexture` (borrows host storage),
   `createRawTexture` (owns sampled-only storage; `RGBA` / `UNSIGNED_BYTE` only;
-  creating one inside a frame submits the commands recorded so far), `disposeTexture`
+  creating one inside a frame first submits the commands recorded so far, so create raw
+  textures before `beginFrame` when the submission count matters), `disposeTexture`
   (owned storage is deleted after the commands already recorded are submitted),
   `createRenderTarget` (`width, height, { colorTexture? }`; not a raw texture), `bindRenderTarget` /
   `restoreDefaultFramebuffer` (also set a full-target viewport), `updateWrappedNativeTexture`
-  (replaces a borrowed handle and rebuilds its framebuffers; call it only when the host storage changed),
+  (replaces a borrowed handle and rebuilds its framebuffers; call it only when the host storage changed;
+  if it throws, retry it or restore the host storage before using the texture or its targets),
   `disposeRenderTarget`.
 - **State** — `setViewport` (pixel `GLViewport`), `setScissor` (an empty rectangle
   clips everything, as in WebGL), `disableScissor`,
