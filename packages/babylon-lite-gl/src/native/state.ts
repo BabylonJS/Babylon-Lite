@@ -10,9 +10,14 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
     if (engine._disposed) {
         return;
     }
+    const target = engine._target;
+    // The default output size is a host query, so an explicit viewport of a bound target does not read it.
+    if (viewport && target) {
+        setNormalizedViewport(engine, viewport.x, viewport.y, viewport.w, viewport.h, target.width, target.height);
+        return;
+    }
     const outputWidth = getRenderWidth(engine);
     const outputHeight = getRenderHeight(engine);
-    const target = engine._target;
     setNormalizedViewport(
         engine,
         viewport?.x ?? 0,

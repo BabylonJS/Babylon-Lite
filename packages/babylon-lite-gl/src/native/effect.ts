@@ -252,7 +252,8 @@ export function setUniformArray(effect: GLEffect, name: string, values: ArrayLik
         }
     }
     commands.endStaging(generation);
-    if (!differs) {
+    // A value read may have disposed the effect or its engine.
+    if (!differs || effect._disposed || effect._engine._disposed) {
         return;
     }
     uniformCommand(effect, name, command);

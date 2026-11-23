@@ -309,6 +309,27 @@ describe("Native Lite GL protocol", () => {
         expect(mock.floats("SETFLOATARRAY4", 6).slice(2)).toEqual([5, 6, 7, 8]);
     });
 
+    it.each([
+        ["effect", (program: ReturnType<typeof effect>) => disposeEffect(program)],
+        ["engine", (program: ReturnType<typeof effect>) => disposeNativeEngine(program._engine)],
+    ])("records no array upload when reading its values disposes the %s", (_owner, dispose) => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const program = effect(engine);
+        const disposing = new Proxy([1, 2, 3, 4], {
+            get(target, key, receiver) {
+                if (key === "3") {
+                    dispose(program);
+                }
+                return Reflect.get(target, key, receiver);
+            },
+        });
+        mock.clear();
+        setEffectFloatArray4(program, "colors", disposing);
+        expect(mock.count("SETPROGRAM")).toBe(0);
+        expect(mock.count("SETFLOATARRAY4")).toBe(0);
+    });
+
     it("retains per-program uniform values and notices in-place array changes", () => {
         const mock = makeRuntime();
         const engine = createNativeEngine();
@@ -406,11 +427,18 @@ describe("Native Lite GL protocol", () => {
     it("maps pixel viewports onto the bound target and gives each binding a full viewport", () => {
         const mock = makeRuntime();
         const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const outputWidth = vi.spyOn(native, "getRenderWidth");
+        const outputHeight = vi.spyOn(native, "getRenderHeight");
         const target = createRenderTarget(engine, 320, 180);
         bindRenderTarget(target);
         expect(mock.floats("SETVIEWPORT", 4)).toEqual([0, 0, 1, 1]);
         setViewport(engine, { x: 80, y: 45, w: 160, h: 90 });
+        setViewport(engine, { x: 80, y: 45, w: 160, h: 90 });
         expect(mock.floats("SETVIEWPORT", 4)).toEqual([0.25, 0.25, 0.5, 0.5]);
+        expect(mock.count("SETVIEWPORT")).toBe(2);
+        expect(outputWidth).not.toHaveBeenCalled();
+        expect(outputHeight).not.toHaveBeenCalled();
         mock.clear();
         bindRenderTarget(target);
         expect(mock.count("BINDFRAMEBUFFER")).toBe(0);
@@ -852,5 +880,19 @@ describe("Native Lite GL protocol", () => {
         expect(native.createTexture).not.toHaveBeenCalled();
         expect(native.createFrameBuffer).not.toHaveBeenCalled();
         expect(mock.words).toEqual([]);
+    });
+
+    it("rejects a raw texture as a render-target color attachment before any host call", () => {
+        const mock = makeRuntime();
+        const engine = createNativeEngine();
+        const native = engine._native as unknown as MockEngine;
+        const raw = createRawTexture(engine, new Uint8Array(640 * 360 * 4), 640, 360);
+        native.createTexture.mockClear();
+        mock.clear();
+        expect(() => createRenderTarget(engine, raw.width, raw.height, { colorTexture: raw })).toThrow(Error);
+        expect(native.createTexture).not.toHaveBeenCalled();
+        expect(native.createFrameBuffer).not.toHaveBeenCalled();
+        expect(mock.words).toEqual([]);
+        expect(raw.isReady).toBe(true);
     });
 });

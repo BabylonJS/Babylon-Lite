@@ -16,6 +16,8 @@ export interface GLTexture extends NativeResource<"texture"> {
     _handle: NativeHandle;
     /** @internal */
     readonly _owned: boolean;
+    /** @internal Whether the storage is known to be unusable as a render-target attachment. */
+    readonly _sampledOnly: boolean;
     /** @internal */
     readonly _targets: GLRenderTarget[];
     /** @internal The engine that owns this texture wrapper. */
@@ -45,13 +47,14 @@ export function configureTexture(engine: GLEngineContext, texture: GLTexture, li
 }
 
 /** @internal */
-export function makeTexture(engine: GLEngineContext, handle: NativeHandle, owned: boolean): GLTexture {
+export function makeTexture(engine: GLEngineContext, handle: NativeHandle, owned: boolean, sampledOnly: boolean): GLTexture {
     const fields: NativeResourceFields<GLTexture> = {
         width: engine._native.getTextureWidth(handle),
         height: engine._native.getTextureHeight(handle),
         isReady: true,
         _handle: handle,
         _owned: owned,
+        _sampledOnly: sampledOnly,
         _targets: [],
         _engine: engine,
         _disposed: false,
@@ -63,7 +66,7 @@ export function makeTexture(engine: GLEngineContext, handle: NativeHandle, owned
 
 /** Borrows native texture storage without taking responsibility for deleting it. */
 export function wrapNativeTexture(engine: GLEngineContext, handle: NativeTextureHandle): GLTexture {
-    return makeTexture(engine, handle, false);
+    return makeTexture(engine, handle, false, false);
 }
 
 /** Upload options shared by native texture creators. */
@@ -91,7 +94,10 @@ export function validateTextureSize(engine: GLEngineContext, width: number, heig
     }
 }
 
-/** Creates an owned texture from raw pixels. Only `gl.RGBA` / `gl.UNSIGNED_BYTE` data is supported. */
+/**
+ * Creates an owned, sampled-only texture from raw pixels. Only `gl.RGBA` / `gl.UNSIGNED_BYTE` data is supported.
+ * The host submits the commands recorded so far before uploading, so create raw textures before `beginFrame` when the number of submissions matters.
+ */
 export function createRawTexture(engine: GLEngineContext, data: Uint8Array, width: number, height: number, options?: GLRawTextureOptions): GLTexture {
     if ((options?.format ?? GL_RGBA) !== GL_RGBA || (options?.type ?? GL_UNSIGNED_BYTE) !== GL_UNSIGNED_BYTE) {
         throw new Error("Native Lite GL raw textures support only RGBA / UNSIGNED_BYTE data.");
@@ -100,7 +106,7 @@ export function createRawTexture(engine: GLEngineContext, data: Uint8Array, widt
     const handle = engine._native.createTexture();
     try {
         engine._native.loadRawTexture(handle, data, width, height, engine._runtime.Engine.TEXTURE_FORMAT_RGBA8, false, options?.invertY ?? false);
-        return makeTexture(engine, handle, true);
+        return makeTexture(engine, handle, true, true);
     } catch (error) {
         engine._native.deleteTexture(handle);
         throw error;

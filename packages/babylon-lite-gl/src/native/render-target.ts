@@ -26,7 +26,7 @@ export interface GLRenderTarget extends NativeResource<"renderTarget"> {
     _disposed: boolean;
 }
 
-/** Creates a composition target around an owned or supplied color attachment of a live engine; a supplied attachment must be a live texture of this engine. */
+/** Creates a composition target around an owned or supplied color attachment of a live engine; a supplied attachment must be a live, renderable texture of this engine. */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
     if (engine._disposed) {
         throw new Error("Native Lite GL createRenderTarget requires an engine that has not been disposed.");
@@ -36,12 +36,15 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
     if (colorTexture && (colorTexture._engine !== engine || colorTexture._disposed)) {
         throw new Error("Native Lite GL createRenderTarget requires a color texture of this engine that has not been disposed.");
     }
+    if (colorTexture?._sampledOnly) {
+        throw new Error("Native Lite GL createRenderTarget cannot render into a sampled-only texture such as one from createRawTexture.");
+    }
     let texture = colorTexture;
     if (!texture) {
         const handle = engine._native.createTexture();
         try {
             engine._native.initializeTexture(handle, width, height, false, engine._runtime.Engine.TEXTURE_FORMAT_RGBA8, true, false, 1);
-            texture = makeTexture(engine, handle, true);
+            texture = makeTexture(engine, handle, true, false);
         } catch (error) {
             engine._native.deleteTexture(handle);
             throw error;
@@ -115,6 +118,8 @@ const NO_FRAMEBUFFERS: readonly NativeHandle[] = [];
  * Repoints a borrowed texture while preserving its render-target identities.
  * The swap is all-or-nothing: if the host cannot create a replacement
  * framebuffer, the texture and its targets keep their original storage.
+ * A host can replace the storage behind the same handle object, so every call
+ * rebuilds the framebuffers; call it only when the storage has changed.
  */
 export function updateWrappedNativeTexture(texture: GLTexture, replacement: NativeTextureHandle): void {
     const engine = texture._engine;

@@ -87,7 +87,8 @@ immediately. Nested or unmatched frame scopes are errors. A command that cannot
 fit in the stream, such as an oversized uniform array, is rejected before any of
 it is recorded, so the stream and the uniform cache are unchanged. Array values
 are read once, before recording, so an array whose read throws leaves them
-unchanged too.
+unchanged too, and a read that disposes the effect or engine leaves the upload
+unrecorded.
 
 `disposeNativeEngine(engine)` is idempotent and disposes the native engine.
 
@@ -152,14 +153,19 @@ handle. `wrapNativeTexture(engine, handle)` **borrows** native storage:
 disposal has been submitted, so a frame may still use a texture it disposes;
 its `format` / `type`
 options accept only `RGBA` / `UNSIGNED_BYTE` (the defaults) and it throws for
-other formats. Texture state
+other formats. Raw storage can be sampled but not rendered into. The host
+submits the commands recorded so far before each raw upload, so a raw texture
+created inside a frame splits that frame's submission; create raw textures
+before `beginFrame` when the number of submissions matters. Texture state
 exposes `readonly width`, `readonly height`, and `isReady`; readiness becomes
 false on disposal, as in Lite GL. Sampler state is set at wrapping or creation,
 not per draw.
 
 `createRenderTarget(engine, width, height, { colorTexture? })` either
 allocates and owns an RGBA8 color texture or borrows the supplied
-`colorTexture`; it always owns its framebuffer. `disposeRenderTarget` releases
+`colorTexture`; it always owns its framebuffer. A raw texture is rejected as
+`colorTexture` before any host call; a wrapped host texture must have been
+created renderable by the host. `disposeRenderTarget` releases
 only the storage the target owns and accepts `null`. `bindRenderTarget(target)`
 binds a target and `restoreDefaultFramebuffer(engine)` binds the native output;
 both resolve the previous target first and set the viewport to cover the new
@@ -170,6 +176,9 @@ borrowed texture in place and rebuilds every framebuffer that renders into it.
 The replacement must have the same dimensions; a shape change is rejected.
 Every replacement framebuffer is created before any existing one is released,
 so if the host fails, the texture and its targets keep their original storage.
+Because a host can recreate the storage behind the same handle object, a call
+with the current handle rebuilds the framebuffers too; call it only when the
+host has replaced the storage, not every frame.
 
 ### 2.5 State
 
@@ -177,7 +186,8 @@ The engine tracks the active framebuffer and viewport. As in Lite GL,
 `setViewport(engine, viewport?)` takes a `GLViewport` in physical pixels of the
 bound target and defaults to the size of the default output, whichever target is
 bound; the native protocol's normalized viewport is derived from the bound
-target's size. `setScissor` uses physical pixels with the same bottom-left
+target's size. An explicit viewport of a bound target does not query the
+default output size. `setScissor` uses physical pixels with the same bottom-left
 origin as Lite GL; portable dimensions are nonnegative integers. A scissor rectangle without area clips everything, as in
 WebGL: drawing and clearing do nothing until the scissor changes or
 `disableScissor` is called. `setBlendMode` uses the Lite GL /
@@ -201,6 +211,7 @@ validation tags, stream capacity and rejected oversized commands, unchanged-stat
 elision, shared uniform values, sampler validation, disposed resources,
 vertex-array reuse and attribute resolution, default index ranges, borrowed
 versus owned texture disposal and deferred deletion, atomic target replacement,
+rejected raw color attachments,
 size limits, pixel viewports, empty scissors, clear options, `#version`
 handling, unsupported raw formats, and rendering state after a native reset.
 Package-output tests (`tests/gl/build/`) check the built `./native` export, that
