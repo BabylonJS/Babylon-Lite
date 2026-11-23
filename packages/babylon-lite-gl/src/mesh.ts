@@ -636,8 +636,15 @@ export function bindMeshVao(vao: GLMeshVao): void {
  *
  * @param vao - The mesh VAO to draw.
  * @param instanceCount - Instance count for instanced draws. Default 0 (non-instanced).
+ * @param indexStart - First index in the retained mesh.
+ * @param indexCount - Number of indices; defaults to the indices from `indexStart` to the end of the mesh.
+ * @throws RangeError when the range is not whole indices within the mesh.
  */
-export function drawMesh(vao: GLMeshVao, instanceCount = 0): void {
+export function drawMesh(vao: GLMeshVao, instanceCount = 0, indexStart = 0, indexCount = vao._indexBuffer.count - indexStart): void {
+    const total = vao._indexBuffer.count;
+    if (!Number.isInteger(indexStart) || !Number.isInteger(indexCount) || indexStart < 0 || indexCount < 0 || indexStart + indexCount > total) {
+        throw new RangeError(`lite-gl: drawMesh range (start ${indexStart}, count ${indexCount}) must be whole indices within the mesh's ${total}`);
+    }
     const engine = vao._engine;
     if (engine._isLost || engine._disposed || vao._disposed) {
         return;
@@ -651,9 +658,9 @@ export function drawMesh(vao: GLMeshVao, instanceCount = 0): void {
     const gl = engine.gl;
     const type = ib.is32Bits ? UNSIGNED_INT : UNSIGNED_SHORT;
     if (instanceCount > 0) {
-        gl.drawElementsInstanced(TRIANGLES, ib.count, type, 0, instanceCount);
+        gl.drawElementsInstanced(TRIANGLES, indexCount, type, indexStart * (ib.is32Bits ? 4 : 2), instanceCount);
     } else {
-        gl.drawElements(TRIANGLES, ib.count, type, 0);
+        gl.drawElements(TRIANGLES, indexCount, type, indexStart * (ib.is32Bits ? 4 : 2));
     }
 }
 

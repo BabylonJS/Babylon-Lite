@@ -9,8 +9,9 @@
 > this repo:
 >
 > - **Package:** `packages/babylon-lite-gl/` (src, `package.json`, `build.mjs`,
->   `tsconfig.json`). Published as `@babylonjs/lite-gl` — a single public entry
->   (the barrel). The plain-`tsc` build emits trimmed public `.d.ts` (all
+>   `tsconfig.json`). Published as `@babylonjs/lite-gl` — the web entry is the
+>   barrel; a second, **experimental and temporary** `@babylonjs/lite-gl/native` entry (`src/native/`) targets
+>   Babylon Native (see `03-native-lite-gl.md`). The plain-`tsc` build emits trimmed public `.d.ts` (all
 >   `@internal` members stripped via `stripInternal`, mirroring `babylon-lite`).
 > - **Unit tests:** `tests/gl/unit/` (`render-loop.test.ts`, `cache.test.ts`,
 >   `_lite-gl-mock.ts`) — run via the `gl-unit` Vitest project
@@ -62,6 +63,12 @@ Non-goals:
 ---
 
 ## 3. Public API Surface
+
+`getTextureCount(engine: GLEngineContext): number` reports the number of live
+sampled textures registered with the context for upload recovery. It exposes
+diagnostic information without exposing the internal resource registry.
+`getCurrentRenderTarget(engine: GLEngineContext): GLRenderTarget | null` exposes
+the current output handle without exposing or duplicating the binding cache.
 
 The sections below exhaustively describe the core surface. Optional, separately tree-shakable modules add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md` and `02-text.md`.
 
@@ -1202,7 +1209,7 @@ export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGL
   `readRenderTargetPixels` readback are all available. Out of scope: MRT (§10).
 
 Packaging mirrors sprites and html-texture: re-exported from the
-`@babylonjs/lite-gl` barrel (the single public entry). Because the package is
+`@babylonjs/lite-gl` barrel (the web entry). Because the package is
 `sideEffects: false` and the module has no top-level side effects, a bundler drops it
 from any bundle that doesn't use it.
 
@@ -1762,7 +1769,9 @@ Installed only in automatic mode; opted-out engines remain lost permanently.
 
 ## 5. Tree-shaking & packaging
 
-`package.json` (a single public entry — the barrel — built with plain `tsc`):
+`package.json` (the web barrel, the separate Babylon Native entry of
+`03-native-lite-gl.md` and the type-only backend contract of
+`04-backend-family.md`, built with plain `tsc`):
 
 ```json
 {
@@ -1773,13 +1782,17 @@ Installed only in automatic mode; opted-out engines remain lost permanently.
     "types": "./src/index.ts",
     "sideEffects": false,
     "exports": {
-        ".": { "import": "./src/index.ts", "types": "./src/index.ts" }
+        ".": { "import": "./src/index.ts", "types": "./src/index.ts" },
+        "./native": { "import": "./src/native/index.ts", "types": "./src/native/index.ts" },
+        "./family": { "import": "./src/family.ts", "types": "./src/family.ts" }
     },
     "publishConfig": {
         "main": "./dist/index.js",
         "types": "./dist/index.d.ts",
         "exports": {
-            ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+            ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
+            "./native": { "import": "./dist/native/index.js", "types": "./dist/native/index.d.ts" },
+            "./family": { "import": "./dist/family.js", "types": "./dist/family.d.ts" }
         }
     },
     "files": ["dist"],
@@ -1808,6 +1821,11 @@ Tree-shaking guarantees:
   `effect.ts` but stays out of every bundle that doesn't render sprites.
 - No file in `src/` performs work at import time. Top-level constants are limited
   to typed-array literals (the quad geometry) which bundlers treat as pure.
+- The web barrel and `src/native/` share no modules, so a web bundle contains no
+  native code and a native bundle contains no WebGL code.
+- The backend contract (`family.ts`, `web-family.ts`, `native/family.ts`) is
+  types only and emits empty modules, so composing a kit adds no runtime code
+  beyond the functions the composition root references.
 - The loss/restore registries (`_effects`, `_textures`) ARE retained whenever
   `createEffect` or `createRawTexture` is referenced, because the constructors
   push into them. This is unavoidable: it's the cost of context restore. Total
@@ -2162,6 +2180,9 @@ ship coverage in all the layers it touches before merge:
 
 - **unit** tests for the new functions / cache behaviour (mock GL);
 - **build** assertions whenever it adds or changes a public export, plus a per-scene **bundle-size ceiling** (`maxRawKB`) for any new GL lab scene;
+- a **backend family** update whenever it adds, removes or changes an exported
+  function: classify it in `GLOps` or a host-ops interface and update both
+  uber-kits (`04-backend-family.md` §4, `packages/babylon-lite-gl/AGENTS.md`);
 - a **parity** scene that renders the feature through BOTH lite-gl AND a Babylon
   `ThinEngine` reference, then pixel-diffs them (the exact method proven by the
   NeonBrush migration — ref page vs lite page → `gl.readPixels` → `compareImages`);
@@ -2361,12 +2382,15 @@ As-built layout:
 
 ```
 packages/babylon-lite-gl/
-    package.json            scoped @babylonjs/lite-gl, single "." entry (the barrel)
+    AGENTS.md               contributor rule: exports, backend family and uber-kits change together
+    package.json            scoped @babylonjs/lite-gl, "." (the barrel) + "./native" + "./family" entries
     tsconfig.json
     build.mjs               plain tsc emit (stripInternal) + writes dist/package.json
     README.md
     src/
         index.ts            re-exports (core API + blend)
+        family.ts           type-only backend contract: GLFamily, GLOps, GLKit (04-backend-family.md)
+        web-family.ts       WebGLFamily + WebGLHostOps
         context.ts          createGLEngine/disposeGLEngine/resizeGLEngine, lost/restored handlers, registries
         framebuffer-validation.ts optional debug validator installed by setFramebufferValidation
         state.ts            GLState types
@@ -2380,9 +2404,10 @@ packages/babylon-lite-gl/
         sprites.ts          GLSprite + createSpriteRenderer/renderSprites/dispose (own VAO/VBO/IBO)
         render-target.ts    createRenderTarget/bindRenderTarget/resizeRenderTarget/disposeRenderTarget (FBO + color tex + optional depth)
         effect-renderer.ts  ensureQuad, setViewport, applyEffectWrapper, drawEffect
+        native/             Babylon Native backend for @babylonjs/lite-gl/native (03-native-lite-gl.md)
 
 tests/gl/                   four-layer harness (mirrors tests/lite/), tsconfig.json
-    unit/                   vitest mock-GL — _lite-gl-mock.ts, {blend,cache,html-texture,render-loop,sprites,render-target}.test.ts
+    unit/                   vitest mock-GL — _lite-gl-mock.ts, {blend,cache,html-texture,render-loop,sprites,render-target}.test.ts, gl-family-{conformance,consumer}.test.ts
     build/                  public-api.test.ts (built dist + trimmed .d.ts)
     parity/                 Playwright pixel-diff vs Babylon ThinEngine — compare-utils.ts, gl-parity.spec.ts
     perf/                   gl-perf-raf.spec.ts (frame cost) + gl-perf-regression.spec.ts (vs Babylon ref)
@@ -2430,3 +2455,31 @@ estimate to account for the loss/restore protocol added in §4.7).
 Estimated bundle delta for NeonBrush (minified + gzipped, what the page actually
 downloads): **~120–150 KB → ~11–14 KB** (≈ 10× smaller — see §12.4 for the
 acceptance criterion).
+
+## Vector-array uniforms, target presentation and mesh subranges
+
+`setEffectFloatArray2(effect, name, values)` and
+`setEffectFloatArray3(effect, name, values)` accept `number[]` or
+`Float32Array` and upload vec2 or vec3 arrays through the effect's resolved
+uniform location. Like the existing scalar and vec4 array setters, they do not
+bind a different program, and ignore unavailable effects,
+lost contexts, and absent uniforms.
+
+Like the other array setters, they are not value-cached and upload every call.
+
+`presentRenderTarget(target)` copies a ready target to the drawing
+buffer with nearest filtering. It leaves the default framebuffer bound and
+the framebuffer cache coherent, even after `wipeGLStateCache`; it does not clear or modify the retained
+offscreen image. Lost contexts and disposed or unavailable resources are
+no-ops. The destination dimensions are the physical canvas size, and an active
+scissor rectangle does not clip the copy; the scissor state is restored
+afterward. WebGL2 cannot copy framebuffers into a multisampled drawing buffer,
+so presentation throws for an engine created with `antialias: true`. The
+drawing buffer's sample count is queried once, on first presentation.
+
+`drawMesh(vao, instanceCount = 0, indexStart = 0,
+indexCount = vao's index count - indexStart)` supports subranges of retained
+geometry. Offsets are in indices, not bytes. Omitting the count draws from
+`indexStart` to the end of the mesh, so omitting the range draws the complete
+mesh. A range that is not whole indices within the mesh throws a `RangeError`
+before any binding or draw call. Attribute and index bindings remain VAO-owned across subrange draws.

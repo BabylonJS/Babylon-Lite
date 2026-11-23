@@ -238,6 +238,9 @@ export interface GLEngineContext {
      * Configuration, not cached GL state: retained across cache wipes/restores.
      * @internal */
     _validateFramebuffer?: (gl: WebGL2RenderingContext, stencil: boolean) => void;
+    /** Sample count of the canvas drawing buffer, queried lazily by `presentRenderTarget`.
+     * @internal */
+    _canvasSamples?: number;
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
@@ -455,6 +458,16 @@ export function getRenderWidth(engine: GLEngineContext): number {
 /** Drawing-buffer height in physical pixels (`canvas.height`). */
 export function getRenderHeight(engine: GLEngineContext): number {
     return engine.canvas.height;
+}
+
+/** Number of live sampled textures managed by the context. */
+export function getTextureCount(engine: GLEngineContext): number {
+    return engine._textures.size;
+}
+
+/** Current drawing target, or null for the canvas framebuffer. */
+export function getCurrentRenderTarget(engine: GLEngineContext): GLRenderTarget | null {
+    return engine._currentRenderTarget;
 }
 
 /** Current hardware-scaling factor — drawing-buffer = clientSize × dpr / level. */

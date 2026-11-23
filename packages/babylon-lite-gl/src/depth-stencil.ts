@@ -22,6 +22,7 @@
  * must not import this module.
  */
 import type { GLEngineContext } from "./context.js";
+import type { GLClearOptions } from "./family.js";
 import type { GLRenderTarget } from "./render-target.js";
 import { applyGLStates } from "./apply-states.js";
 import {
@@ -215,16 +216,6 @@ function enableSeparateStencil(s: GLEngineContext["_state"]): void {
     resetStencilBack(rs);
     s._setStencilBack = mirrorSharedStencilOpsToBack;
     s._flushStencil = flushStencilSeparate;
-}
-
-/** Options for {@link clearEngine}. */
-export interface GLClearOptions {
-    /** When set, clears the color buffer to this RGBA color (alpha default 1). */
-    color?: { r: number; g: number; b: number; a?: number };
-    /** Clear the depth buffer (respects the current depth write mask). */
-    depth?: boolean;
-    /** Clear the stencil buffer (respects the current stencil write mask). */
-    stencil?: boolean;
 }
 
 /**

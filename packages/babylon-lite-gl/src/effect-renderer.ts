@@ -1,5 +1,6 @@
 import type { GLEngineContext } from "./context.js";
 import { createEffect, disposeEffect, type GLEffect, isEffectReady, useEffect } from "./effect.js";
+import type { GLViewport } from "./family.js";
 import { applyGLStates } from "./apply-states.js";
 
 /** Built-in fullscreen-quad vertex shader, used when `GLEffectWrapperOptions`
@@ -80,18 +81,6 @@ export function disposeEffectWrapper(wrapper: GLEffectWrapper): void {
     }
     wrapper._disposed = true;
     disposeEffect(wrapper.effect);
-}
-
-/** Pixel-space viewport rectangle passed to `setViewport`. */
-export interface GLViewport {
-    /** Lower-left X origin in physical pixels. */
-    x: number;
-    /** Lower-left Y origin in physical pixels. */
-    y: number;
-    /** Width in physical pixels. */
-    w: number;
-    /** Height in physical pixels. */
-    h: number;
 }
 
 /** Cached `gl.viewport`. Defaults to the full canvas in pixel coordinates. */
