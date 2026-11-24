@@ -25,7 +25,7 @@ import { F32 } from "../engine/typed-arrays.js";
 import { BU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
-import { applyGsFragments } from "../mesh/GaussianSplatting/gaussian-splatting-pipeline.js";
+import { applyGsFragments } from "../mesh/GaussianSplatting/gs-apply-fragments.js";
 import { gsGpuPickingFragment, encodeIdToColor } from "../mesh/GaussianSplatting/gs-gpu-picking-fragment.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import { getRenderTargetSize } from "../engine/engine.js";

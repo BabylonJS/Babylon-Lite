@@ -849,8 +849,8 @@ export {
 } from "./animation/easing.js";
 export type { AnimationEasing } from "./animation/easing.js";
 // Opt-in bone control for skinned models (near-zero bundle cost unless enableBoneControl is called).
+export { enableBoneControl } from "./skeleton/enable-bone-control.js";
 export {
-    enableBoneControl,
     getBoneByName,
     setBonePosition,
     setBoneRotationQuaternion,

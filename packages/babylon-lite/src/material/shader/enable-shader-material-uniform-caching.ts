@@ -3,7 +3,7 @@ import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewPro
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderMaterial, ShaderUniformSlot } from "./shader-material.js";
-import { _isShaderSystemUniform } from "./shader-material.js";
+import { _isShaderSystemUniform } from "./shader-system-dependencies.js";
 import { _installShaderUniformWriters, _shaderWorldMatrix, type ShaderCustomUniformWriter, type ShaderSystemUniformWriter } from "./shader-renderable.js";
 import { WORLD, VIEW, PROJECTION, VIEW_PROJECTION, shaderSystemDependencies } from "./shader-system-dependencies.js";
 

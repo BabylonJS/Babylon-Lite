@@ -16,7 +16,7 @@
 
 import type { Vec3 } from "../math/types.js";
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
-import { PhysicsMotionType } from "./havok.js";
+import { PhysicsMotionType } from "./physics-motion-types.js";
 
 /**
  * A simulation region: a native Havok world whose bodies are simulated relative to a fixed

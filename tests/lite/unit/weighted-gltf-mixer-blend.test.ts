@@ -16,7 +16,7 @@ import { enableAnimationBlending, setAnimationAdditive } from "../../../packages
 import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packages/babylon-lite/src/animation/animation-group-mask";
 import { INTERP_LINEAR, PATH_ROTATION, PATH_SCALE } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationClip, NodeRest, SkeletonBinding, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
-import { enableBoneControl } from "../../../packages/babylon-lite/src/skeleton/bone-control";
+import { enableBoneControl } from "../../../packages/babylon-lite/src/skeleton/enable-bone-control";
 import type { BoneOverride } from "../../../packages/babylon-lite/src/skeleton/bone-control";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 

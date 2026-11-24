@@ -247,8 +247,12 @@ clip does not animate).
 
 It is **opt-in and near-zero bundle cost when unused**: the always-fetched skeleton /
 animation chunk references it only through two null hooks (`bone-control-hooks.ts`).
-Calling `enableBoneControl()` installs the implementation; until then the whole module
-(handle building, eager bake, override application) tree-shakes away.
+Calling `enableBoneControl()` (`enable-bone-control.ts`) installs the implementation; until then
+the whole module (handle building, eager bake, override application) tree-shakes away.
+`bone-control.ts` never imports the hooks: `bone-control-hooks.ts` lazy-loads it for
+`enableBoneControlForSkinnedAssets()`, and a lazy module that statically reaches its loader
+makes Rolldown (Vite 8) keep it in apps that never use it
+(`tests/lite/build/lazy-import-cycles.test.ts`).
 
 ```typescript
 // Public API (index.ts)
@@ -355,5 +359,6 @@ The internal `BoneOverride` map type is kept off the public API surface: public 
 | `update-skeleton-bone-matrices.ts` | High-level programmatic bone-matrix update that keeps the CPU mirror and GPU texture synchronized                               |
 | `skeleton-updater.ts`              | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload             |
 | `skeleton-pose.ts`                 | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
-| `bone-control.ts`                  | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier              |
+| `bone-control.ts`                  | Opt-in bone-control API: `getBoneByName`, `setBone*`, eager bake + per-frame override applier                                   |
+| `enable-bone-control.ts`           | `enableBoneControl()`: installs the bone-control implementation into the hooks                                                  |
 | `bone-control-hooks.ts`            | Two null hooks (`_boneBuilder`, `_boneApplier`) so the always-fetched chunk references bone control without bundling it         |

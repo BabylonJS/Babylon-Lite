@@ -14,7 +14,8 @@ import type { AnimationGltfMixer, AnimationGroup } from "../../../packages/babyl
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
 import { INTERP_LINEAR, PATH_SCALE } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationClip, NodeRest, SkeletonBinding, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
-import { enableBoneControl, setBoneScaling, setBoneVisible } from "../../../packages/babylon-lite/src/skeleton/bone-control";
+import { setBoneScaling, setBoneVisible } from "../../../packages/babylon-lite/src/skeleton/bone-control";
+import { enableBoneControl } from "../../../packages/babylon-lite/src/skeleton/enable-bone-control";
 import type { Bone, BoneOverride, Skeleton } from "../../../packages/babylon-lite/src/skeleton/bone-control";
 import { createAnimationController } from "../../../packages/babylon-lite/src/skeleton/skeleton-updater";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";

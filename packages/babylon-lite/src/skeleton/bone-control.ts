@@ -11,6 +11,9 @@
  *
  *  Opt-in & near-zero-cost when unused: the always-fetched skeleton/animation chunk
  *  references this module only through the two null hooks in `bone-control-hooks.ts`.
+ *  This module never imports those hooks: `enable-bone-control.ts` (static opt-in) and the
+ *  hooks' own lazy skin-gated path install them, so the lazy edge stays acyclic
+ *  (tests/lite/build/lazy-import-cycles.test.ts).
  *  Until `enableBoneControl()` is imported + called, the tree-shaker folds this whole
  *  module (handle building, skin extraction, eager bake, override application) away.
  *
@@ -26,7 +29,6 @@ import { invertMat4 } from "../math/invert-mat4.js";
 import { createIdentityMat4 } from "../math/create-identity-mat4.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { TRS_STRIDE, T_OFF, R_OFF, S_OFF, computeTopoOrder, resetTRS, computeNodeWorldMatrices, writeBoneTextures } from "./skeleton-pose.js";
-import { _installBoneControl } from "./bone-control-hooks.js";
 import { _rightHanded } from "#coordinate-system";
 
 /** @internal Per-bone local-transform override. `mask` bits: 1 = translation,
@@ -223,7 +225,8 @@ export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void {
  *     working buffer after the rest reset, before channel eval (so animation wins).
  *   • `hiddenOnly = true` — collapse hidden bones to zero scale after channel eval, so
  *     `setBoneVisible` survives clips that animate the bone's scale. */
-function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number, hiddenOnly?: boolean): void {
+/** @internal */
+export function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number, hiddenOnly?: boolean): void {
     for (const [ni, o] of overrides) {
         if (ni < 0 || ni >= numNodes) {
             continue;
@@ -367,7 +370,8 @@ function extractSkinGroups(json: any, binChunk: DataView, meshes: Mesh[], parent
 /** Builder hook: construct a public `Skeleton` per glTF skin, each with an eager
  *  bake closure that recomputes the node hierarchy from rest + overrides and
  *  uploads that skin's bone textures (so overrides apply even with no animation). */
-async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<number, BoneOverride>): Promise<{ skeletons?: Skeleton[] }> {
+/** @internal */
+export async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<number, BoneOverride>): Promise<{ skeletons?: Skeleton[] }> {
     const { _json: json, _binChunk: binChunk, _engine: engine, _parentMap: parentMap, _worldMatrixCache: worldMatrixCache } = ctx;
 
     const groups = extractSkinGroups(json, binChunk, meshes, parentMap, worldMatrixCache);
@@ -430,27 +434,4 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     });
 
     return { skeletons };
-}
-
-/**
- * Enable bone control for skinned glTF models. Call once, before loading the
- * assets you want to control. After loading, read `container.skeletons` and drive
- * bones with {@link getBoneByName} + the `setBone*` functions.
- *
- * ```ts
- * enableBoneControl(); // ← opt-in, before loadGltf
- * const character = await loadGltf(engine, "character.glb");
- * addToScene(scene, character);
- * const skel = character.skeletons![0];
- * const head = getBoneByName(skel, "Head");
- * if (head) setBoneVisible(skel, head, false); // hide the head + everything under it
- * ```
- *
- * Process-global and idempotent. Skinned scenes that never call this are
- * unaffected (near byte-identical to a build without bone control).
- *
- * @public
- */
-export function enableBoneControl(): void {
-    _installBoneControl(buildSkeletons, applyOverridesToTRS);
 }

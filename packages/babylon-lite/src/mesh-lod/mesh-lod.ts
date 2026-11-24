@@ -17,6 +17,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { MeshLoDAssetRuntime, MeshLoDEffectiveSettings } from "./mesh-lod-runtime.js";
 import type * as MeshLoDRuntimeModule from "./mesh-lod-runtime.js";
+import type * as MeshLoDSceneModule from "./mesh-lod-scene.js";
 import type { MeshLoDError } from "./mesh-lod-errors.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import { initSceneNodeTransform } from "../scene/scene-node.js";
@@ -248,18 +249,21 @@ export function _resolveMeshLoDLoadOptions(options?: MeshLoDLoadOptions): MeshLo
 
 // ─── Lazy runtime plumbing ───────────────────────────────────────────
 
-/** Cached runtime module, populated on the first {@link loadMeshLoD}. Nullable
- *  lazy cache only — no module-level collection or eager import. */
+/** Cached runtime and scene-registry modules, populated on the first {@link loadMeshLoD}.
+ *  Nullable lazy caches only — no module-level collection or eager import. The scene
+ *  registry is loaded here rather than imported by the runtime so the PBR renderable
+ *  it lazy-loads can use the runtime without reaching back into its loader. */
 let _runtimeModule: typeof MeshLoDRuntimeModule | null = null;
+let _sceneModule: typeof MeshLoDSceneModule | null = null;
 
-function requireRuntime(): typeof MeshLoDRuntimeModule {
-    const runtime = _runtimeModule;
-    if (!runtime) {
+function requireScene(): typeof MeshLoDSceneModule {
+    const scene = _sceneModule;
+    if (!scene) {
         // Unreachable in correct usage: a live asset/instance implies loadMeshLoD
         // already resolved and populated the cache.
         throw createMeshLoDError("MLOD_DISPOSED", "MeshLoD runtime is not loaded; call loadMeshLoD before registering instances");
     }
-    return runtime;
+    return scene;
 }
 
 // ─── Public functions ────────────────────────────────────────────────
@@ -271,7 +275,9 @@ function requireRuntime(): typeof MeshLoDRuntimeModule {
 export async function loadMeshLoD(engine: EngineContext, source: MeshLoDSource, options?: MeshLoDLoadOptions): Promise<MeshLoDAsset> {
     const settings = _resolveMeshLoDLoadOptions(options);
     const selectionMode = resolveSelectionMode(options?.selectionMode);
-    const runtime = (_runtimeModule ??= await import("./mesh-lod-runtime.js"));
+    const [runtime, scene] = await Promise.all([_runtimeModule ?? import("./mesh-lod-runtime.js"), _sceneModule ?? import("./mesh-lod-scene.js")]);
+    _runtimeModule = runtime;
+    _sceneModule = scene;
     return runtime._loadMeshLoD(engine, source, settings, selectionMode, options?.request, options?.signal);
 }
 
@@ -321,13 +327,13 @@ export function createMeshLoDInstance(asset: MeshLoDAsset, material: PbrMaterial
  *  does not write a scene reference into the instance. The scene must use the
  *  asset's loading engine; a different engine throws `MLOD_INVALID_OPTION`. */
 export function addMeshLoDToScene(scene: SceneContext, instance: MeshLoDInstance): void {
-    requireRuntime()._addMeshLoDToScene(scene, instance);
+    requireScene().addMeshLoDInstanceToScene(scene, instance);
 }
 
 /** Remove an instance from a scene. Idempotent; the instance stops being
  *  selected or submitted immediately. */
 export function removeMeshLoDFromScene(scene: SceneContext, instance: MeshLoDInstance): void {
-    requireRuntime()._removeMeshLoDFromScene(scene, instance);
+    requireScene().removeMeshLoDInstanceFromScene(scene, instance);
 }
 
 /** Set the target screen-space error (pixels) for an asset. */

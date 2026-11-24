@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance, disposeMeshLoDAsset, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
-import type { MeshLoDCpuInstanceHistory } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type { MeshLoDCpuInstanceHistory } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { selectMeshLoDCpu } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
 import {

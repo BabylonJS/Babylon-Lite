@@ -11,7 +11,7 @@ import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipel
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
-import { ALPHA_CUTOFF, CAMERA_POSITION, SCREEN_SIZE, shaderSystemDependency } from "./shader-system-dependencies.js";
+import { _isShaderSystemUniform, ALPHA_CUTOFF, CAMERA_POSITION, SCREEN_SIZE, shaderSystemDependency } from "./shader-system-dependencies.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
  *  for \>4 bones/vertex) are the skinning attributes — bound from the mesh's skeleton/VAT buffers,
@@ -243,11 +243,6 @@ export function _assertShaderIdentifier(kind: string, name: string): void {
 
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
     return !!_attributeInfo(name);
-}
-
-/** @internal */
-export function _isShaderSystemUniform(name: string): name is ShaderSystemUniformName {
-    return shaderSystemDependency(name) !== 0;
 }
 
 function systemUniformType(name: ShaderSystemUniformName): ShaderUniformType {
