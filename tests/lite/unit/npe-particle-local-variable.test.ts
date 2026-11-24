@@ -41,6 +41,7 @@ async function buildLocalGetter(state: NpeBuildState, blockId: number, scope: un
         engine: {} as EngineContext,
         input: () => draw,
         isConnected: () => true,
+        isInt: () => false,
         setOutput: (_blockId, _name, getter) => {
             output = getter;
         },
@@ -124,6 +125,7 @@ describe("ParticleLocalVariableBlock", () => {
             engine: {} as EngineContext,
             input: () => () => ++evaluations,
             isConnected: () => true,
+            isInt: () => false,
             setOutput: (_blockId, _name, getter) => {
                 output = getter;
             },

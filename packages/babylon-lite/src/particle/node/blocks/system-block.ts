@@ -44,7 +44,7 @@ export const npeBlock: NpeBlockEvaluator = {
                     // own lazy mipmap import, is tolerated below with image failures.
                     const { loadTexture2D } = await import("../../../texture/texture-2d.js");
                     try {
-                        // Block invertY defaults to true; Lite's opposite billboard V convention maps false to an upload flip.
+                        // Lite's billboard V runs opposite to Babylon.js, so a block invertY of false maps to an upload flip.
                         system.texture = await loadTexture2D(ctx.engine, texture.url, { invertY: !texture.invertY });
                     } catch {
                         // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.

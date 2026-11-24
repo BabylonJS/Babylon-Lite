@@ -40,6 +40,7 @@ describe("NPE particle gradients", () => {
             setOutput(_blockId: number, _name: string, getter: NpeGetter): void {
                 output = getter;
             },
+            isInt: () => false,
         } as unknown as NpeBuildContext;
 
         particleGradientBlock.build(block, ctx);

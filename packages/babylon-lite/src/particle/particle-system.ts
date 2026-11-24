@@ -21,14 +21,17 @@ export interface ParticleEmitterInverse {
 
 /**
  * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
- * Holds the render cell dimensions, the per-particle cell-index column read by the billboard, and the
- * per-particle update step. The feature's columns and logic live in `sprite-columns.ts` + the sprite
- * blocks; a non-sprite system leaves this null and imports none of that.
+ * Holds the render cell dimensions, the configured start/end cells (read by the sprite-cell contextual
+ * sources), the per-particle cell-index column read by the billboard, and the per-particle update step.
+ * The feature's columns and logic live in `sprite-columns.ts` + the sprite blocks; a non-sprite system
+ * leaves this null and imports none of that.
  */
 export interface ParticleSpriteHandle {
     readonly cellWidth: number;
     readonly cellHeight: number;
-    readonly cellIndex: Uint16Array;
+    readonly startCellID: number;
+    readonly endCellID: number;
+    readonly cellIndex: Int32Array;
     readonly update: (i: number) => void;
 }
 
@@ -79,6 +82,12 @@ export interface ParticleSystem {
     _prepareFrame?: () => void;
     /** @internal Sprite-sheet feature handle, present only for sprite systems. */
     _spriteSheet?: ParticleSpriteHandle;
+    /**
+     * @internal Birth reset run on every spawned slot before the creation slots, like Babylon.js `Particle._reset`, so
+     * replacing a public creation slot cannot skip it. A spawned slot keeps the previous particle's columns, so the one
+     * feature owning state that Babylon.js resets there installs it; systems without such state leave it absent.
+     */
+    _resetParticle?: ParticleStep;
     /** @internal Optional feature writer installed only when a graph reads ColorDead. */
     _writeColorDead?: (i: number, color: Color4) => void;
     /** @internal Mesh-normal emitters leave Babylon.js's initial direction at its zero default. */
@@ -209,6 +218,7 @@ function createNew(system: ParticleSystem, count: number): void {
         if (i < 0) {
             break;
         }
+        system._resetParticle?.(i);
         // Fixed Babylon.js creation-slot order (not graph order) — this is what keeps the per-particle
         // `Math.random()` sequence aligned with Babylon.js.
         if (system.createLifeTime) {

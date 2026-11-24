@@ -266,6 +266,10 @@ export interface SceneContext extends RenderingContext {
     // ─── Dispose infrastructure ────────────────────────────────
     /** @internal Shared cleanup callbacks (scene UBOs, lights UBOs, etc.). Registered by builders. */
     _disposables: (() => void)[];
+    /** @internal Non-throwing release that `disposeScene` runs before any disposer, so a throwing disposer cannot
+     *  skip it. Kept apart from `_disposables` so installing it never moves a rebuild's saved disposer boundary.
+     *  Installers chain onto the previous callback. */
+    _earlyDispose?: () => void;
     /** @internal Per-mesh cleanup callbacks (mesh UBOs, bind groups). For material swap + dispose. */
     _meshDisposables: Map<Mesh, (() => void)[]>;
     /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
@@ -616,6 +620,7 @@ export function disposeScene(scene: SceneContext): void {
         return;
     }
     ctx._z = true;
+    ctx._earlyDispose?.();
     const lateCleanup = (_lateCleanup ??= new WeakMap());
     lateCleanup.set(ctx, () => 1);
     unregisterRenderingContext(ctx.surface, ctx);

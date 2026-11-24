@@ -82,6 +82,7 @@ const REQUIRED_BUNDLE_SCENES_BY_TEST: Readonly<Record<string, readonly string[]>
         "scene301",
         "scene302",
         "scene305",
+        "scene359",
     ],
 };
 

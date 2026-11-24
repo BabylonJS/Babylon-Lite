@@ -59,6 +59,6 @@ export const npeBlock: NpeBlockEvaluator = {
             return lerpGetters(left, right, i, t, v2, v3, c4);
         };
 
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, ctx.isInt(block, "left"));
     },
 };

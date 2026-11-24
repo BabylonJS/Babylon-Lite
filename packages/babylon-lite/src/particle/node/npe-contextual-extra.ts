@@ -8,6 +8,9 @@ const CTX_DIRECTION = 0x0002;
 const CTX_SCALE = 0x0007;
 const CTX_AGE_GRADIENT = 0x0008;
 const CTX_ANGLE = 0x0009;
+const CTX_SPRITE_CELL_INDEX = 0x0010;
+const CTX_SPRITE_CELL_START = 0x0011;
+const CTX_SPRITE_CELL_END = 0x0012;
 const CTX_INITIAL_COLOR = 0x0013;
 const CTX_COLOR_DEAD = 0x0014;
 const CTX_INITIAL_DIRECTION = 0x0015;
@@ -83,6 +86,20 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
         }
         case CTX_COLOR_STEP:
             return color4Getter(buffer.colorStepR, buffer.colorStepG, buffer.colorStepB, buffer.colorStepA);
+        case CTX_SPRITE_CELL_INDEX: {
+            const cellIndex = column(buffer, "sprite.cellIndex", Int32Array);
+            // Babylon.js resets the cell to the sheet start, 0 without a sheet, before any creation getter. The sheet owns
+            // that reset and replaces this zero fallback when it builds later, so a system keeps one reset however many readers.
+            system._resetParticle ??= (i) => {
+                cellIndex[i] = 0;
+            };
+            return (i) => cellIndex[i]!;
+        }
+        // The sprite sheet may build after this input, so read its configured range lazily; Babylon.js defaults both to 0.
+        case CTX_SPRITE_CELL_START:
+            return () => system._spriteSheet?.startCellID ?? 0;
+        case CTX_SPRITE_CELL_END:
+            return () => system._spriteSheet?.endCellID ?? 0;
         case CTX_INITIAL_DIRECTION: {
             if (system._suppressInitialDirectionCapture) {
                 const zero: Vec3 = { x: 0, y: 0, z: 0 };

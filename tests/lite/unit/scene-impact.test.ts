@@ -201,6 +201,7 @@ describe("affected scene selection", () => {
             "scene301",
             "scene302",
             "scene305",
+            "scene359",
         ]);
     });
 });
