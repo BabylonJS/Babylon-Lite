@@ -83,8 +83,9 @@ export interface ParticleSystem {
     /** @internal Sprite-sheet feature handle, present only for sprite systems. */
     _spriteSheet?: ParticleSpriteHandle;
     /**
-     * @internal Birth reset run before any creation getter, like Babylon.js `Particle._reset`. Installed only by
-     * features whose per-particle state Babylon.js resets there, because a spawned slot keeps the previous particle's columns.
+     * @internal Birth reset run on every spawned slot before the creation slots, like Babylon.js `Particle._reset`, so
+     * replacing a public creation slot cannot skip it. A spawned slot keeps the previous particle's columns, so the one
+     * feature owning state that Babylon.js resets there installs it; systems without such state leave it absent.
      */
     _resetParticle?: ParticleStep;
     /** @internal Optional feature writer installed only when a graph reads ColorDead. */
@@ -217,6 +218,7 @@ function createNew(system: ParticleSystem, count: number): void {
         if (i < 0) {
             break;
         }
+        system._resetParticle?.(i);
         // Fixed Babylon.js creation-slot order (not graph order) — this is what keeps the per-particle
         // `Math.random()` sequence aligned with Babylon.js.
         if (system.createLifeTime) {

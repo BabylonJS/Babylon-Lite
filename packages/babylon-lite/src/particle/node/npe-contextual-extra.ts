@@ -88,12 +88,10 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
             return color4Getter(buffer.colorStepR, buffer.colorStepG, buffer.colorStepB, buffer.colorStepA);
         case CTX_SPRITE_CELL_INDEX: {
             const cellIndex = column(buffer, "sprite.cellIndex", Int32Array);
-            // Babylon.js resets the cell to the sheet start (0 without a sheet) before any creation getter. The sheet
-            // may build after this source, so the reset reads the start lazily and the result is independent of build order.
-            const previousReset = system._resetParticle;
-            system._resetParticle = (i) => {
-                previousReset?.(i);
-                cellIndex[i] = system._spriteSheet?.startCellID ?? 0;
+            // Babylon.js resets the cell to the sheet start, 0 without a sheet, before any creation getter. The sheet owns
+            // that reset and replaces this zero fallback when it builds later, so a system keeps one reset however many readers.
+            system._resetParticle ??= (i) => {
+                cellIndex[i] = 0;
             };
             return (i) => cellIndex[i]!;
         }

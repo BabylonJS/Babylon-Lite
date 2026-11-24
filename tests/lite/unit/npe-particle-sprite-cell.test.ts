@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
@@ -69,6 +69,61 @@ describe("NPE sprite-cell values", () => {
         // The particle dies at 0.75 and a new one spawns into the same slot, which still holds the floored cell.
         animateParticleSystem(system, 1);
         expect([buffer.alive, buffer.age[0], buffer.size[0], cellIndex[0]]).toEqual([1, 0, start, start]);
+    });
+
+    it.each([
+        {
+            name: "fixed",
+            randomStartCell: false,
+            frames: [
+                [0, 2, 0],
+                [0.5, 4, 0],
+                [0, 2, 0],
+                [0.5, 4, 0],
+            ],
+        },
+        {
+            name: "random",
+            randomStartCell: true,
+            frames: [
+                [0, 2, 0],
+                [0.5, 5, 1],
+                [0, 2, 1],
+                [0.5, 4, 2],
+            ],
+        },
+    ])("resets $name start cells at spawn when createLifeTime is replaced", async ({ randomStartCell, frames }) => {
+        const random = vi.spyOn(Math, "random").mockReturnValueOnce(0.2).mockReturnValueOnce(0);
+        try {
+            const sheet = { ...setupSheet(3, 1), loop: false, randomStartCell };
+            const system = await build([create, sheet, { customType: "BABYLON.BasicSpriteUpdateBlock", id: 4, inputs: [particle(3)] }], 4, [], 1);
+            const buffer = system.buffer;
+            // A caller-owned lifetime slot that knows nothing about the birth reset.
+            system.createLifeTime = (i) => {
+                buffer.lifeTime[i] = 0.75;
+            };
+            system.emitRate = 2;
+            system.updateSpeed = 0.5;
+            const cellIndex = column(buffer, "sprite.cellIndex", Int32Array);
+            startParticleSystem(system);
+
+            // Each frame records [age, cell, random draws]. Frame 3 respawns into the slot whose particle died on the non-looping end cell, 6.
+            const observed = frames.map(() => {
+                animateParticleSystem(system, 1);
+                return [buffer.age[0], cellIndex[0], random.mock.calls.length];
+            });
+            expect(observed).toEqual(frames);
+        } finally {
+            random.mockRestore();
+        }
+    });
+
+    it("keeps one cell reset per system however many readers", () => {
+        const system = createParticleSystem(1);
+        makeExtraContextualGetter(system.buffer, system, CTX_SPRITE_CELL_INDEX);
+        const fallback = system._resetParticle;
+        makeExtraContextualGetter(system.buffer, system, CTX_SPRITE_CELL_INDEX);
+        expect(system._resetParticle).toBe(fallback);
     });
 
     it("keeps signed cell intermediates between chained updates like Babylon.js", async () => {
