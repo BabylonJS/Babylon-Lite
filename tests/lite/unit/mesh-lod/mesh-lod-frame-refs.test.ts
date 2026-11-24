@@ -12,9 +12,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { finishMeshLoDFrame, queueMeshLoDFrame, stepMeshLoDStreaming } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
-import { addMeshLoDInstanceToScene, driveMeshLoDStreaming, selectMeshLoDBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { driveMeshLoDStreaming, selectMeshLoDBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
 import { addMeshLoDPageBenefit } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-math.js";
-import type { MeshLoDInstanceSelection, MeshLoDSceneBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type { MeshLoDSceneBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type { MeshLoDInstanceSelection } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import {
     CONTROL_COUNT_WORD,

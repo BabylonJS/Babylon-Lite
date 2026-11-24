@@ -1,5 +1,5 @@
 /**
- * Scene 359 — glTF export: negative world matrix
+ * Scene 364 — glTF export: negative world matrix
  *
  * Babylon.js visualization test: "GLTF Serializer with Negative World Matrix (left handed, twice)", run as `?iterations=2`.
  * Playground: #KX53VK#88. Reference image: glTFSerializerNegativeWorldMatrix.png (errorRatio 1.1), shared by all variants.
@@ -15,7 +15,7 @@ import { test } from "../parity-fixtures";
 import { getSceneConfig } from "../compare-utils";
 import { assertExportParity } from "../export-gltf-parity";
 
-test.skip(!!getSceneConfig(359).skipParity, "Scene 359 skipped via skipParity in scene-config.json");
-test("Scene 359 — GLTF Serializer with Negative World Matrix (left handed, twice) matches Babylon.js", async ({ page }, testInfo) => {
-    await assertExportParity(page, testInfo, 359, "?iterations=2");
+test.skip(!!getSceneConfig(364).skipParity, "Scene 364 skipped via skipParity in scene-config.json");
+test("Scene 364 — GLTF Serializer with Negative World Matrix (left handed, twice) matches Babylon.js", async ({ page }, testInfo) => {
+    await assertExportParity(page, testInfo, 364, "?iterations=2");
 });

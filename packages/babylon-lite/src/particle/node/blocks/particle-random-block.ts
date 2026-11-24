@@ -68,6 +68,7 @@ export const npeBlock: NpeBlockEvaluator = {
     async build(block, ctx) {
         const minGetter = ctx.input(block, "min", () => 0);
         const maxGetter = ctx.input(block, "max", () => 1);
+        const isInt = ctx.isInt(block, "min");
         const lockMode = typeof block.serialized.lockMode === "number" ? block.serialized.lockMode : LOCK_PER_PARTICLE;
 
         const buffer = ctx.state.buffer!;
@@ -80,7 +81,8 @@ export const npeBlock: NpeBlockEvaluator = {
                 "output",
                 valueType === "number"
                     ? (await import("./particle-random-once.js")).createOnceRandomGetter(buffer, block.id, draw as ScalarGetter)
-                    : (await import("./particle-random-once-typed.js")).createTypedOnceRandomGetter(buffer, block.id, draw, valueType)
+                    : (await import("./particle-random-once-typed.js")).createTypedOnceRandomGetter(buffer, block.id, draw, valueType),
+                isInt
             );
             return;
         }
@@ -103,6 +105,6 @@ export const npeBlock: NpeBlockEvaluator = {
             return stored;
         };
 
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, isInt);
     },
 };

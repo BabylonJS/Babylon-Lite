@@ -13,6 +13,8 @@ const SYS_TIME = 1;
 const SYS_DELTA = 2;
 const SYS_EMITTER = 3;
 
+const CTX_SPRITE_CELL_INDEX = 0x0010;
+const CTX_SPRITE_CELL_END = 0x0012;
 const CTX_LOCAL_POSITION_UPDATED = 0x0018;
 
 function parseConstant(type: number, value: unknown): NpeValue {
@@ -34,7 +36,8 @@ function parseConstant(type: number, value: unknown): NpeValue {
 
 /**
  * `ParticleInputBlock` — a constant, a contextual source, or a system source. Common contextual sources build
- * inline; the remaining sources lazy-load their getter factories.
+ * inline; the remaining sources lazy-load their getter factories. Like Babylon.js, `Int` typed constants and the
+ * sprite-cell contextual sources publish `Int` typing; system sources are never `Int`.
  */
 export const npeBlock: NpeBlockEvaluator = {
     async build(block, ctx) {
@@ -42,8 +45,10 @@ export const npeBlock: NpeBlockEvaluator = {
         const systemSource = typeof block.serialized.systemSource === "number" ? block.serialized.systemSource : 0;
 
         let getter: NpeGetter;
+        let isInt = false;
         if (contextual !== 0) {
             const state = ctx.state;
+            isInt = contextual >= CTX_SPRITE_CELL_INDEX && contextual <= CTX_SPRITE_CELL_END;
             getter =
                 makeContextualGetter(state.buffer!, state.system!, contextual) ??
                 (contextual === CTX_LOCAL_POSITION_UPDATED
@@ -67,10 +72,11 @@ export const npeBlock: NpeBlockEvaluator = {
             }
         } else {
             const type = typeof block.serialized.type === "number" ? block.serialized.type : TYPE_FLOAT;
+            isInt = type === TYPE_INT;
             const constant = parseConstant(type, block.serialized.value);
             getter = () => constant;
         }
 
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, isInt);
     },
 };

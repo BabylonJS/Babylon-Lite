@@ -1,6 +1,7 @@
 import type { EngineContext } from "./engine.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
 import type { OverdrawCostMeasure } from "../frame-graph/overdraw-probe-run.js";
+import { makeTimingSnapshot } from "./gpu-task-timing-snapshot.js";
 
 export type { OverdrawCostMeasure };
 
@@ -125,18 +126,4 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
 export async function measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure> {
     const { _measureRenderTaskOverdrawCost } = await import("../frame-graph/overdraw-probe-run.js");
     return _measureRenderTaskOverdrawCost(engine, task, options);
-}
-
-/** @internal */
-export function makeTimingSnapshot(
-    status: RenderTaskGpuTimingStatus,
-    supported: boolean,
-    enabled: boolean,
-    frameIndex: number,
-    tasks: readonly RenderTaskGpuTiming[],
-    droppedTaskCount: number,
-    totalDurationMs: number,
-    error?: string
-): RenderTaskGpuTimings {
-    return { status, supported, enabled, frameIndex, tasks, totalDurationMs, droppedTaskCount, error };
 }

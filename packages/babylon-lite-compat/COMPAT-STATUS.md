@@ -10,9 +10,9 @@ updated by the `update-compat-layer` skill.
      `Lite compat package version` is NOT a sync marker -- it tracks the published
      package and changes only when that version changes. -->
 
-- **Last synced BJS commit:** `47f84cf6dc635e97bfef29408be1cea41279334a`
-- **Last synced Lite commit:** `76d7889b97ce573352c2ae9cc7f9837eaed4a2bb`
-- **Last sync date:** 2026-11-23
+- **Last synced BJS commit:** `087c79263b3709f0eb2c23ea0232345accbf370f`
+- **Last synced Lite commit:** `99466d5d19ce3018ffeb1fb6fa844b0f36f5de12`
+- **Last sync date:** 2026-11-24
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the

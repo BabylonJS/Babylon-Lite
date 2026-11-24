@@ -735,8 +735,9 @@ export function shaderSystemDependencies(spec: UboSpec): number;
 The table is a null-prototype object literal, so inherited keys such as `constructor` classify as 0.
 Consumers:
 
-- `shader-material.ts`: `_isShaderSystemUniform(name)` is `shaderSystemDependency(name) !== 0`, and
-  `systemUniformType` derives `vec3<f32>` / `vec2<f32>` / `f32` / `mat4x4<f32>` from the
+- `shader-system-dependencies.ts`: `_isShaderSystemUniform(name)` is `shaderSystemDependency(name) !== 0`
+  (kept here so the lazily loaded `shader-renderable.ts` never imports `shader-material.ts`).
+- `shader-material.ts`: `systemUniformType` derives `vec3<f32>` / `vec2<f32>` / `f32` / `mat4x4<f32>` from the
   `CAMERA_POSITION` / `SCREEN_SIZE` / `ALPHA_CUTOFF` / matrix bits.
 - `shader-renderable.ts`: `createPacket` stores `shaderSystemDependencies(systemSpec)` as
   `ShaderPacket._systemDependencies`; `updatePacket` gates on it; `writeSystemUniforms` dispatches each

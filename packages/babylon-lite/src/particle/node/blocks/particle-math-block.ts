@@ -30,7 +30,8 @@ function applyScalar(op: number, a: number, b: number): number {
 
 /**
  * `ParticleMathBlock` — arithmetic on two inputs; scalar+vector splats the scalar. Writes results into
- * a reused scratch value so it is allocation-free on the update path.
+ * a reused scratch value so it is allocation-free on the update path. As in Babylon.js, an `Int` left operand
+ * truncates the scalar result and the output is `Int` only when both operands are.
  */
 export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
@@ -99,6 +100,18 @@ export const npeBlock: NpeBlockEvaluator = {
             return v2;
         };
 
-        ctx.setOutput(block.id, "output", getter);
+        const leftIsInt = ctx.isInt(block, "left");
+        // Babylon.js also applies `| 0` to an Int-left vector result, collapsing it to 0; only scalars are truncated here.
+        ctx.setOutput(
+            block.id,
+            "output",
+            leftIsInt
+                ? (i) => {
+                      const value = getter(i);
+                      return typeof value === "number" ? value | 0 : value;
+                  }
+                : getter,
+            leftIsInt && ctx.isInt(block, "right")
+        );
     },
 };

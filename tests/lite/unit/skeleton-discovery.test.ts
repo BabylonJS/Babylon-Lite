@@ -108,7 +108,8 @@ describe("glTF skeleton discovery", () => {
 
     it("returns undefined for unskinned meshes and skins loaded without bone-control opt-in", async () => {
         const { default: feature } = await import("../../../packages/babylon-lite/src/loader-gltf/gltf-feature-skeleton");
-        const { enableBoneControl, getMeshSkeleton } = await import("../../../packages/babylon-lite/src/skeleton/bone-control");
+        const { getMeshSkeleton } = await import("../../../packages/babylon-lite/src/skeleton/bone-control");
+        const { enableBoneControl } = await import("../../../packages/babylon-lite/src/skeleton/enable-bone-control");
         const { ctx, meshes, data } = fixture();
         expect(getMeshSkeleton(meshes[0]!)).toBeUndefined();
         await feature.applyMesh!(data(0), meshes[0]!, ctx);

@@ -6,7 +6,7 @@ const OP_CEIL = 1;
 const OP_FLOOR = 2;
 const OP_TRUNCATE = 3;
 
-/** `ParticleFloatToIntBlock` — convert a scalar via round, ceil, floor, or truncate. */
+/** `ParticleFloatToIntBlock` — convert a scalar via round, ceil, floor, or truncate into an `Int` typed output. */
 export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const operation = typeof block.serialized.operation === "number" ? block.serialized.operation : OP_ROUND;
@@ -24,6 +24,6 @@ export const npeBlock: NpeBlockEvaluator = {
                     return Math.round(value);
             }
         };
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, true);
     },
 };

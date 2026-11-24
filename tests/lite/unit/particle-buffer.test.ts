@@ -13,8 +13,8 @@ describe("Particle buffer", () => {
 
     it("column() allocates once and shares by name", () => {
         const buffer = createParticleBuffer(16);
-        const a = column(buffer, "sprite.cellIndex", Uint16Array);
-        const b = column(buffer, "sprite.cellIndex", Uint16Array);
+        const a = column(buffer, "sprite.cellIndex", Int32Array);
+        const b = column(buffer, "sprite.cellIndex", Int32Array);
         expect(a).toBe(b);
         expect(a.length).toBe(16);
         expect(buffer._columns.size).toBe(1);

@@ -3248,12 +3248,12 @@
     },
     {
         "id": 359,
-        "slug": "scene359-gltf-export-negative-world-matrix",
-        "name": "Scene 359 — glTF Export: Negative World Matrix",
-        "maxMad": 0.05,
-        "maxRawKB": 126.3,
-        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded twice.",
-        "tags": ["gltf", "export"],
+        "slug": "scene359-npe-values-math",
+        "name": "Scene 359 — NPE Values & Math",
+        "maxMad": 0.01,
+        "maxRawKB": 46.5,
+        "description": "Deterministic NPE sprite-sheet fountain whose position, colour, size, and sprite cell are computed by the value/math blocks: Trigonometry, NLerp, SmoothStep, Clamp, Step, NumberMath, VectorMath, FloatToInt, Int-typed Math, the sprite-cell contextual sources, and UpdateSpriteCellIndex. Lite must preserve Babylon.js pixels.",
+        "tags": ["npe", "particles", "billboards", "sprite-sheet", "math"],
         "skipPerf": true
     },
     {
@@ -3293,6 +3293,16 @@
         "maxMad": 0.05,
         "maxRawKB": 141,
         "description": "Babylon.js visualization test “Export GLTF Extension KHR_texture_transform” (playground #20OAV9#15148): Standard materials with rotated, offset and scaled textures, exported and reloaded below the originals.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 364,
+        "slug": "scene364-gltf-export-negative-world-matrix",
+        "name": "Scene 364 — glTF Export: Negative World Matrix",
+        "maxMad": 0.05,
+        "maxRawKB": 126.3,
+        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded twice.",
         "tags": ["gltf", "export"],
         "skipPerf": true
     }

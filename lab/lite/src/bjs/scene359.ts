@@ -1,109 +1,71 @@
-// Scene 359 — BJS reference for the glTF export "Negative World Matrix" test.
-// Mirrors playground #KX53VK#88 (Babylon.js visualization test "GLTF Serializer with Negative World Matrix
-// (left handed, twice)"; reference image glTFSerializerNegativeWorldMatrix.png): four vertex-colored triangles
-// (CCW / CW winding, two under a negatively scaled + rotated parent) exported with GLTF2Export and reloaded
-// `iterations` times (default 1). The parity test uses `?iterations=2`.
-// The two right-handed tests are not ported (Babylon Lite has no right-handed scenes).
+// Babylon.js reference for Scene 359. It parses the same values/math NPE graph as Lite, seeds the RNG
+// identically, steps the simulation a fixed number of times, and renders the frozen frame.
+
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { Light } from "@babylonjs/core/Lights/light";
-import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
-import { Material } from "@babylonjs/core/Materials/material";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { Mesh } from "@babylonjs/core/Meshes/mesh";
-import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Scene } from "@babylonjs/core/scene";
-import { GLTF2Export } from "@babylonjs/serializers/glTF/2.0";
-import "@babylonjs/loaders/glTF";
-import { createExportReferenceEngine, installExportReferenceRandom, startExportReference } from "./export-gltf-fixtures";
-
-// Babylon.js visualization harness: seeded Math.random.
-installExportReferenceRandom();
-
-// Test variant (config `replace`): `//options//` -> `useRightHandedSystem = false; iterations = 1|2;`
-const params = new URLSearchParams(location.search);
-const useRightHandedSystem = false;
-const iterations = Number(params.get("iterations") ?? "1");
-
-const positions = {
-    CCW: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-    CW: [0, 0, 0, 0, 1, 0, 1, 0, 0],
-};
-const colors = [1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1];
-const indices = [0, 1, 2];
-
-function clear(scene: Scene) {
-    scene.meshes.slice().forEach((mesh) => {
-        mesh.dispose(false, true);
-    });
-}
-
-function createTriangle(scene: Scene, name: string, x: number, y: number, z: number, sideOrientation: "CCW" | "CW", addInvertedParent: boolean) {
-    let parent: Mesh | null = null;
-    if (addInvertedParent) {
-        parent = new Mesh("InvertNode", scene);
-        parent.scaling.z = -1;
-        parent.rotation.y = Math.PI;
-    }
-    const mesh = new Mesh(name, scene, parent);
-    mesh.position.set(x, y, z);
-
-    const vertexData = new VertexData();
-    vertexData.positions = positions[sideOrientation];
-    vertexData.colors = colors;
-    vertexData.indices = indices;
-    const normals: number[] = [];
-    VertexData.ComputeNormals(vertexData.positions, indices, normals, { useRightHandedSystem: scene.useRightHandedSystem === (sideOrientation === "CCW") });
-    vertexData.normals = normals;
-    vertexData.applyToMesh(mesh);
-
-    const material = new PBRMaterial("material_" + name, scene);
-    material.metallic = 0;
-    material.roughness = 1;
-    material.sideOrientation = sideOrientation === "CCW" ? Material.CounterClockWiseSideOrientation : Material.ClockWiseSideOrientation;
-    mesh.material = material;
-}
-
-async function exportThenImportAsync(scene: Scene) {
-    const shouldExportNode = (node: unknown) => !(node instanceof Light);
-    const response = await GLTF2Export.GLBAsync(scene, "geometry", { shouldExportNode });
-
-    clear(scene);
-
-    const blob = response.files["geometry.glb"] as Blob;
-    const file = new File([blob], "geometry.glb");
-
-    const container = await LoadAssetContainerAsync(file, scene);
-    container.addAllToScene();
-}
-
-async function createScene(engine: WebGPUEngine, canvas: HTMLCanvasElement) {
-    const scene = new Scene(engine);
-    scene.useRightHandedSystem = useRightHandedSystem;
-
-    const camera = new ArcRotateCamera("Camera", -Math.PI / 2, Math.PI / 2, 4, new Vector3(0, 0.5, 0), scene);
-    camera.attachControl(canvas, true);
-
-    new DirectionalLight("Light", new Vector3(0, 0, 1), scene);
-
-    createTriangle(scene, "CCW", -1, 1, 0, "CCW", false);
-    createTriangle(scene, "CW", 1, 1, 0, "CW", false);
-    createTriangle(scene, "CCW_Inverted", -1, -1, 0, "CCW", true);
-    createTriangle(scene, "CW_Inverted", 1, -1, 0, "CW", true);
-
-    for (let i = 0; i < iterations; i++) {
-        await exportThenImportAsync(scene);
-    }
-    return scene;
-}
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
+import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet";
+import "@babylonjs/core/Particles/Node/Blocks";
+import "@babylonjs/core/Shaders/particles.vertex";
+import "@babylonjs/core/Shaders/particles.fragment";
+import { SCENE359_NPE_JSON, SCENE359_STEPS } from "../shared/scene359-values-math-npe.js";
 
 (async function () {
-    const { engine, canvas, startedAt } = await createExportReferenceEngine();
-    const scene = await createScene(engine, canvas);
-    scene.useConstantAnimationDeltaTime = true;
-    await startExportReference(engine, canvas, scene, startedAt);
-})().catch((err) => {
-    console.error(err);
+    const initStart = performance.now();
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
+    await engine.initAsync();
+
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(0, 0, 0, 1);
+
+    const camera = new ArcRotateCamera("cam", -Math.PI / 2, 1.25, 7, new Vector3(0, 2, 0), scene);
+    camera.minZ = 0.1;
+    camera.maxZ = 100;
+
+    const set = NodeParticleSystemSet.Parse(SCENE359_NPE_JSON);
+    const built = await set.buildAsync(scene);
+    const system = built.systems[0] as ParticleSystem;
+
+    // Use the same resolved sprite sheet as Lite (the graph stores a relative path).
+    system.particleTexture = new Texture("https://playground.babylonjs.com/textures/player.png", scene, false, false);
+    system.preWarmStepOffset = 1;
+
+    // Seed Math.random identically to the Lite scene, then step the simulation deterministically and
+    // freeze it (updateSpeed 0) so the render loop renders a stable frame.
+    let seed = 1;
+    Math.random = () => {
+        const value = Math.sin(seed++) * 10000;
+        return value - Math.floor(value);
+    };
+    system.start();
+    for (let step = 0; step < SCENE359_STEPS; step++) {
+        system.animate(true);
+    }
+    system.updateSpeed = 0;
+
+    const engineWithDrawCalls = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame?: () => void } };
+    scene.onBeforeRenderObservable.add(() => {
+        engineWithDrawCalls._drawCalls?.fetchNewFrame?.();
+    });
+    scene.onAfterRenderObservable.add(() => {
+        canvas.dataset.drawCalls = String(engineWithDrawCalls._drawCalls?.current ?? 0);
+    });
+
+    await scene.whenReadyAsync();
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
+    canvas.dataset.initMs = String(performance.now() - initStart);
+    canvas.dataset.ready = "true";
+})().catch((error) => {
+    console.error(error);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = String(error);
+    }
 });

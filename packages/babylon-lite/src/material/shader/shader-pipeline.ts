@@ -7,7 +7,7 @@ import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboField, UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderMaterial } from "./shader-material.js";
-import { _isShaderSystemUniform } from "./shader-material.js";
+import { _isShaderSystemUniform } from "./shader-system-dependencies.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";

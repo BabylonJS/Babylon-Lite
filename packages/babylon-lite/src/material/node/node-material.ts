@@ -425,16 +425,3 @@ export function extractDefault(raw: unknown, type: NodeValueType): number[] {
 }
 
 // ─── UBO writer ─────────────────────────────────────────────────────
-
-export function writeNodeUBO(engine: EngineContext, buffer: GPUBuffer, material: NodeMaterial): void {
-    const size = material._compile._nodeUboSpec?._totalBytes ?? 0;
-    if (size === 0) {
-        return;
-    }
-    const scratch = new F32(size / 4);
-    for (const slot of material._uniformValues.values()) {
-        const dstIdx = slot._offsetBytes >> 2;
-        scratch.set(slot._values, dstIdx);
-    }
-    engine._device.queue.writeBuffer(buffer, 0, scratch);
-}
