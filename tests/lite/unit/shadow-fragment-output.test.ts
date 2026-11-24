@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPbrShadowFragment, preparePbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
+import { createPbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
 import { createStdShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-shadow-fragment";
 import { createShadowFragment, type ShadowLightSlot } from "../../../packages/babylon-lite/src/shader/fragments/shadow-fragment-core";
 import { loadShadowFragmentFactory } from "../../../packages/babylon-lite/src/shader/fragments/shadow-fragment-builder";
@@ -52,7 +52,7 @@ describe("prepared shadow receiver algorithms", () => {
         expect(() => create("shadow", [{ lightIndex: 0, shadowType: "esm" }])).toThrow("ESM shadow receiver was not prepared.");
     });
 
-    it("preserves CSM precedence and forwards only CSM slots", async () => {
+    it("forwards only CSM slots to the CSM receiver", () => {
         const standardFragment = { _id: "std-csm" } as ShaderFragment;
         const pbrFragment = { _id: "pbr-csm" } as ShaderFragment;
         const standardFactory = vi.fn(() => standardFragment);
@@ -66,8 +66,7 @@ describe("prepared shadow receiver algorithms", () => {
         ];
 
         expect(createStdShadowFragment(slots)).toBe(standardFragment);
-        const createPbr = await preparePbrShadowFragment(slots);
-        expect(createPbr(slots)).toBe(pbrFragment);
+        expect(createPbrShadowFragment(slots)).toBe(pbrFragment);
         expect(standardFactory).toHaveBeenCalledExactlyOnceWith([{ lightIndex: 3 }]);
         expect(pbrFactory).toHaveBeenCalledExactlyOnceWith([{ lightIndex: 3 }]);
     });
