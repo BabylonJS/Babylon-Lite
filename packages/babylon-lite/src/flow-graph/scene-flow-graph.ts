@@ -6,7 +6,8 @@
 
 import type { SceneContext } from "../scene/scene-core.js";
 import type { FgRuntime } from "./runtime.js";
-import { advanceFlowGraphTasks, createFgRuntime, disposeFlowGraph, pumpFlowGraphTick, startFlowGraphs } from "./runtime.js";
+import { advanceFlowGraphTasks, disposeFlowGraph, pumpFlowGraphTick, startFlowGraphs } from "./runtime.js";
+import { createFgRuntime } from "./runtime-env.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { FgCapabilities, FgWiring, LoadedFlowGraph } from "./context.js";
 import type { FgEventBus } from "./event-bus.js";

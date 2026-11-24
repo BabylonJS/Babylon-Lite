@@ -6,7 +6,8 @@
  *  reference a scene. */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addMeshLoDInstanceToScene, getMeshLoDSelectionCamera, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { getMeshLoDSelectionCamera } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
 import { addMeshLoDToScene, createMeshLoDInstance, loadMeshLoD } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";

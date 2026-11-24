@@ -11,7 +11,7 @@
  *  accessors stay aligned), and rewrites every `bufferView.byteOffset` to its
  *  global position in the concatenated chunk (and resets `buffer` to 0). */
 
-import { resolveBufferUri } from "./gltf-json-asset.js";
+import { resolveBufferUri } from "./gltf-buffer-uri.js";
 
 export async function loadMultiBuffer(json: any, baseUrl: string): Promise<DataView> {
     const buffers: any[] = json.buffers ?? [];

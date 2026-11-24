@@ -10,7 +10,8 @@ const { enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton
     setBoneWorldPoseDeferred: vi.fn(),
     bakeSkeleton: vi.fn(),
 }));
-vi.mock("../../../../packages/babylon-lite/src/skeleton/bone-control", () => ({ enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton }));
+vi.mock("../../../../packages/babylon-lite/src/skeleton/bone-control", () => ({ getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton }));
+vi.mock("../../../../packages/babylon-lite/src/skeleton/enable-bone-control", () => ({ enableBoneControl }));
 const { getContainerMeshes } = vi.hoisted(() => ({ getContainerMeshes: vi.fn(() => []) }));
 vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getContainerMeshes }));
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({

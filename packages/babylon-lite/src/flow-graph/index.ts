@@ -54,8 +54,6 @@ export {
     cancelPendingForBlock,
     compactPending,
     createFgContext,
-    createFgEnv,
-    createFgRuntime,
     disposeFlowGraph,
     getDataValue,
     getExecVar,
@@ -65,3 +63,4 @@ export {
     stillPending,
     tickFlowGraph,
 } from "./runtime.js";
+export { createFgEnv, createFgRuntime } from "./runtime-env.js";

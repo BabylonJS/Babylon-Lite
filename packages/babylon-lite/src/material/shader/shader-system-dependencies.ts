@@ -1,4 +1,5 @@
 import type { UboSpec } from "../../shader/fragment-types.js";
+import type { ShaderSystemUniformName } from "./shader-material.js";
 
 export const WORLD = 1;
 export const VIEW = 2;
@@ -27,6 +28,11 @@ const DEPENDENCIES = {
 /** @internal Dependency bits of one system uniform name; 0 for any non-system name. */
 export function shaderSystemDependency(name: string): number {
     return DEPENDENCIES[name] ?? 0;
+}
+
+/** @internal */
+export function _isShaderSystemUniform(name: string): name is ShaderSystemUniformName {
+    return shaderSystemDependency(name) !== 0;
 }
 
 /** @internal Dependencies of the declared system layout, including composed matrices. */

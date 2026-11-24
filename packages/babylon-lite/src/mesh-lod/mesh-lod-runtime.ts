@@ -11,8 +11,7 @@
  *  stable internal contract those tasks target. */
 
 import type { EngineContext } from "../engine/engine.js";
-import type { SceneContext } from "../scene/scene-core.js";
-import type { MeshLoDAsset, MeshLoDDebugView, MeshLoDDiagnostics, MeshLoDInstance, MeshLoDRequestOptions, MeshLoDSelectionMode, MeshLoDSource } from "./mesh-lod.js";
+import type { MeshLoDAsset, MeshLoDDebugView, MeshLoDDiagnostics, MeshLoDRequestOptions, MeshLoDSelectionMode, MeshLoDSource } from "./mesh-lod.js";
 import type { ParsedMeshLoDContainer } from "./mesh-lod-format.js";
 import type { MeshLoDRangeSource } from "./mesh-lod-range-source.js";
 import { parseMeshLoDContainer, readBootstrapExtent, toMeshLoDMetadata } from "./mesh-lod-format.js";
@@ -39,7 +38,6 @@ import {
 import { decodeMeshLoDPage, getMeshLoDPageDecoder } from "./mesh-lod-page-decoder.js";
 import type { DecodedMeshLoDPage } from "./mesh-lod-page-decoder.js";
 import type { MeshoptDecoderModule } from "../loader-gltf/meshopt-decode.js";
-import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "./mesh-lod-scene.js";
 import type { MeshLoDGpuAssetBuffers, MeshLoDGpuSelectedPair } from "./mesh-lod-selection-gpu.js";
 import type { MeshLoDPageDemand, MeshLoDRequestScheduler, MeshLoDSchedulerTimers } from "./mesh-lod-scheduler.js";
 import { createMeshLoDRequestScheduler, disposeMeshLoDRequestScheduler, schedulerQueuedCount, submitMeshLoDDemand } from "./mesh-lod-scheduler.js";
@@ -523,12 +521,6 @@ export async function _loadMeshLoD(
     }
 }
 
-/** Register an instance into its scene-owned MeshLoD batch (delegates to the scene
- *  registry module). */
-export function _addMeshLoDToScene(scene: SceneContext, instance: MeshLoDInstance): void {
-    addMeshLoDInstanceToScene(scene, instance);
-}
-
 /** @internal Normalize a raw GPU/model selected `(cluster, instance)` list to
  *  per-instance ascending unique cluster IDs — the canonical form CPU/GPU equivalence
  *  fixtures and real-device readbacks compare against the CPU oracle's
@@ -543,12 +535,6 @@ export function _normalizeMeshLoDSelectedClusterIds(pairs: readonly MeshLoDGpuSe
         }
     }
     return Uint32Array.from([...ids].sort((a, b) => a - b));
-}
-
-/** Remove an instance from its scene-owned MeshLoD batch (delegates to the scene
- *  registry module). */
-export function _removeMeshLoDFromScene(scene: SceneContext, instance: MeshLoDInstance): void {
-    removeMeshLoDInstanceFromScene(scene, instance);
 }
 
 // ─── Streaming residency engine (architecture §11) ───────────────────

@@ -3,7 +3,8 @@ import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SurfaceContext } from "./surface.js";
 import { addFramePostSubmitHook } from "./frame-post-submit.js";
-import { makeTimingSnapshot, type RenderTaskGpuTiming, type RenderTaskGpuTimings } from "./gpu-task-timing.js";
+import type { RenderTaskGpuTiming, RenderTaskGpuTimings } from "./gpu-task-timing.js";
+import { makeTimingSnapshot } from "./gpu-task-timing-snapshot.js";
 
 const INITIAL_TASK_CAPACITY = 64;
 const MAX_IN_FLIGHT_READBACKS = 3;

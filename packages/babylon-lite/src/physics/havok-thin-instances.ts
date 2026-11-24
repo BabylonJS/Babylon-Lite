@@ -6,7 +6,7 @@ import type { Mat4, Mat4Storage, Quat } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { flushThinInstances } from "../mesh/thin-instance.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
+import { PhysicsMotionType, PhysicsPrestepType } from "./physics-motion-types.js";
 import type { HavokThinInstanceContext, PhysicsBody, PhysicsWorld } from "./havok.js";
 
 type NativeTransform = [number[], number[]];

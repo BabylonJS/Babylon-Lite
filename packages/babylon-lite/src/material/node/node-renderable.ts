@@ -16,7 +16,6 @@ import { _rightHanded } from "#coordinate-system";
 import type { MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { NodeMaterial } from "./node-material.js";
-import { writeNodeUBO } from "./node-material.js";
 import { compileNodePipeline } from "./node-pipeline.js";
 import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
@@ -540,4 +539,17 @@ export function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
     scratch[17] = gpu.hasUv === false ? 0 : 1;
     scratch[18] = gpu.hasTangent ? 1 : 0;
     scratch[19] = gpu.hasColor ? 1 : 0;
+}
+
+export function writeNodeUBO(engine: EngineContext, buffer: GPUBuffer, material: NodeMaterial): void {
+    const size = material._compile._nodeUboSpec?._totalBytes ?? 0;
+    if (size === 0) {
+        return;
+    }
+    const scratch = new F32(size / 4);
+    for (const slot of material._uniformValues.values()) {
+        const dstIdx = slot._offsetBytes >> 2;
+        scratch.set(slot._values, dstIdx);
+    }
+    engine._device.queue.writeBuffer(buffer, 0, scratch);
 }

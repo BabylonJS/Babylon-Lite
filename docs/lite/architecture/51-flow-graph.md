@@ -285,7 +285,13 @@ export interface FgAccessor {
 }
 ```
 
-### Standalone runtime functions (`flow-graph/runtime.ts`)
+### Standalone runtime functions (`flow-graph/runtime.ts`, `flow-graph/runtime-env.ts`)
+
+`createFgEnv` / `createFgRuntime` live in `runtime-env.ts`, the only runtime module that imports
+`block-registry.ts`. Every lazily-loaded block statically imports `runtime.ts`, so `runtime.ts` must
+never import the registry that lazy-loads those blocks: a lazy module that statically reaches its
+loader makes Rolldown (Vite 8) emit every block chunk even in apps without flow graphs.
+`tests/lite/build/lazy-import-cycles.test.ts` enforces this.
 
 ```typescript
 /** PULL a data input: resolve source, run its def.updateOutputs, read cache. */
@@ -297,11 +303,6 @@ export function activateSignal(ctx: FgContext, env: FgEnv, block: FgBlock, socke
 
 /** Instantiate runtime state for a parsed graph. */
 export function createFgContext(graph: FgGraph, opts?: { rightHanded?: boolean }): FgContext;
-/** Build the resolved env (await needed defs, attach accessors/animations/bus).
- *  Editor-authored unknown block types fail loudly. KHR unsupported operations
- *  are translated to registered typed no-op blocks before this boundary. */
-export function createFgEnv(graph: FgGraph, wiring?: FgWiring): Promise<FgEnv>;
-
 /** One graph runtime = graph + context + env, owned by the scene. */
 export interface FgRuntime {
     readonly graph: FgGraph;
@@ -312,6 +313,11 @@ export interface FgRuntime {
     _unsub: (() => void)[];
 }
 
+// runtime-env.ts
+/** Build the resolved env (await needed defs, attach accessors/animations/bus).
+ *  Editor-authored unknown block types fail loudly. KHR unsupported operations
+ *  are translated to registered typed no-op blocks before this boundary. */
+export function createFgEnv(graph: FgGraph, wiring?: FgWiring): Promise<FgEnv>;
 /** Convenience: build env (awaiting defs) + context in one call. */
 export function createFgRuntime(graph: FgGraph, wiring?: FgWiring, opts?: { rightHanded?: boolean }): Promise<FgRuntime>;
 
@@ -818,6 +824,7 @@ packages/babylon-lite/src/flow-graph/
   block-registry.ts              # getBlockDef() dynamic-import switch
   context.ts                     # FgContext, FgEnv, FgAccessor
   runtime.ts                     # getDataValue/setDataValue/activateSignal, FgRuntime, start/tick/dispose
+  runtime-env.ts                 # createFgEnv/createFgRuntime (only runtime module importing block-registry)
   event-bus.ts                   # FgEventBus, FgEventType, subscribe/pump/clear
   fg-math.ts                     # Vec2 + quaternion/matrix/bitwise helpers (lazy)
   rich-type.ts                   # defaultForType(), coerceValue(), animationTypeForFgType()

@@ -17,7 +17,7 @@ import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js"
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderAttributeName, ShaderMaterial, ShaderUniformType } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
-import { _isShaderSystemUniform } from "./shader-material.js";
+import { _isShaderSystemUniform } from "./shader-system-dependencies.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 import { _attributeInfo, _getShaderVbSupport, type ShaderRenderPass, type ShaderVbLayout } from "./shader-vb-support.js";

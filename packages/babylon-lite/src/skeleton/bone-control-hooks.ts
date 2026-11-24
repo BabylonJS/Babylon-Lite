@@ -47,11 +47,11 @@ export async function _ensureBoneControlForSkinnedAsset(): Promise<void> {
     if (!_loadBoneControlForSkinnedAssets || _boneBuilder) {
         return;
     }
-    _boneControlLoad ??= import("./bone-control.js").then(({ enableBoneControl }) => enableBoneControl());
+    _boneControlLoad ??= import("./bone-control.js").then(({ buildSkeletons, applyOverridesToTRS }) => _installBoneControl(buildSkeletons, applyOverridesToTRS));
     await _boneControlLoad;
 }
 
-/** @internal Install the bone-control implementation. Called by `enableBoneControl`. */
+/** @internal Install the bone-control implementation. Called by `enableBoneControl` and the skin-gated lazy path. */
 export function _installBoneControl(builder: BoneBuilder, applier: BoneApplier): void {
     _boneBuilder = builder;
     _boneApplier = applier;

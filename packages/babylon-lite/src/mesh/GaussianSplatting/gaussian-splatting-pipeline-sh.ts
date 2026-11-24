@@ -38,7 +38,7 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { getRenderTargetSize } from "../../engine/engine.js";
 import { disposeGaussianSplattingMesh, uploadPendingSplatOrder, postSplatSortIfDirty, type GaussianSplattingMesh, type GsShaderFragment } from "./gaussian-splatting-mesh.js";
 import { registerPickSource } from "../../picking/pick-contributor.js";
-import { applyGsFragments } from "./gaussian-splatting-pipeline.js";
+import { applyGsFragments } from "./gs-apply-fragments.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 interface PipelineEntry {

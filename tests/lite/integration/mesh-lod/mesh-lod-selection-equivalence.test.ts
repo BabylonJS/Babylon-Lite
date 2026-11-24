@@ -34,7 +34,7 @@ import {
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDGpuSelectionModelInput, MeshLoDGpuSelectionParams } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
-import { getMeshLoDSelectionCamera } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { getMeshLoDSelectionCamera } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
 
 const IDENTITY: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 

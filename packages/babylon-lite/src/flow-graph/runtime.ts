@@ -4,10 +4,8 @@
 // records ticked in a cancellation-safe per-frame loop. See
 // docs/lite/architecture/51-flow-graph.md → Internal Architecture.
 
-import type { FgBlockDef } from "./block-def.js";
-import type { FgContext, FgEnv, FgPendingTask, FgWiring } from "./context.js";
-import { createFgEventBus, flushFgEvents, isFgEventTransitivePropagationStopped, pumpFgEventHandlers, subscribeFgEvent, type FgEventPayload } from "./event-bus.js";
-import { getBlockDef } from "./block-registry.js";
+import type { FgContext, FgEnv, FgPendingTask } from "./context.js";
+import { flushFgEvents, isFgEventTransitivePropagationStopped, pumpFgEventHandlers, subscribeFgEvent, type FgEventPayload } from "./event-bus.js";
 import { coerceValue, defaultForType } from "./rich-type.js";
 import type { FgBlock, FgGraph, FgValue } from "./types.js";
 import { FgEventType } from "./types.js";
@@ -168,51 +166,6 @@ export function createFgContext(graph: FgGraph, opts?: { rightHanded?: boolean }
     };
 }
 
-/** Build the resolved env: await every block def the graph needs (registry or
- *  wiring override), then attach accessors/animations/caps/bus.
- *
- *  Unknown op policy: the registry returns `null` for an unknown type and this
- *  loader FAILS LOUDLY (throws with the offending types) so a `KHR_interactivity`
- *  asset can't silently render a broken interaction. */
-export async function createFgEnv(graph: FgGraph, wiring: FgWiring = {}): Promise<FgEnv> {
-    const defs: Record<string, FgBlockDef> = {};
-    const unsupported: string[] = [];
-
-    for (const block of graph.blocks) {
-        if (defs[block.type]) {
-            continue;
-        }
-        const override = wiring.defs?.[block.type];
-        if (override) {
-            defs[block.type] = override;
-            continue;
-        }
-        const loader = getBlockDef(block.type);
-        if (!loader) {
-            if (!unsupported.includes(block.type)) {
-                unsupported.push(block.type);
-            }
-            continue;
-        }
-        defs[block.type] = await loader();
-    }
-
-    if (unsupported.length > 0) {
-        throw new Error(`flow-graph: unsupported block type(s): ${unsupported.join(", ")}`);
-    }
-
-    return {
-        graph,
-        defs,
-        accessors: wiring.accessors ?? {},
-        resolveAccessor: wiring.resolveAccessor,
-        animations: wiring.animations ?? [],
-        caps: wiring.caps ?? {},
-        events: wiring.events ?? createFgEventBus(),
-        _assetScope: wiring._assetScope,
-    };
-}
-
 /** One graph runtime = graph + context + env, owned by the scene. */
 export interface FgRuntime {
     readonly graph: FgGraph;
@@ -221,13 +174,6 @@ export interface FgRuntime {
     started: boolean;
     /** @internal Bus unsubscribe fns registered at start, called on dispose. */
     _unsub: (() => void)[];
-}
-
-/** Assemble a runtime from a graph + wiring (creates context + env). */
-export async function createFgRuntime(graph: FgGraph, wiring: FgWiring = {}, opts?: { rightHanded?: boolean }): Promise<FgRuntime> {
-    const env = await createFgEnv(graph, wiring);
-    const context = createFgContext(graph, opts);
-    return { graph, context, env, started: false, _unsub: [] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

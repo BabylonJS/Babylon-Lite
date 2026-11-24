@@ -4,7 +4,8 @@ import { expect, test } from "../parity/parity-fixtures";
 import type * as Gpu from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type * as Scheduler from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scheduler.js";
 import type * as Api from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
-import type * as Scene from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type * as Scene from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene-selection.js";
+import type { MeshLoDSceneBatch } from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import type * as Decoder from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import type * as Camera from "../../../packages/babylon-lite/src/camera/free-camera.js";
 import type * as Pbr from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -222,7 +223,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                         },
                     },
                 };
-                const batch: Scene.MeshLoDSceneBatch = {
+                const batch: MeshLoDSceneBatch = {
                     asset: cpuAsset,
                     material: materials.createPbrMaterial({ doubleSided: true }),
                     instances: [],
@@ -307,7 +308,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
             gpuUrl: moduleUrl(sourceRoot, "mesh-lod-selection-gpu.ts"),
             schedulerUrl: moduleUrl(sourceRoot, "mesh-lod-scheduler.ts"),
             apiUrl: moduleUrl(sourceRoot, "mesh-lod.ts"),
-            sceneUrl: moduleUrl(sourceRoot, "mesh-lod-scene.ts"),
+            sceneUrl: moduleUrl(sourceRoot, "mesh-lod-scene-selection.ts"),
             decoderUrl: moduleUrl(sourceRoot, "mesh-lod-page-decoder.ts"),
             cameraUrl: moduleUrl(sourceRoot, "..", "camera", "free-camera.ts"),
             materialUrl: moduleUrl(sourceRoot, "..", "material", "pbr", "pbr-material.ts"),

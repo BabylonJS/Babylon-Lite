@@ -25,8 +25,11 @@ import type { HavokThinInstanceAdvancedContext } from "./havok-thin-instance-adv
 import { decomposeMat4 } from "../math/decompose-mat4.js";
 import type { PhysicsConstraintDebug } from "./physics-viewer.js";
 import { _rightHanded } from "#coordinate-system";
+import { PhysicsMotionType, PhysicsPrestepType } from "./physics-motion-types.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
+
+export { PhysicsMotionType, PhysicsPrestepType };
 
 /** Geometry type of a physics collision shape. */
 export const PhysicsShapeType = {
@@ -40,27 +43,6 @@ export const PhysicsShapeType = {
     HEIGHTFIELD: 7,
 } as const;
 export type PhysicsShapeType = (typeof PhysicsShapeType)[keyof typeof PhysicsShapeType];
-
-/** How a body moves: `STATIC` (immovable), `ANIMATED` (driven by the node transform), or `DYNAMIC` (simulated). */
-export const PhysicsMotionType = {
-    STATIC: 0,
-    ANIMATED: 1,
-    DYNAMIC: 2,
-} as const;
-export type PhysicsMotionType = (typeof PhysicsMotionType)[keyof typeof PhysicsMotionType];
-
-/**
- * How a moved transform node is propagated to its physics body before each step.
- * `DISABLED` skips the sync, `TELEPORT` snaps the body to the node (`HP_Body_SetQTransform`),
- * and `ACTION` sets the body's velocity so it reaches the node (`HP_Body_SetTargetQTransform`,
- * dragging resting bodies via friction). Values match Babylon.js `PhysicsPrestepType`.
- */
-export const PhysicsPrestepType = {
-    DISABLED: 0,
-    TELEPORT: 1,
-    ACTION: 2,
-} as const;
-export type PhysicsPrestepType = (typeof PhysicsPrestepType)[keyof typeof PhysicsPrestepType];
 
 /** Type of Havok Physics V2 constraint. */
 export const PhysicsConstraintType = {
