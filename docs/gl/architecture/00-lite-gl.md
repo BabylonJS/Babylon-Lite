@@ -2004,12 +2004,12 @@ createRawTexture(engine, new Uint8Array(4), 1, 1, { invertY: false, minFilter: g
 lite-gl ships the **same four-layer test harness as the sibling `babylon-lite`
 package**, rooted at `tests/gl/` and mirroring `tests/lite/{unit,build,parity,perf}`:
 
-| Layer              | Location           | Runner                             | Gate                                                                                                                           |
-| ------------------ | ------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Unit               | `tests/gl/unit/`   | vitest — `pnpm test:unit:gl`       | mock-GL call / cache assertions                                                                                                |
-| Build / public API | `tests/gl/build/`  | vitest — `pnpm test:build:gl`      | builds, trims `@internal`, isolated `.d.ts` typecheck, exports-map resolution, **per-scene bundle-size ceilings (`maxRawKB`)** |
-| **Visual parity**  | `tests/gl/parity/` | Playwright — `pnpm test:parity:gl` | canvas screenshot vs committed Babylon `ThinEngine` golden, gated on `MAD ≤ maxMad`                                            |
-| **Performance**    | `tests/gl/perf/`   | Playwright — `pnpm test:perf:gl`   | per-scene frame cost vs Babylon `ThinEngine` ref                                                                               |
+| Layer              | Location           | Runner                             | Gate                                                                                                                                                        |
+| ------------------ | ------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit               | `tests/gl/unit/`   | vitest — `pnpm test:unit:gl`       | mock-GL call / cache assertions                                                                                                                             |
+| Build / public API | `tests/gl/build/`  | vitest — `pnpm test:build:gl`      | builds, trims `@internal`, isolated `.d.ts` typecheck, exports-map resolution, **per-scene bundle-size ceilings (`maxRawKB`)**, no import cycles in `dist/` |
+| **Visual parity**  | `tests/gl/parity/` | Playwright — `pnpm test:parity:gl` | canvas screenshot vs committed Babylon `ThinEngine` golden, gated on `MAD ≤ maxMad`                                                                         |
+| **Performance**    | `tests/gl/perf/`   | Playwright — `pnpm test:perf:gl`   | per-scene frame cost vs Babylon `ThinEngine` ref                                                                                                            |
 
 ### 12.0 Coverage policy — REQUIRED for every addition
 
@@ -2116,6 +2116,24 @@ Acceptance: the swap drops the per-page `@babylonjs/core` footprint by **at
 least 10×** for the smallest consumer (e.g. ScanEffect or a single loading
 screen). The 10–12 KB min+gzip estimate in §0 is a hypothesis; if the real
 number is materially worse, investigate before merging the NeonBrush PR.
+
+### 12.6 Import-graph invariants (`tests/gl/build/import-cycles.test.ts`)
+
+`dist/` is a 1:1 `tsc` emit, so consumers' bundlers see the `src/` module graph
+exactly. The `gl-build` project enforces on the emitted `dist/**/*.js`:
+
+- **No lazy-import cycles.** An `import()` target must never statically reach
+  the module that lazy-loads it; otherwise Rolldown (Vite 8) emits the lazy
+  chunk and everything its loader lazy-loads for apps that never use them.
+- **No runtime static cycles.** Value imports form a DAG, so initialisation
+  order never depends on which module a consumer imports first. Type-only
+  cycles are allowed because `import type` is erased by `tsc` and never reaches
+  `dist/`.
+- **No orphan chunks.** Vite 8 builds of an empty web scene and of the
+  `./native` entry emit only chunks reachable from the entry.
+
+Fix a violation by moving the shared code into a leaf module that both sides
+import, or by turning a types-only back-edge into `import type`.
 
 ---
 
