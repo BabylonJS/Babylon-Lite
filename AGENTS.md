@@ -11,8 +11,8 @@ architectural and workflow decisions.
 
 ## Release Commit Messages
 
-The npm publish pipeline's weekly `auto` mode decides between a minor and major
-release by scanning commit messages since the last `npm-lite-v*` tag.
+The release pipeline decides between a minor and major release by scanning commit
+messages since the last `npm-lite-v*` tag.
 
 For normal changes, use Conventional Commit-style messages such as:
 
@@ -33,13 +33,15 @@ commit. If a PR is labeled `breaking`, `breaking change`, `major`, or
 `semver-major`, PR CI will require a marker in the PR title/body when the
 release-marker job has a repo-scoped `GITHUB_TOKEN` available to read PR labels.
 
-Manual patch/minor/major releases are requested by editing `config/release.json`
-and incrementing its `nonce`; weekly scheduled releases remain `auto`. The npm
-publish script scans commits since the previous `npm-lite-v*` release tag for
-breaking-change markers on every release mode. If breaking changes are present,
-`auto` resolves to `major`, and explicit `patch`/`minor` releases are rejected
-so a manual patch cannot hide a breaking change from the next weekly auto
-release.
+Releases are published by the internal Azure DevOps release pipeline, which
+tags the released master commit as `npm-lite-v<X.Y.Z>`; that tag triggers
+`azure-pipelines-playground-release.yml` to deploy the versioned playground. The
+public `azure-pipelines-npm-publish.yml` and `azure-pipelines-npm-publish-gl.yml`
+pipelines are retired (manual emergency fallback only), so editing
+`config/release.json` or `config/release-gl.json` no longer requests a release.
+Release version resolution scans commits since the previous `npm-lite-v*`
+release tag for breaking-change markers, so a missing marker can hide a breaking
+change inside a minor or patch release.
 
 ### Guardrails (Non-Negotiable)
 

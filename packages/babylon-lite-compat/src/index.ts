@@ -36,7 +36,7 @@ export { PickingInfo } from "./culling/picking-info.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
-export type { AbstractEngineOptions, EngineOptions, WebGPUEngineOptions } from "./engine/engine.js";
+export type { AbstractEngineOptions, EngineFeatures, EngineOptions, WebGPUEngineOptions } from "./engine/engine.js";
 
 // ─── Compute and buffers ─────────────────────────────────────────────
 export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
@@ -105,6 +105,20 @@ export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { _GetPackedShBytesPerSplat, _HasGaussianPointSplattingProjectedDepth, GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
 export type { IGaussianPointSplattingProgress, ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 export {
+    _ClampGpuSortKeyBits,
+    _GetGpuSortPassCount,
+    _GetGpuSortPaddedCount,
+    _PackGpuSortIntervals,
+    _ComputeGpuSortDepthCoefficients,
+    _ComputeGpuSortDepthRange,
+    _ComputeGpuSortKeyScale,
+    _DecodeGpuSortSogMean,
+    GetGaussianSplattingGpuSorterMaxSplatCount,
+    GaussianSplattingGpuSortOutput,
+    GaussianSplattingGpuSorter,
+} from "./meshes/gaussian-splatting-gpu-sorter.js";
+export type { GaussianSplattingGpuSortMatrix, IGaussianSplattingGpuSortSource, IGaussianSplattingGpuSortOptions } from "./meshes/gaussian-splatting-gpu-sorter.js";
+export {
     MeshBlendingRadiusClass,
     PackMeshBlendingTag,
     UnpackMeshBlendingTag,
@@ -144,6 +158,16 @@ export {
 // ─── Textures ────────────────────────────────────────────────────────
 export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, HtmlTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
 export { ExternalTexture } from "./textures/external-texture.js";
+export {
+    DivideTexturesAsync,
+    TransmissionFractionAsync,
+    TransmissionScatterToSingleScatterAlbedoAsync,
+    MultiScatterToSingleScatterAlbedoAsync,
+    SingleScatterToMultiScatterAlbedoAsync,
+    ThinWalledScatterWeightsAsync,
+} from "./textures/texture-processing.js";
+export { TextureColorSpace, ChannelMask, TextureChannel } from "./textures/texture-processing.js";
+export type { ITextureProcessOperand, ITextureProcessorOutputOptions } from "./textures/texture-processing.js";
 export type { IHtmlTextureOptions } from "./textures/textures.js";
 export {
     RawTexture2DArray,
@@ -208,7 +232,7 @@ export { GridMaterial } from "./materials/grid-material.js";
 export { GetSupportedSimultaneousLights } from "./materials/material-helpers.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
-export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
+export { Animation, AnimationGroup, TargetedAnimation, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
 export type { AnimationGroupState, AnimationValue, IAnimationKey, IAnimationVectorValue } from "./animations/animation.js";
 export {
     EasingFunction,
@@ -328,7 +352,6 @@ export {
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
-    GlowLayer,
     GreasedLineMesh,
     GreasedLineBaseMesh,
     GreasedLineRibbonMesh,
@@ -358,6 +381,7 @@ export {
     ComputeOverlayCssTransform,
     GetElementPixelFromUv,
     IsHtmlInCanvasSupportedNatively,
+    _IsHtmlInCanvasPolyfillInstalled,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
     Sound,
@@ -407,7 +431,17 @@ export {
     ValidateFlowGraphWithBlockList,
     RemoveFlowGraphAnimationGroupObservers,
     defaultValueParseFunction,
+    DefaultKTX2EncoderOptions,
+    KhronosTextureContainer2Encoder,
+    MapSRGBToLinear,
+    WebGPURenderPassCommandStream,
+    WebGPURenderPassCommandStreamProtocolVersion,
+    WebGPURenderPassCommandStreamMaxDrawsPerBatch,
+    SubMesh,
+    BakedVertexAnimationManager,
+    VertexAnimationBaker,
 } from "./unsupported/unsupported-apis.js";
+export type { IBakedVertexAnimationManager, IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";
@@ -465,7 +499,6 @@ export {
     DepthOfFieldEffect,
     DefaultRenderingPipeline,
     FxaaPostProcess,
-    SSAO2RenderingPipeline,
     FSR1RenderingPipeline,
     ThinFSR1UpscalePostProcess,
     ThinFSR1SharpenPostProcess,
@@ -488,6 +521,12 @@ export {
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
+export { SSAO2RenderingPipeline } from "./post-processes/ssao2-rendering-pipeline.js";
+export { GlowLayer } from "./layers/glow-layer.js";
+export type { IGlowLayerOptions, GlowLayerMaterial, GlowLayerColorSelector, GlowLayerTextureSelector } from "./layers/glow-layer.js";
+export { PostProcessRenderPipelineManager } from "./post-processes/post-process-render-pipeline-manager.js";
+export type { PostProcessRenderPipeline } from "./post-processes/post-process-render-pipeline-manager.js";
+export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "./loading/khr-materials-scatter.js";
 export type {
     EffectWrapperCustomShaderCodeProcessing,
     EffectWrapperCreationOptions,

@@ -1,6 +1,6 @@
 import { DV } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
-import { _getAdapterOptions } from "../engine/engine.js";
+import { _getAdapterOptions } from "../engine/device.js";
 import type { ComputeUniformArena } from "./compute-uniform-arena.js";
 import type { ComputeUniformLayout, ComputeUniformWriter } from "./compute-uniform-writer.js";
 import { _createComputeUniformWriter, _installComputeUniformF16Write } from "./compute-uniform-writer.js";

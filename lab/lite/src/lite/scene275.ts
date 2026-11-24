@@ -1,5 +1,5 @@
 import {
-    addTextRenderable,
+    addTextRenderableToScene,
     createDefaultTextData,
     createEngine,
     createFreeCamera,
@@ -39,8 +39,8 @@ async function main(): Promise<void> {
     });
     setAlphaToCoverage(front, true);
     setAlphaToCoverage(rear, true);
-    addTextRenderable(scene, front);
-    addTextRenderable(scene, rear);
+    addTextRenderableToScene(scene, front);
+    addTextRenderableToScene(scene, rear);
 
     await registerScene(scene);
     await startEngine(engine);

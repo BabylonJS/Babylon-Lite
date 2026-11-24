@@ -26,7 +26,7 @@ function setSprite2DInstanceParams(handle: Sprite2DHandle, params: Sprite2DInsta
 
 Enable explicitly during setup, after creating a layer with `customShader` and
 before rendering its fragment's first use of `in.instanceParams`. For depth-hosted
-layers, enable before `addDepthHostedSpriteLayer`; changing their layout after
+layers, enable before `addDepthHostedSpriteLayerToScene`; changing their layout after
 registration is unsupported because their draw bindings cache the pipeline.
 Only the pure-2D `SpriteRenderer` supports enabling after earlier frames.
 Enabling a non-custom layer or a layer with a different vertex extension throws.

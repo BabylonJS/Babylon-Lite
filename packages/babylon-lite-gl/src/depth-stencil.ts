@@ -22,6 +22,7 @@
  * must not import this module.
  */
 import type { GLEngineContext } from "./context.js";
+import type { GLClearOptions } from "./family.js";
 import type { GLRenderTarget } from "./render-target.js";
 import { applyGLStates } from "./apply-states.js";
 import {
@@ -217,16 +218,6 @@ function enableSeparateStencil(s: GLEngineContext["_state"]): void {
     resetStencilBack(rs);
     s._setStencilBack = mirrorSharedStencilOpsToBack;
     s._flushStencil = flushStencilSeparate;
-}
-
-/** Options for {@link clearEngine}. */
-export interface GLClearOptions {
-    /** When set, clears the color buffer to this RGBA color (alpha default 1). */
-    color?: { r: number; g: number; b: number; a?: number };
-    /** Clear the depth buffer (respects the current depth write mask). */
-    depth?: boolean;
-    /** Clear the stencil buffer (respects the current stencil write mask). */
-    stencil?: boolean;
 }
 
 /**
@@ -588,7 +579,6 @@ function flushColorMask(engine: GLEngineContext): void {
  *
  * No-op on a lost/disposed context or a disposed target.
  *
- * @param engine - The engine that owns `rt`.
  * @param rt - The render target to attach the stencil buffer to.
  * @param options - `depth` (default `true`): when `true` the attachment is a
  *  packed depth+stencil buffer (`DEPTH24_STENCIL8` on `DEPTH_STENCIL_ATTACHMENT`)
@@ -598,7 +588,8 @@ function flushColorMask(engine: GLEngineContext): void {
  * @throws If a renderbuffer handle could not be allocated or the framebuffer is
  *  incomplete after attaching.
  */
-export function generateRenderTargetStencil(engine: GLEngineContext, rt: GLRenderTarget, options?: { depth?: boolean }): void {
+export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { depth?: boolean }): void {
+    const engine = rt._engine;
     if (engine._isLost || engine._disposed || rt._disposed) {
         return;
     }

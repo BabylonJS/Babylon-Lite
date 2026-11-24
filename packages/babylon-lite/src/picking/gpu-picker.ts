@@ -19,12 +19,12 @@ import { createUniformBuffer } from "../resource/uniform-buffer.js";
 export type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
-const _pickVP = new F32(20);
+const _pickVP = /* @__PURE__ */ new F32(20);
 const PICK_MESH_UBO_BYTES = 80;
-const _uboScratch = new ArrayBuffer(PICK_MESH_UBO_BYTES);
-const _uboF32 = new F32(_uboScratch);
-const _uboU32 = new U32(_uboScratch);
-const _uboView = new U8(_uboScratch);
+const _uboScratch = /* @__PURE__ */ new ArrayBuffer(PICK_MESH_UBO_BYTES);
+const _uboF32 = /* @__PURE__ */ new F32(_uboScratch);
+const _uboU32 = /* @__PURE__ */ new U32(_uboScratch);
+const _uboView = /* @__PURE__ */ new U8(_uboScratch);
 
 /** GPU-based picker — pure state. Use pickAsync() and disposePicker() standalone functions. */
 export interface GpuPicker {
@@ -246,6 +246,14 @@ function createPickDiscardBindGroup(engine: EngineContext, layout: GPUBindGroupL
  *  concurrent calls on the same picker so their shared 1×1 staging buffers never race. */
 async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
+    // Release contributors whose source left the scene (e.g. a removed billboard). Picks are serialized and each
+    // awaits its readback, so no submitted pick still uses them.
+    picker._contributors?.forEach((contributor, source) => {
+        if (!scene._pickSources.includes(source)) {
+            contributor.dispose?.();
+            picker._contributors!.delete(source);
+        }
+    });
     const pickFilter = options?.filter ?? null;
     const pickDiscard = options?.discard ?? null;
     const ignored = options?.ignore;

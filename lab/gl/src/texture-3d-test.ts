@@ -54,15 +54,7 @@ let verified = false;
 let restorations = 0;
 
 function checkPixel(column: number, row: number, expected: ArrayLike<number>): void {
-    gl.readPixels(
-        Math.floor(((column + 0.5) * canvas.width) / 5),
-        Math.floor(((row + 0.5) * canvas.height) / 2),
-        1,
-        1,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        actual
-    );
+    gl.readPixels(Math.floor(((column + 0.5) * canvas.width) / 5), Math.floor(((row + 0.5) * canvas.height) / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, actual);
     for (let channel = 0; channel < 4; channel++) {
         if (Math.abs(actual[channel]! - expected[channel]!) > 2) {
             throw new Error(`3D texture sample (${column}, ${row}) channel ${channel}: expected ${expected[channel]}, got ${actual[channel]}`);
@@ -92,13 +84,13 @@ onContextRestored(engine, () => {
 });
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, wrapper.effect) || !volume.isReady) {
+    if (!isEffectReady(wrapper.effect) || !volume.isReady) {
         return;
     }
     resizeGLEngine(engine);
     setViewport(engine);
     applyEffectWrapper(wrapper);
-    setEffectTexture3D(engine, wrapper.effect, "uVolume", volume);
+    setEffectTexture3D(wrapper.effect, "uVolume", volume);
     drawEffect(engine);
     if (!verified) {
         try {

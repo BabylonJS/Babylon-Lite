@@ -6,6 +6,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
+import type { ParallaxOcclusionProps } from "../parallax/parallax-occlusion.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
 import { getPbrGroupBuilder } from "./pbr-group-builder.js";
@@ -29,6 +30,8 @@ export interface PbrMaterialProps extends Material {
     normalTexture?: Texture2D;
     /** Normal map scale (glTF normalTexture.scale). Default 1.0. */
     normalTextureScale?: number;
+    /** @internal Set via {@link setPbrParallaxOcclusion}; independent height-map UV displacement. */
+    _parallaxOcclusion?: ParallaxOcclusionProps;
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
     ormTexture?: Texture2D;
     emissiveTexture?: Texture2D;
@@ -80,6 +83,17 @@ export interface PbrMaterialProps extends Material {
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
+    /** Tangent-space bent normal map (linear RGB, same encoding as a normal map) sampled with UV1.
+     *  Replaces the analytic specular occlusion of the environment reflection with a
+     *  spherical-Gaussian visibility-cone estimate driven by the bent normal and ambient occlusion.
+     *  Only active on lit materials with an environment (IBL) and an occlusion texture
+     *  (`ormTexture` or `occlusionTexture`, with `occlusionStrength > 0`).
+     *  Maps to BJS PBRMaterial.bentNormalTexture. Explicit opt-in: call `enableBentNormals()`
+     *  before `registerScene` (otherwise ignored; keeps other bundles free of bent-normal code). */
+    bentNormalTexture?: Texture2D;
+    /** Blend factor of the bent normal occlusion (clamped to [0,1]). Default 1.0.
+     *  Maps to BJS `bentNormalTexture.level`. */
+    bentNormalStrength?: number;
     /** Baked lightmap texture. Added to the shaded color by default, or multiplied
      *  when `useLightmapAsShadowmap` is true. Set via {@link setPbrLightmap}. */
     lightmapTexture?: Texture2D;

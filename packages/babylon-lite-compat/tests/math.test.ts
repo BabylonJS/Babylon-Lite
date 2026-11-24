@@ -157,6 +157,9 @@ describe("Color3 / Color4", () => {
         expect(red.r).toBeCloseTo(1);
         expect(red.g).toBe(0);
         expect(red.toHexString()).toBe("#FF0000");
+        expect(new Color3(2, 0.5, -0.25).toHexString()).toBe("#FF8000");
+        expect(new Color4(4, -1, 0.5, 1.2).toHexString()).toBe("#FF0080FF");
+        expect(new Color4(4, -1, 0.5, 1.2).toHexString(true)).toBe("#FF0080");
     });
 
     it("converts Color3 to Color4", () => {

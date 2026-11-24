@@ -13,7 +13,7 @@ export type Sprite2DInstanceParams = readonly [number, number, number, number] |
  * Enable per-instance parameters on a custom-shader layer. Existing and newly added sprites
  * start at zero. Idempotent; ordinary layers retain their layout until explicitly enabled.
  * The engine transports these values without interpreting them or changing color, UV or depth.
- * Enable depth-hosted layers before `addDepthHostedSpriteLayer`. Late enablement is supported
+ * Enable depth-hosted layers before `addDepthHostedSpriteLayerToScene`. Late enablement is supported
  * only by the pure-2D SpriteRenderer, which refreshes its pipeline each frame.
  */
 export function enableSprite2DInstanceParams(layer: Sprite2DLayer): void {

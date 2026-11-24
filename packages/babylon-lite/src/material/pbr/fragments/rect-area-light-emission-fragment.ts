@@ -10,13 +10,18 @@ import { _installPbrBindingContext } from "../pbr-pipeline.js";
 /** @internal Reserved scene bit, owned by this lazy extension only. */
 export const RECT_AREA_PBR_EMISSION = 1 << 8;
 const EVALUATION = "evaluateAreaLtc(N,V,input.worldPos,areaEntry,roughness,lightIndex)";
+let _installed = false;
 
 /** @internal Only the lazy feature populates its scene-owned binding context. */
 export function installRectAreaEmissionPbr(): void {
+    if (_installed) {
+        return;
+    }
     _installPbrBindingContext((context, id, disposers) => {
         context._lightingId = id;
         context._disposers = disposers;
     });
+    _installed = true;
 }
 
 /** @internal */

@@ -1,12 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import * as lite from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
 import { Material, StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, PBRSpecularGlossinessMaterial } from "../src/materials/materials";
 import { NodeMaterial } from "../src/materials/node-material";
 import { Color3 } from "../src/math/color";
-import type { Scene } from "../src/scene/scene";
-import { CubeTexture } from "../src/textures/textures";
-import type { BaseTexture } from "../src/textures/textures";
+import { Mesh } from "../src/meshes/meshes";
+import { Scene } from "../src/scene/scene";
+import { BaseTexture, CubeTexture } from "../src/textures/textures";
+
+class TestTexture extends BaseTexture {
+    public resolve(lite: object): void {
+        this._lite = lite as never;
+        this._notifyReady();
+    }
+
+    public whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
 
 /** Minimal stand-in for a resolved compat texture (only `_lite` is read by the setters). */
 function fakeTexture(): BaseTexture {
@@ -32,6 +44,35 @@ describe("StandardMaterial texture proxies", () => {
         mat.emissiveTexture = null;
         expect(mat.emissiveTexture).toBeNull();
         expect(mat._lite._emissiveTexture).toBeNull();
+    });
+
+    it("forwards PBR bent-normal textures and their level", () => {
+        const mat = new PBRMaterial("dog");
+        const tex = fakeTexture();
+        tex.level = 0.4;
+
+        mat.bentNormalTexture = tex;
+
+        expect(mat.bentNormalTexture).toBe(tex);
+        expect(mat._lite.bentNormalTexture).toBe(tex._lite);
+        expect(mat._lite.bentNormalStrength).toBe(0.4);
+        expect(mat.getActiveTextures()).toContain(tex);
+
+        mat.bentNormalTexture = null;
+        expect(mat._lite.bentNormalTexture).toBeUndefined();
+    });
+
+    it("rebinds a bent-normal texture independently of albedo readiness", () => {
+        const mat = new PBRMaterial("dog");
+        const tex = fakeTexture();
+        mat.bentNormalTexture = tex;
+        mat._lite.bentNormalTexture = undefined;
+        mat._lite.baseColorTexture = {} as never;
+        mat._lite.ormTexture = {} as never;
+
+        mat._ensureRenderable({} as never);
+
+        expect(mat._lite.bentNormalTexture).toBe(tex._lite);
     });
 
     describe("PBRMaterial late texture binding", () => {
@@ -147,9 +188,31 @@ describe("Material.clone", () => {
         expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
     });
 
-    // Emissive lives on the opt-in `_emissiveColor` backing field, which the generic
-    // data copy skips (it ignores `_`-prefixed keys), so the clone has to restore it
-    // explicitly through the setter — otherwise the clone renders non-emissive.
+    it("PBRMaterial.clone subscribes independently to pending bent-normal readiness and level changes", () => {
+        const tex = new TestTexture();
+        tex.level = 0.4;
+        const source = new PBRMaterial("source");
+        source.bentNormalTexture = tex;
+
+        const clone = source.clone("clone");
+        tex.level = 0.6;
+        expect(source._lite.bentNormalStrength).toBe(0.6);
+        expect(clone._lite.bentNormalStrength).toBe(0.6);
+
+        source.dispose();
+        tex.resolve({ id: "bent" });
+        clone._lite.baseColorTexture = {} as never;
+        clone._lite.ormTexture = {} as never;
+        clone._ensureRenderable({} as never);
+
+        expect(clone._lite.bentNormalTexture).toBe(tex._lite);
+        tex.level = 0.7;
+        expect(clone._lite.bentNormalStrength).toBe(0.7);
+        expect(source._lite.bentNormalStrength).toBe(0.6);
+    });
+
+    // Emissive is restored through its setter so the clone registers the corresponding
+    // Lite extension rather than only copying the loader-owned backing field.
     it("PBRMaterial.clone carries emissive colour without aliasing the source", () => {
         const mat = new PBRMaterial("src");
         mat.emissiveColor = new Color3(0.3, 0.6, 0.9);
@@ -222,6 +285,25 @@ describe("Material.clone", () => {
         await parsePromise!;
         expect(clone._lite).toBe(cloneLite);
         expect(mesh.material).toBe(cloneLite);
+    });
+
+    it("keeps an assigned NodeMaterial facade when deferred compilation replaces its Lite handle", async () => {
+        const sourceLite = { id: "source" };
+        const cloneLite = { id: "clone" };
+        vi.spyOn(lite, "parseNodeMaterialFromSnippet").mockResolvedValueOnce(cloneLite as never);
+        const scene = new Scene(new NullEngine());
+        const source = new NodeMaterial("src", scene, { foo: "bar" });
+        source._lite = sourceLite as never;
+        const clone = source.clone("clone");
+        const mesh = Mesh._fromLite({ name: "mesh", children: [], _gpu: {}, material: sourceLite } as never, undefined, scene);
+
+        mesh.material = clone;
+        expect(mesh.material).toBe(clone);
+
+        await clone._parse({} as never);
+
+        expect(mesh._lite.material).toBe(cloneLite);
+        expect(mesh.material).toBe(clone);
     });
 
     it("NodeMaterial parse does not overwrite a mesh reassigned before compilation finishes", async () => {

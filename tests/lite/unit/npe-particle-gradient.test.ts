@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { particleGradientBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-gradient-block";
+import { npeBlock as particleGradientBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-gradient-block";
 import type { NpeGradientEntry } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-gradient-value-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import type { NpeGetter, NpeValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";

@@ -6,7 +6,8 @@
 
 import { attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSPZ, registerScene, startEngine } from "babylon-lite";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/hornedlizard/hornedlizard.spz";
+// Same SPZ bytes, pinned outside jsDelivr's failing branch URL.
+const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/509ba0beb77e241a55a54154d119749eb58ed960/hornedlizard/hornedlizard.spz";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -29,9 +30,10 @@ async function main(): Promise<void> {
     await splat.firstSortReady;
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
 
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    const dataset = canvas.dataset;
+    dataset.drawCalls = String(engine.drawCallCount);
+    dataset.initMs = String(performance.now() - __initStart);
+    dataset.ready = "true";
 }
 
 main().catch((err) => {

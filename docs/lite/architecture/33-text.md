@@ -133,9 +133,20 @@ export interface TextRenderable extends Renderable {
 }
 
 export function createTextRenderable(data: TextData, options?: TextRenderableOptions): TextRenderable;
-export function addTextRenderable(scene: SceneContext, renderable: TextRenderable): void;
+export function addTextRenderableToScene(scene: SceneContext, renderable: TextRenderable): void; // idempotent
+export function removeTextRenderableFromScene(scene: SceneContext, renderable: TextRenderable): boolean; // false when not a member
+export function getSceneTextRenderables(scene: SceneContext): readonly TextRenderable[]; // add-order snapshot
+export function onSceneTextRenderablesChanged(scene: SceneContext, listener: SceneRenderableChangeListener<TextRenderable>): () => void;
 export function disposeTextRenderable(renderable: TextRenderable): void;
 ```
+
+Scene membership is a custom-renderable collection (see
+[01-scene.md § Custom-renderable collections](01-scene.md#custom-renderable-collections)),
+separate from `addToScene` / `onSceneChange`. Removing a text renderable stops it
+drawing immediately and releases its GPU buffers after in-flight frames; its
+`TextData` stays caller-owned, and a re-added renderable recreates its GPU record
+(and its groups' bind groups) on the next build. A text renderable should belong
+to one scene at a time, because its draw bindings share one GPU record.
 
 A `TextRenderable` mirrors `Mesh`'s TRS surface (`position`, `rotation`,
 `rotationQuaternion`, `scaling`) and implements the standard `Renderable`
@@ -267,7 +278,7 @@ await startEngine(engine);
 ```
 
 For a 3D scene, swap the last three lines for `createTextRenderable(data)` +
-`addTextRenderable(scene, …)`; everything else is identical.
+`addTextRenderableToScene(scene, …)`; everything else is identical.
 
 ## Implementation
 
@@ -579,8 +590,9 @@ outlines.
   pipeline key).
 - `render/renderable.ts` — `Renderable`, `DrawBinding`, `DrawUpdateContext`
   (TextRenderable contract).
-- `scene/scene-core.ts` — `addDeferredSceneRenderables` (`addTextRenderable`
-  attachment).
+- `scene/scene-renderable-collection.ts` — custom-renderable collection helpers
+  (`addTextRenderableToScene` / `removeTextRenderableFromScene` /
+  `getSceneTextRenderables` / `onSceneTextRenderablesChanged`).
 - `camera/camera.ts` — `getViewProjectionMatrix`,
   `getEffectiveAspectRatio` (TextRenderable per-frame MVP composition).
 - `math/observable-vec3.ts`, `math/observable-quat.ts`,
@@ -630,7 +642,7 @@ Unit tests live in `tests/lite/unit/`:
 | `src/text/layout.ts`                         | `TextLayoutOptions` + `layoutText` — default LTR + word-wrap + align layout via `text-shaper.shape`.                                                                                                                                                                                                                                                                                                                                |
 | `src/text/text-data.ts`                      | `TextData` (branded) + `GlyphRun` + `PlacedGlyph` + `TextDataUpdate` + slot-allocator types. Public API: `createTextData` / `updateTextData` / `disposeTextData` and the per-instance allocator (addRun / removeRun / replaceRun / reset+compaction).                                                                                                                                                                               |
 | `src/text/default-text-data.ts`              | `DefaultTextData` (branded) + `createDefaultTextData` / `updateDefaultTextData` / `disposeDefaultTextData`; convenience layer composing layout + curve extraction + a private `GlyphStorage`.                                                                                                                                                                                                                                       |
-| `src/text/text-renderable.ts`                | `TextRenderable` + `createTextRenderable` / `addTextRenderable` / `disposeTextRenderable`; 3D `Renderable` implementation.                                                                                                                                                                                                                                                                                                          |
+| `src/text/text-renderable.ts`                | `TextRenderable` + `createTextRenderable` / `addTextRenderableToScene` / `disposeTextRenderable`; 3D `Renderable` implementation.                                                                                                                                                                                                                                                                                                   |
 | `src/text/text-renderer.ts`                  | `TextLayer` (2D pixel-space placement record) + `TextRenderer` (standalone `RenderingContext`) + their factories and the swapchain draw pass.                                                                                                                                                                                                                                                                                       |
 | `src/text/_gpu/text-textures.ts`             | `ensureSharedAtlasGpu`; lazy `rgba32float` texture create + version-gated upload + capacity grow. (Atlas teardown is inlined in `disposeGlyphStorage` to avoid a circular import.)                                                                                                                                                                                                                                                  |
 | `src/text/_gpu/text-pipeline.ts`             | `getOrCreateTextPipeline` / `getTextPipelineCache` / `clearTextPipelineCache` + the `TextPipelineVariant` seam; per-device bind group layout + base WGSL modules + per-target-key pipeline cache. Knows nothing about shader fragments and composes no WGSL.                                                                                                                                                                        |

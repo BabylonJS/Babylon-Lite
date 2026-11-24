@@ -6,9 +6,8 @@ import type { GLVertexBuffer } from "../mesh.js";
 import { disableBlend, setBlendState } from "../blend.js";
 import { applyGLStates } from "../apply-states.js";
 import { clearEngine, setColorMask, setCullState, setDepthState } from "../depth-stencil.js";
-import type { GLClearOptions } from "../depth-stencil.js";
 import { setViewport } from "../effect-renderer.js";
-import type { GLViewport } from "../effect-renderer.js";
+import type { GLClearOptions, GLViewport } from "../family.js";
 import { runRenderLoop, stopRenderLoop } from "../render-loop.js";
 import type { GLTextData } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
@@ -109,7 +108,7 @@ export function createTextRenderer(engine: GLEngineContext, options: GLTextRende
     try {
         quad = createVertexBuffer(engine, QUAD_CORNERS);
     } catch (error) {
-        disposeEffect(engine, base._effect);
+        disposeEffect(base._effect);
         throw error;
     }
     const layers = options.layers.slice();
@@ -159,7 +158,7 @@ function getDrawState(renderer: GLTextRenderer, data: GLTextData): DataDrawState
 /** True only when all shader variants needed by visible layers have linked. */
 export function isTextRendererReady(renderer: GLTextRenderer): boolean {
     const engine = renderer._engine;
-    if (renderer._disposed || engine._isLost || engine._disposed || !isEffectReady(engine, renderer._base._effect)) {
+    if (renderer._disposed || engine._isLost || engine._disposed || !isEffectReady(renderer._base._effect)) {
         return false;
     }
     if (!renderer._variant && _createTextVariant) {
@@ -170,7 +169,7 @@ export function isTextRendererReady(renderer: GLTextRenderer): boolean {
             }
         }
     }
-    return !renderer._variant || isEffectReady(engine, renderer._variant._effect);
+    return !renderer._variant || isEffectReady(renderer._variant._effect);
 }
 
 function compareLayers(a: GLTextLayer, b: GLTextLayer): number {
@@ -222,14 +221,14 @@ export function renderText(renderer: GLTextRenderer): number {
             }
             const program = group._groupKey === group._curveSetId ? renderer._base : renderer._variant!;
             if (currentProgram !== program) {
-                uploadTextUniforms(engine, program, layer, width, height);
-                setEffectTexture(engine, program._effect, "styles", gpu._styleTex);
+                uploadTextUniforms(program, layer, width, height);
+                setEffectTexture(program._effect, "styles", gpu._styleTex);
                 currentProgram = program;
             }
             const atlas = ensureSharedAtlasGpu(engine, group._curveSet._atlas);
-            setEffectTexture(engine, program._effect, "curveTex", atlas._curveTex);
-            setEffectTexture(engine, program._effect, "bandTex", atlas._bandTex);
-            setEffectTexture(engine, program._effect, "glyphMetadata", atlas._metaTex);
+            setEffectTexture(program._effect, "curveTex", atlas._curveTex);
+            setEffectTexture(program._effect, "bandTex", atlas._bandTex);
+            setEffectTexture(program._effect, "glyphMetadata", atlas._metaTex);
             state._vaos[i] = bindTextVao(engine, renderer._quad, gpu._instanceBuf, group._slotStart, state._vaos[i]);
             gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, group._slotCount);
             draws++;
@@ -303,10 +302,10 @@ export function disposeTextRenderer(renderer: GLTextRenderer): void {
         }
     }
     renderer._drawState.clear();
-    disposeEffect(engine, renderer._base._effect);
+    disposeEffect(renderer._base._effect);
     if (renderer._variant) {
-        disposeEffect(engine, renderer._variant._effect);
+        disposeEffect(renderer._variant._effect);
     }
-    disposeBuffer(engine, renderer._quad);
+    disposeBuffer(renderer._quad);
     renderer._layers.length = 0;
 }

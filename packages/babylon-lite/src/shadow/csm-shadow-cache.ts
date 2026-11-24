@@ -24,7 +24,6 @@ import {
     _computeCsmCascades,
     _createCascadeScratch,
     _csmSliceCornersInto,
-    _dropTaskMeshes,
     _reconcileCsmCasters,
     _writeCsmUbo,
     csmCameraAspect,
@@ -34,6 +33,7 @@ import {
     type CsmTaskState,
 } from "./csm-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 interface CsmCachedTaskState extends CsmTaskState {
     _staticTasks: RenderTask[];

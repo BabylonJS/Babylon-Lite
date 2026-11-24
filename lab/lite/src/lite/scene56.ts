@@ -1,7 +1,7 @@
 import {
     addBillboardSpriteIndex,
     addToScene,
-    addAxisLockedBillboardSystem,
+    addBillboardSystemToScene,
     createArcRotateCamera,
     createBox,
     createEngine,
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
         frame: 23,
         color: [1, 1, 1, 0.9],
     });
-    addAxisLockedBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     await registerScene(scene);
     await startEngine(engine);

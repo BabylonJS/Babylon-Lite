@@ -40,6 +40,8 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const scene = createSceneContext(engine);
+    const { rt, rst } = scene.defaultRenderTask!.config;
+    const targets = { rt, rst };
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
 
     const mainCamera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 18, { x: 0, y: 1.5, z: 0 });
@@ -80,7 +82,7 @@ async function main(): Promise<void> {
     subjectCamera.farPlane = 10;
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene, targets);
 
     // Camera gizmo.
     const cameraGizmo = createCameraGizmo(engine, utilityLayer);

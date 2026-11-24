@@ -27,6 +27,7 @@ const liteMocks = vi.hoisted(() => ({
     createTexture3DFromPixels: vi.fn(),
     createDynamicTexture: vi.fn(),
     updateDynamicTexture: vi.fn(),
+    enableBentNormals: vi.fn(),
     // The opt-in PBR feature setters compat routes through instead of writing the backing
     // fields directly (the setter is what registers the feature's shader ext). They must
     // apply the same field write here, since the material paths under test read it back.
@@ -80,14 +81,22 @@ function fakeScene(started: boolean): {
     unregisterMaterial: ReturnType<typeof vi.fn>;
 } {
     const engineLite = { id: "engine-lite" };
-    const registerMaterial = vi.fn();
-    const unregisterMaterial = vi.fn();
+    const materials: object[] = [];
+    const registerMaterial = vi.fn((material: object) => materials.push(material));
+    const unregisterMaterial = vi.fn((material: object) => {
+        const index = materials.indexOf(material);
+        if (index !== -1) {
+            materials.splice(index, 1);
+        }
+    });
     const scene = {
         _hasStarted: started,
         _lite: { id: "scene-lite" },
+        materials,
         getEngine: () => ({ _lite: engineLite }),
         _registerMaterial: registerMaterial,
         _unregisterMaterial: unregisterMaterial,
+        _trackTextureLoad: vi.fn(),
     } as unknown as Scene;
     return { scene, engineLite, registerMaterial, unregisterMaterial };
 }
@@ -130,6 +139,134 @@ describe("BaseTexture._onReady", () => {
         let fired = 0;
         (texture as unknown as { _onReady(cb: () => void): void })._onReady(() => fired++);
         expect(fired).toBe(1);
+    });
+});
+
+describe("Texture.replaceImage", () => {
+    it("reuses a ready source handle and rebuilds materials that reference the target", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("https://h/target.png", scene);
+        const source = new Texture("https://h/source.png", scene);
+        const targetHandle = { id: "target" };
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve(targetHandle);
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const mat = new StandardMaterial("m", scene);
+        mat.diffuseTexture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.getInternalTexture()).toBe(sourceHandle);
+        expect(target.name).toBe(source.name);
+        expect(mat._lite.diffuseTexture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+
+    it("rebinds cloned Standard materials and PBR sheen textures", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const original = new StandardMaterial("original", scene);
+        original.diffuseTexture = target;
+        const clone = original.clone("clone");
+        const pbr = new PBRMaterial("pbr", scene);
+        pbr.sheen.texture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(original._lite.diffuseTexture).toBe(sourceHandle);
+        expect(clone._lite.diffuseTexture).toBe(sourceHandle);
+        expect((pbr._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(3);
+    });
+
+    it("preserves a custom target name while replacing its image source", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise).mockResolvedValueOnce({ id: "clone" });
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        target.name = "ground";
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.name).toBe("ground");
+        expect(target.clone().name).toBe("ground");
+    });
+
+    it("preserves a loader-produced sheen texture after facade access, finalization, and cloning", () => {
+        const { scene } = fakeScene(true);
+        const sheenTexture = { id: "loaded-sheen" };
+        const loaded = PBRMaterial._fromLite("loaded", { _sheen: { isEnabled: true, texture: sheenTexture } } as never, scene);
+
+        expect(loaded.sheen.intensity).toBe(1);
+        const clone = loaded.clone("clone");
+        loaded._ensureRenderable(scene.getEngine()._lite);
+        clone._ensureRenderable(scene.getEngine()._lite);
+
+        expect((loaded._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+        expect((clone._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+    });
+
+    it("rejects engine-only, unready, cross-engine, and differently oriented sources", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const pendingLoad = deferred<object>();
+        const otherLoad = deferred<object>();
+        const invertedLoad = deferred<object>();
+        const engineOnlyLoad = deferred<object>();
+        liteMocks.loadTexture2D
+            .mockReturnValueOnce(targetLoad.promise)
+            .mockReturnValueOnce(pendingLoad.promise)
+            .mockReturnValueOnce(otherLoad.promise)
+            .mockReturnValueOnce(invertedLoad.promise)
+            .mockReturnValueOnce(engineOnlyLoad.promise);
+        const target = new Texture("target.png", scene, false, true);
+        const pending = new Texture("pending.png", scene, false, true);
+        const otherEngine = new Texture("other.png", engineWrapper(), false, true);
+        const inverted = new Texture("inverted.png", scene, false, false);
+        const engineOnly = new Texture("engine-only.png", engineWrapper(), false, true);
+        targetLoad.resolve({ id: "target" });
+        otherLoad.resolve({ id: "other" });
+        invertedLoad.resolve({ id: "inverted" });
+        engineOnlyLoad.resolve({ id: "engine-only" });
+        await Promise.all([target.whenReadyAsync(), otherEngine.whenReadyAsync(), inverted.whenReadyAsync(), engineOnly.whenReadyAsync()]);
+
+        expect(target.replaceImage(pending)).toBe(false);
+        expect(target.replaceImage(otherEngine)).toBe(false);
+        expect(target.replaceImage(inverted)).toBe(false);
+        expect(engineOnly.replaceImage(target)).toBe(false);
+        expect(target.replaceImage(target)).toBe(true);
+    });
+
+    it("rejects a same-engine source whose effective upload flip differs", async () => {
+        const { scene, engineLite } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene, false, false);
+        const source = new Texture("source.png", { _lite: engineLite as import("babylon-lite").EngineContext }, false, false);
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(false);
     });
 });
 
@@ -199,6 +336,24 @@ describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
         expect((mat._lite as { baseColorTexture?: unknown }).baseColorTexture).toBe(handle);
         expect((mat._lite as { _gammaAlbedo?: unknown })._gammaAlbedo).toBe(true);
         expect(liteMocks.createSolidTexture2D).toHaveBeenCalledWith(engineLite, 1, 1, 1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+
+    it("rebuilds a started material when bent normals are removed", () => {
+        const { scene } = fakeScene(true);
+        const mat = new PBRMaterial("m", scene);
+        const texture = {
+            _lite: { id: "bent" },
+            level: 1,
+            _onReady: (listener: () => void) => listener(),
+            _onLevelChanged: vi.fn(() => vi.fn()),
+        } as unknown as Texture;
+
+        mat.bentNormalTexture = texture;
+        liteMocks.rebuildMaterial.mockClear();
+        mat.bentNormalTexture = null;
+
+        expect(mat._lite.bentNormalTexture).toBeUndefined();
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
     });
 });
@@ -302,7 +457,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
 
     it("ensures the renderable, adopts the scene, and rebinds when the mesh is live", () => {
         const { scene, engineLite } = fakeScene(true);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -318,7 +473,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
 
     it("adopts the scene and rebinds, without GPU finalization, before the engine has started", () => {
         const { scene } = fakeScene(false);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -338,7 +493,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const defaultMaterial = fakeMaterial();
         Object.defineProperty(scene, "defaultMaterial", { value: defaultMaterial });
         const previousMaterial = fakeMaterial();
-        const liteMesh: { material: unknown } = { material: previousMaterial._lite };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: previousMaterial._lite, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;

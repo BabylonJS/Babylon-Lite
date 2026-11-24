@@ -69,6 +69,8 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const scene = createSceneContext(engine);
+    const { rt, rst } = scene.defaultRenderTask!.config;
+    const targets = { rt, rst };
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3.5, 14, { x: 0, y: 0, z: 0 });
@@ -115,7 +117,7 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene, targets);
 
     const positionGizmo = createPositionGizmo(engine, utilityLayer);
     attachPositionGizmoToNode(positionGizmo, cube1.cube);

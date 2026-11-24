@@ -8,10 +8,12 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { DrawBinding, DrawUpdateBatch, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { getUniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
-import { createSceneContext, registerScene } from "../../../packages/babylon-lite/src/scene/scene";
+import { createSceneContext, registerScene, processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene";
+import { registerMeshScene } from "../../../packages/babylon-lite/src/scene/mesh-scene-registry";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { enableRenderTaskMeshRefresh } from "../../../packages/babylon-lite/src/frame-graph/render-task-mesh-refresh";
 import { _removeMeshFromRenderTask, type RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { rebuildTransferTarget, transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
@@ -25,6 +27,13 @@ import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/s
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setMeshVisible } from "../../../packages/babylon-lite/src/scene/scene";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { buildStandardMeshRenderables } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
+import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity";
+import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -77,13 +86,23 @@ function makeMockEngine(options?: {
     }[];
     onWriteBuffer?: (buffer: GPUBuffer, offset: number, data: AllowSharedBufferSource, dataOffset?: number, size?: number) => void;
     bufferCopies?: [GPUBuffer, number, GPUBuffer, number, number][];
+    onIndexedDraw?: (encoder: "pass" | "bundle", positionBuffer: GPUBuffer | undefined) => void;
+    onBundleReplay?: (bundles: Iterable<GPURenderBundle>) => void;
 }): EngineContext {
     let currentPipeline: GPURenderPipeline | null = null;
+    let positionBuffer: GPUBuffer | undefined;
     const pass = {
         setViewport: () => undefined,
         setScissorRect: () => undefined,
         setBindGroup: () => undefined,
-        executeBundles: () => undefined,
+        executeBundles: (bundles: Iterable<GPURenderBundle>) => options?.onBundleReplay?.(bundles),
+        setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
+            if (slot === 0) {
+                positionBuffer = buffer;
+            }
+        },
+        setIndexBuffer: () => undefined,
+        drawIndexed: () => options?.onIndexedDraw?.("pass", positionBuffer),
         setPipeline: (pipeline: GPURenderPipeline) => {
             currentPipeline = pipeline;
         },
@@ -121,13 +140,22 @@ function makeMockEngine(options?: {
         },
         createRenderBundleEncoder: (descriptor: GPURenderBundleEncoderDescriptor) => {
             options?.bundleDescriptors?.push(descriptor);
+            let positionBuffer: GPUBuffer | undefined;
             return {
                 setBindGroup: () => undefined,
                 setPipeline: () => undefined,
+                setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
+                    if (slot === 0) {
+                        positionBuffer = buffer;
+                    }
+                },
+                setIndexBuffer: () => undefined,
+                drawIndexed: () => options?.onIndexedDraw?.("bundle", positionBuffer),
                 finish: () => ({}) as GPURenderBundle,
             } as unknown as GPURenderBundleEncoder;
         },
         queue: {
+            writeTexture: () => undefined,
             writeBuffer: (buffer: GPUBuffer, offset: number, data: AllowSharedBufferSource, dataOffset?: number, size?: number) =>
                 options?.onWriteBuffer?.(buffer, offset, data, dataOffset, size),
         },
@@ -254,8 +282,14 @@ function makeTransparentRenderable(id: string, initialCenter: [number, number, n
     return renderable;
 }
 
-function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "order" | "isTransparent" | "_transmissive" | "_direct">>, drawOrder: string[]): Renderable {
+function makeDrawOrderRenderable(
+    id: string,
+    flags: Partial<Pick<Renderable, "order" | "isTransparent" | "_transmissive" | "_direct">>,
+    drawOrder: string[],
+    mesh?: Mesh
+): Renderable {
     const renderable: Renderable = {
+        mesh,
         order: flags.order ?? 100,
         isTransparent: flags.isTransparent ?? false,
         _transmissive: flags._transmissive ?? false,
@@ -697,6 +731,271 @@ describe("RenderPassTask transparent sorting", () => {
         expect(to._renderables).toEqual(renderables);
     });
 
+    it.each([
+        ["opaque", "blend", 1, 0],
+        ["blend", "opaque", 0, 1],
+        ["standard", "opaque", 0, 1],
+    ] as const)(
+        "uses rendered PBR policy for explicit %s → %s overrides without changing the non-override binding",
+        async (sourceKind, overrideKind, ownPolicy, overridePolicy) => {
+            const initial = new Map<GPUBuffer, number[]>();
+            const engine = makeMockEngine({
+                onWriteBuffer: (buffer, offset, data, dataOffset = 0, size) => {
+                    if (offset === 0 && size === 8) {
+                        const storage = ArrayBuffer.isView(data) ? data.buffer : data;
+                        const start = ArrayBuffer.isView(data) ? data.byteOffset + dataOffset : dataOffset;
+                        initial.set(buffer, Array.from(new Float32Array(storage, start, 2)));
+                    }
+                },
+            });
+            const scene = createSceneContext(engine, { defaultRenderTask: false });
+            scene.camera = makeCamera();
+            const material = sourceKind === "standard" ? createStandardMaterial() : createPbrMaterial({ alphaBlend: sourceKind === "blend" });
+            const override = createPbrMaterial({ alphaBlend: overrideKind === "blend" });
+            const target = initMeshTransform({
+                name: "override-policy",
+                children: [],
+                material,
+                visible: true,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint16",
+                    indexCount: 3,
+                },
+            });
+            setMeshOpacity(target, 0.5);
+            const probe = initMeshTransform({ ...target, name: "prepared-override", material: override });
+            const pbrMeshes = sourceKind === "standard" ? [probe] : [target, probe];
+            scene._groups.set(override._buildGroup, pbrMeshes);
+            const pbr = await buildPbrRenderables(scene, pbrMeshes, undefined);
+            scene._groups.set(override._buildGroup, Object.assign(pbrMeshes, { r: pbr.rebuildSingle, o: pbr.renderables }));
+            if (sourceKind === "standard") {
+                const meshes = [target];
+                scene._groups.set(material._buildGroup, meshes);
+                const standard = buildStandardMeshRenderables(scene, meshes, {});
+                scene._groups.set(material._buildGroup, Object.assign(meshes, { r: standard.rebuildSingle, o: standard.renderables }));
+                scene._renderables.push(...standard.renderables);
+            } else {
+                scene._renderables.push(...pbr.renderables.filter((renderable) => renderable.mesh === target));
+            }
+            scene.meshes.push(target);
+            registerMeshScene(scene, target);
+            const own = createRenderTask({ name: "own-policy", rt: engine.scRT, autoMirror: false }, engine, scene);
+            const alternate = createRenderTask({ name: "override-policy", rt: engine.scRT, autoMirror: false }, engine, scene);
+            addMeshToTask(own, target);
+            addMeshToTask(alternate, target, { material: override });
+            own.record();
+            alternate.record();
+            const buffers: GPUBuffer[] = [];
+            for (const [task, policy] of [
+                [own, ownPolicy],
+                [alternate, overridePolicy],
+            ] as const) {
+                expect(task.execute!()).toBe(1);
+                const binding = task._transparentBindings[0]!;
+                expect(binding.renderable.mesh).toBe(target);
+                const pass = { setBindGroup: vi.fn(), setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), drawIndexed: vi.fn() };
+                binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+                const group = pass.setBindGroup.mock.calls.find(([index]) => index === 1)![1] as GPUBindGroupDescriptor;
+                const opacity = [...group.entries].map((entry) => (entry.resource as GPUBufferBinding).buffer).filter((buffer) => initial.has(buffer));
+                expect(opacity).toHaveLength(1);
+                expect(initial.get(opacity[0]!)).toEqual([0.5, policy]);
+                buffers.push(opacity[0]!);
+            }
+            expect(buffers[0]).not.toBe(buffers[1]);
+            expect(initial.get(buffers[0]!)).toEqual([0.5, ownPolicy]);
+            own.dispose();
+            alternate.dispose();
+            disposeGpuResourceRetirements(engine);
+            for (const disposers of scene._meshDisposables.values()) {
+                disposers.forEach((dispose) => dispose());
+            }
+        }
+    );
+
+    it.each([false, true])("follows explicit-task opacity crossings only with mesh refresh, including live zero skip and lifetime retirement (refresh: %s)", async (refresh) => {
+        const passDraws: (GPUBuffer | undefined)[] = [];
+        const engine = makeMockEngine({ onIndexedDraw: (encoder, buffer) => encoder === "pass" && passDraws.push(buffer) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        scene.camera = makeCamera();
+        const material = createStandardMaterial();
+        const target = initMeshTransform({
+            name: "explicit-opacity",
+            children: [],
+            visible: true,
+            material,
+            receiveShadows: false,
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                normalBuffer: {} as GPUBuffer,
+                uvBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexFormat: "uint16",
+                indexCount: 3,
+            },
+        });
+        setMeshOpacity(target, 1);
+        const meshes = [target];
+        scene._groups.set(material._buildGroup, meshes);
+        const built = buildStandardMeshRenderables(scene, meshes, {});
+        scene._groups.set(material._buildGroup, Object.assign(meshes, { r: built.rebuildSingle, o: built.renderables }));
+        scene.meshes.push(target);
+        scene._renderables.push(...built.renderables);
+        registerMeshScene(scene, target);
+        const task = createRenderTask({ name: "explicit-opacity", rt: engine.scRT, autoMirror: false }, engine, scene);
+        if (refresh) {
+            enableRenderTaskMeshRefresh(task);
+        }
+        addMeshToTask(task, target);
+        task.record();
+        expect(task.execute!()).toBe(1);
+        const original = task._renderables[0]!;
+        expect(task._opaqueBindings[0]!.renderable).toBe(original);
+        setMeshOpacity(target, 0.5);
+        expect(scene._materialSwapQueue).toEqual([target]);
+        await processMaterialSwaps(scene);
+        expect(scene._renderables[0]!.isTransparent).toBe(true);
+        passDraws.length = 0;
+        expect(task.execute!()).toBe(1);
+        const faded = task._renderables[0]!;
+        expect(faded === original).toBe(!refresh);
+        expect(task._transparentBindings).toHaveLength(refresh ? 1 : 0);
+        expect(task._opaqueBindings).toHaveLength(refresh ? 0 : 1);
+        expect(passDraws).toEqual(refresh ? [target._gpu.positionBuffer] : []);
+        const retired = vi.fn();
+        if (refresh) {
+            faded._lifetimeDisposers!.push(retired);
+        }
+        const version = scene._renderableVersion;
+        for (const value of [0, 0.5]) {
+            setMeshOpacity(target, value);
+            expect(scene._materialSwapQueue).toEqual([]);
+            passDraws.length = 0;
+            expect(task.execute!()).toBe(refresh && value === 0 ? 0 : 1);
+            expect(task._renderables[0]).toBe(faded);
+            expect(passDraws).toEqual(refresh && value !== 0 ? [target._gpu.positionBuffer] : []);
+            expect(scene._renderableVersion).toBe(version);
+        }
+        setMeshOpacity(target, 1);
+        await processMaterialSwaps(scene);
+        expect(retired).not.toHaveBeenCalled();
+        expect(task.execute!()).toBe(1);
+        expect(task._renderables[0] === original).toBe(!refresh);
+        expect(task._opaqueBindings).toHaveLength(1);
+        expect(task._transparentBindings).toHaveLength(0);
+        disposeGpuResourceRetirements(engine);
+        expect(retired).toHaveBeenCalledTimes(refresh ? 1 : 0);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(retired).toHaveBeenCalledTimes(refresh ? 1 : 0);
+    });
+
+    it.each(["standard", "pbr"] as const)("keeps %s opacity live through 0.5 → 0 → 0.5 outside the cached opaque bundle and in geometry", async (family) => {
+        const bundleDraws: (GPUBuffer | undefined)[] = [];
+        const passDraws: (GPUBuffer | undefined)[] = [];
+        const bundleReplays: GPURenderBundle[][] = [];
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({
+            bundleDescriptors,
+            onIndexedDraw: (encoder, buffer) => (encoder === "bundle" ? bundleDraws : passDraws).push(buffer),
+            onBundleReplay: (bundles) => bundleReplays.push([...bundles]),
+        });
+        const scene = createSceneContext(engine);
+        scene.camera = makeCamera();
+        const material = family === "standard" ? createStandardMaterial() : createPbrMaterial();
+        const meshes = ["faded", "opaque"].map((name) =>
+            initMeshTransform({
+                name,
+                children: [],
+                visible: true,
+                material,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint16",
+                    indexCount: 3,
+                },
+            })
+        );
+        const [faded, opaque] = meshes as [Mesh, Mesh];
+        setMeshOpacity(faded, 0.5);
+        scene._groups.set(material._buildGroup, meshes);
+        const built = family === "standard" ? buildStandardMeshRenderables(scene, meshes, {}) : await buildPbrRenderables(scene, meshes, undefined);
+        scene._groups.set(material._buildGroup, Object.assign(meshes, { r: built.rebuildSingle, o: built.renderables }));
+        scene.meshes.push(...meshes);
+        scene._renderables.push(...built.renderables);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        task.record();
+        const geometry = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }] }, engine, scene);
+        await geometry._preload!();
+        geometry.record();
+        let cached: GPURenderBundle | undefined;
+        let lastVis: number | undefined;
+        for (const [index, value] of [0.5, 0, 0.5].entries()) {
+            setMeshOpacity(faded, value);
+            expect(faded._skipColorDraw).toBe(value === 0);
+            expect(faded.visible).toBe(true);
+            passDraws.length = 0;
+            expect(task.execute!()).toBe(value ? 2 : 1);
+            lastVis ??= task._lastVis;
+            expect(task._lastVis).toBe(lastVis);
+            expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer] : []);
+            expect(task._opaqueBindings.map((binding) => binding.renderable.mesh)).toEqual([opaque]);
+            expect(task._transparentBindings.map((binding) => binding.renderable.mesh)).toEqual([faded]);
+            expect(bundleDraws).toEqual([opaque._gpu.positionBuffer]);
+            expect(bundleDescriptors).toHaveLength(1);
+            expect(task._ob).toHaveLength(1);
+            cached ??= task._ob[0];
+            expect(task._ob[0]).toBe(cached);
+            expect(bundleReplays).toHaveLength(index + 1);
+            expect(bundleReplays[index]).toEqual([cached]);
+            passDraws.length = 0;
+            geometry.execute!();
+            expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer, opaque._gpu.positionBuffer] : [opaque._gpu.positionBuffer]);
+        }
+        geometry.dispose();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("ignores colour-only omission on opaque and direct shadow lists, without invalidating bundles", () => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine);
+        const draws: string[] = [];
+        // PCF/CSM no-colour and ESM colour casters are all non-transparent;
+        // the shader-route tests exercise that classification with real builders.
+        const target = initMeshTransform({ name: "caster", children: [], visible: true, material: createStandardMaterial(), _gpu: {} as Mesh["_gpu"] });
+        const casters = [makeDrawOrderRenderable("depth-caster", {}, draws, target), makeDrawOrderRenderable("direct-caster", { _direct: true }, draws, target)];
+        scene._renderables.push(...casters);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        setMeshOpacity(target, 0);
+        task.record();
+        expect(task._transparentBindings).toHaveLength(0);
+        expect(task._opaqueBindings).toHaveLength(1);
+        expect(task._directBindings).toHaveLength(1);
+        expect(task.execute!()).toBe(2);
+        expect(draws).toEqual(["depth-caster", "direct-caster"]);
+        const lastVis = task._lastVis;
+        for (const value of [0.5, 0, 1]) {
+            setMeshOpacity(target, value);
+            draws.length = 0;
+            expect(task.execute!()).toBe(2);
+            expect(draws).toEqual(["direct-caster"]);
+            expect(task._lastVis).toBe(lastVis);
+            expect(bundleDescriptors).toHaveLength(1);
+        }
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
     it("re-records a cached bundle invalidated before scene registration", () => {
         const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
         const engine = makeMockEngine({ bundleDescriptors });
@@ -1053,6 +1352,47 @@ describe("RenderPassTask transparent sorting", () => {
         await registerScene(everyScene);
         everyScene._record();
         expect(everyCopies).toBe(2);
+    });
+
+    it("filters transmission and renderOnTop opacity live, after texture updates, but not opaque/direct bindings", async () => {
+        let copies = 0;
+        const engine = makeMockEngine({ msaaSamples: 1, onCopy: () => copies++ });
+        const scene = createSceneContext(engine);
+        scene.camera = makeCamera();
+        const draws: string[] = [];
+        const target = (): Mesh => {
+            const target = initMeshTransform({ children: [], visible: true, material: createStandardMaterial(), _gpu: {} as Mesh["_gpu"] });
+            setMeshOpacity(target, 0);
+            return target;
+        };
+        const opaque = makeDrawOrderRenderable("opaque", {}, draws, target());
+        const direct = makeDrawOrderRenderable("direct", { _direct: true }, draws, target());
+        const glass = makeDrawOrderRenderable("glass", { isTransparent: true, _transmissive: true }, draws, target());
+        const overlay = makeDrawOrderRenderable("overlay", { isTransparent: true }, draws, target());
+        const ordinary = makeDrawOrderRenderable("ordinary", { isTransparent: true }, draws);
+        overlay.mesh!.renderOnTop = true;
+        scene._renderables.push(opaque, direct, glass, overlay, ordinary);
+        enableSceneTransmission(scene, engine);
+        await registerScene(scene);
+        scene._record();
+        // A skipped transmissive binding still refreshes the snapshot at the
+        // same point as a hidden binding; the visibility check must not move.
+        expect(copies).toBe(1);
+        expect(draws).toEqual(["opaque", "direct", "ordinary"]);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const lastVis = task._lastVis;
+        for (const value of [0.5, 0, 1]) {
+            setMeshOpacity(glass.mesh!, value);
+            setMeshOpacity(overlay.mesh!, value);
+            draws.length = 0;
+            copies = 0;
+            task.execute!();
+            expect(copies).toBe(1);
+            expect(draws).toEqual(value ? ["direct", "glass", "ordinary", "overlay"] : ["direct", "ordinary"]);
+            expect(task._lastVis).toBe(lastVis);
+        }
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("uses a repeat anisotropic sampler for the transmission refraction texture", async () => {

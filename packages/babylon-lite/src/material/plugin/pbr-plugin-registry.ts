@@ -1,5 +1,6 @@
 import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
+import { pbrPluginDecorator } from "./pbr-plugin-decorator.js";
 
 let indexToFragment: ShaderFragment[] | null = null;
 let counter = 0;
@@ -22,7 +23,7 @@ export function _getPbrPluginFragment(index: number): ShaderFragment | undefined
 
 /** @internal Preserve an opt-in PBR plugin bridge across later registration and reconciliation. */
 export function _setActivePbrPluginExt(extension: PbrExt): void {
-    activeExtension = extension;
+    activeExtension = pbrPluginDecorator ? pbrPluginDecorator(extension) : extension;
 }
 
 /** @internal Return the active opt-in bridge, or the ordinary bridge before an override is installed. */

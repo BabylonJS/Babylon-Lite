@@ -19,7 +19,7 @@ do not import the feature.
 The material-owned renderer supports opaque PBR metallic-roughness (including
 unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
-clearcoat, sheen, UV2, gamma-albedo decoding, lightmaps, dielectric-reflectance
+clearcoat, sheen, UV2, gamma-albedo decoding, lightmaps, bent normals, dielectric-reflectance
 extensions, per-texture UV transforms (including material-side V-flips),
 per-material environments/local probes, material stencil state, material plugins,
 and other unsupported extensions

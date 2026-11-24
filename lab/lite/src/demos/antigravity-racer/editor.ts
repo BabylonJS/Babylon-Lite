@@ -10,7 +10,7 @@
  * camera (mouse) lets you fly around the whole loop while editing.
  */
 
-import type { EngineContext, GpuPicker, Mesh, PositionGizmo, SceneContext, UtilityLayer } from "babylon-lite";
+import type { EngineContext, GpuPicker, Mesh, PositionGizmo, SceneContext, UtilityLayer, OverlaySceneOptions } from "babylon-lite";
 import {
     addToScene,
     attachControl,
@@ -52,7 +52,8 @@ export async function createTrackEditor(
     canvas: HTMLCanvasElement,
     track: TrackData,
     hud: EditorHud,
-    input: InputSystem
+    input: InputSystem,
+    targets: OverlaySceneOptions
 ): Promise<TrackEditor> {
     const cx = track.controlPoints.reduce((s, p) => s + p.x, 0) / track.controlPoints.length;
     const cy = track.controlPoints.reduce((s, p) => s + p.y, 0) / track.controlPoints.length;
@@ -78,7 +79,7 @@ export async function createTrackEditor(
         return marker;
     });
 
-    const utilityLayer: UtilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer: UtilityLayer = createUtilityLayer(scene, targets);
     const gizmo: PositionGizmo = createPositionGizmo(engine, utilityLayer);
     const editorPointer = attachEditorPointerDrag(canvas, utilityLayer, gizmo);
     const picker: GpuPicker = createGpuPicker(scene);

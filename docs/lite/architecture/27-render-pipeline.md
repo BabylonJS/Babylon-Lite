@@ -134,6 +134,12 @@ Important fields:
 
 `addMeshToTask(task, mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the completed scene-local material group's `r` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`. Standalone geometry-view factories explicitly opt into `_sceneIndependentRebuild`; only these may fall back to `_buildGroup._rebuildSingle` when no scene group exists.
 
+For multiple meshes, `addMeshesToTask(task, meshes, { material })` queues in input order and
+publishes at most one binding generation on a live task. Failure restores the pre-call queue and
+generation. `removeMeshesFromTask(task, meshes)` compacts all task lists using a membership set
+and reselects/releases update batches once. Empty batches are no-ops; task-specific refresh hooks
+preserve the same population and removal semantics as individual calls.
+
 `RenderTask.enabled` defaults to `true`. Setting it to `false` skips the pass before updates, attachment loads, resolves, or draws.
 
 ## Runtime Flow

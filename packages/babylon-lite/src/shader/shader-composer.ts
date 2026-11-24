@@ -8,6 +8,7 @@ import { computeUboLayout } from "./ubo-layout.js";
 import { SCENE_UBO_WGSL } from "./scene-uniforms.js";
 import { wgsl } from "./wgsl.js";
 import type { MeshVbLayout } from "../mesh/mesh.js";
+import { bindingExtension } from "./binding-extension.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -194,7 +195,15 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         const entry: GPUBindGroupLayoutEntry = { binding: b, visibility: d._visibility };
         const bindingType = d._type;
         let qualifier = "";
-        let declarationType: string;
+        // Extension binding factories install their emitter before returning the typed declaration.
+        let declarationType!: string;
+        if (bindingExtension) {
+            const extension = bindingExtension(d, entry);
+            if (extension) {
+                qualifier = extension._qualifier;
+                declarationType = extension._declarationType;
+            }
+        }
         switch (bindingType._kind) {
             case "uniform-buffer":
                 entry.buffer = { type: "uniform" };

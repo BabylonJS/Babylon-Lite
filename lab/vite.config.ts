@@ -19,6 +19,8 @@ interface DemoConfigEntry {
     slug: string;
     name: string;
     description: string;
+    /** Optional hosted thumbnail; otherwise use the demo's relative JPG path. */
+    thumbnailUrl?: string;
     tags?: string[];
     mobile?: boolean;
 }
@@ -67,11 +69,12 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
         ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
         : "";
     const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
+    const thumbnailUrl = demo.thumbnailUrl ?? `/thumbnails/demo-${demo.slug}.jpg`;
     return [
         `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<a class="card-main" href="/demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
-        `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="${escapeHtml(thumbnailUrl)}" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,

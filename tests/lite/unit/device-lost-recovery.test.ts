@@ -43,6 +43,7 @@ function context(kind: string): RenderingContext {
 function engineWith(...contexts: RenderingContext[]): EngineContext {
     return {
         surfaces: [{ _renderingContexts: contexts } as unknown as SurfaceContext],
+        device: {},
     } as unknown as EngineContext;
 }
 
@@ -519,6 +520,7 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
     function trackingEngine(): EngineContext {
         return {
             _device: device(),
+            device: {},
             surfaces: [],
             _animFrameId: 0,
             _renderFn: null,

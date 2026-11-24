@@ -7,7 +7,7 @@ import { readFileSync } from "fs";
  * Resolve the version string the self-hosted engine reports at runtime (baked in via
  * the `__BL_VERSION__` define and logged as `Babylon Lite v<version>`). Without it the
  * engine falls back to its source `package.json` (0.1.0), which is stale because the
- * real version is only stamped during the npm publish pipeline.
+ * real version is only stamped by release builds.
  *
  * The stamp reflects which deploy this engine belongs to:
  *   • A published version snapshot (`PACKAGE_VERSION` set) reports that exact release.

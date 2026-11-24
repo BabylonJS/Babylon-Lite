@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
-import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import {
+    addMeshToTask,
+    addMeshesToTask,
+    createRenderTask,
+    removeMeshFromTask,
+    removeMeshesFromTask,
+    type RenderTask,
+} from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { buildStandardMeshRenderables } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
@@ -20,6 +27,8 @@ import { createPhysicsDebugLineMaterial, physicsDebugLineGroupBuilder } from "..
 import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/render/draw-update-batches";
 import { prepareTaskRenderables } from "../../../packages/babylon-lite/src/frame-graph/render-task-transaction";
 import { ensureSceneLightState } from "../../../packages/babylon-lite/src/render/lights-ubo";
+import { ensurePcfShadowTaskState, getNoColorView, preloadPcfShadowTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
+import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
 function fixture() {
     const buffers: GPUBuffer[] = [];
@@ -140,7 +149,7 @@ function expectPublishedGeneration(task: RenderTask): void {
     expect(task._ob).toBeDefined();
 }
 
-function syntheticMaterial(f: ReturnType<typeof fixture>) {
+function syntheticMaterial(f: ReturnType<typeof fixture>, isTransparent = false, direct = false) {
     const built: { renderable: Renderable; lifetime: ReturnType<typeof vi.fn>; bindings: ReturnType<typeof vi.fn>[]; batch: DrawUpdateBatch }[] = [];
     let failBind = false;
     let failBuild = false;
@@ -159,9 +168,10 @@ function syntheticMaterial(f: ReturnType<typeof fixture>) {
         const batch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
         resources._lifetimeDisposers.push(lifetime);
         const renderable: Renderable = {
-            mesh: target,
+            mesh: _mesh,
             order: 100,
-            isTransparent: false,
+            isTransparent,
+            _direct: direct,
             bind(_engine, signature) {
                 enableDrawBatchCollection(signature);
                 const dispose = vi.fn();
@@ -196,6 +206,177 @@ function syntheticMaterial(f: ReturnType<typeof fixture>) {
 }
 
 describe("base RenderTask ownership", () => {
+    it("adds a live batch in order with one binding generation instead of one per mesh", () => {
+        const f = fixture();
+        const materials = Array.from({ length: 4 }, (_, index) => syntheticMaterial(f, index === 2, index === 3));
+        const batch = f.task();
+        const singles = f.task();
+        for (const task of [batch, singles]) {
+            addMeshToTask(task, materials[0]!.mesh);
+            task.record();
+        }
+        const batchBind = vi.spyOn(batch._renderables[0]!, "bind");
+        const singleBind = vi.spyOn(singles._renderables[0]!, "bind");
+        const meshes = [materials[1]!.mesh, materials[2]!.mesh, materials[1]!.mesh, materials[3]!.mesh];
+        addMeshesToTask(batch, meshes);
+        for (const mesh of meshes) addMeshToTask(singles, mesh);
+        expect(batchBind).toHaveBeenCalledOnce();
+        expect(singleBind).toHaveBeenCalledTimes(meshes.length);
+        expect(batch._renderables.map((r) => r.mesh)).toEqual(singles._renderables.map((r) => r.mesh));
+        for (const bucket of ["_opaqueBindings", "_directBindings", "_transparentBindings"] as const) {
+            expect(batch[bucket].map((b) => b.renderable.mesh)).toEqual(singles[bucket].map((b) => b.renderable.mesh));
+        }
+        batch.dispose();
+        singles.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("removes a batch from every list with one batch-state selection and ordered removal hooks", () => {
+        const f = fixture();
+        const materials = Array.from({ length: 4 }, (_, index) => syntheticMaterial(f, index === 2, index === 3));
+        const batch = f.task();
+        const singles = f.task();
+        for (const task of [batch, singles]) {
+            addMeshesToTask(
+                task,
+                materials.map((m) => m.mesh)
+            );
+            task.record();
+            task._pendingMeshes!.push(...materials.map((m) => ({ mesh: m.mesh, material: m.material })));
+        }
+        const state = batch._batchState!;
+        const select = vi.spyOn(state, "_select");
+        const release = vi.spyOn(state, "_release");
+        const hook = (batch._removeMesh = vi.fn());
+        const meshes = [materials[1]!.mesh, materials[2]!.mesh, materials[3]!.mesh, materials[1]!.mesh, {}];
+        removeMeshesFromTask(batch, meshes);
+        for (const mesh of meshes) removeMeshFromTask(singles, mesh);
+        expect(select).toHaveBeenCalledOnce();
+        expect(release).toHaveBeenCalledOnce();
+        expect(hook.mock.calls.map(([mesh]) => mesh)).toEqual(meshes);
+        expect(batch._renderables.map((r) => r.mesh)).toEqual([materials[0]!.mesh]);
+        expect(batch._renderables.map((r) => r.mesh)).toEqual(singles._renderables.map((r) => r.mesh));
+        expect(batch._pendingMeshes).toEqual(singles._pendingMeshes);
+        for (const bucket of ["_opaqueBindings", "_directBindings", "_transparentBindings"] as const) {
+            expect(batch[bucket].map((b) => b.renderable.mesh)).toEqual(singles[bucket].map((b) => b.renderable.mesh));
+        }
+        const after = generation(batch);
+        removeMeshesFromTask(batch, meshes);
+        expect(generation(batch)).toEqual(after);
+        expect(select).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(f.engine);
+        for (const material of materials.slice(1)) {
+            for (const built of material.built) {
+                expect(built.lifetime).toHaveBeenCalledOnce();
+                expect(built.batch.destroy).toHaveBeenCalledOnce();
+            }
+        }
+        expect(materials[0]!.built[0]!.lifetime).not.toHaveBeenCalled();
+        batch.dispose();
+        singles.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it.each(["build", "bind"] as const)("rolls back the entire live batch and pending queue on %s failure", (phase) => {
+        const f = fixture();
+        const live = syntheticMaterial(f);
+        const queued = syntheticMaterial(f);
+        const candidate = syntheticMaterial(f);
+        const failing = syntheticMaterial(f);
+        const task = f.task();
+        addMeshToTask(task, live.mesh);
+        task.record();
+        task._pendingMeshes!.push({ mesh: queued.mesh, material: queued.material });
+        const pending = task._pendingMeshes!;
+        const requests = pending.slice();
+        const before = generation(task);
+        failing.fail(phase);
+        expect(() => addMeshesToTask(task, [candidate.mesh, failing.mesh])).toThrow(phase === "build" ? "build failed" : "binding failed");
+        expect(generation(task)).toEqual(before);
+        expect(task._pendingMeshes).toBe(pending);
+        expect(pending).toEqual(requests);
+        for (const material of [queued, candidate, failing]) {
+            expect(material.built[0]!.lifetime).toHaveBeenCalledOnce();
+        }
+        expect(live.built[0]!.lifetime).not.toHaveBeenCalled();
+        expect(live.built[0]!.batch.destroy).not.toHaveBeenCalled();
+        task.record();
+        expect(task._renderables.map((r) => r.mesh)).toEqual([live.mesh, queued.mesh]);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("restores an unpopulated live task after its first batch fails", () => {
+        const f = fixture();
+        const material = syntheticMaterial(f);
+        const task = f.task();
+        task.record();
+        const before = generation(task);
+        material.fail("bind");
+        expect(() => addMeshesToTask(task, [material.mesh])).toThrow("binding failed");
+        expect(generation(task)).toEqual(before);
+        expect(task._pendingMeshes).toBeUndefined();
+        expect(task._addMesh).toBeUndefined();
+        task.record();
+        expect(task._renderables).toHaveLength(0);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("treats empty batches as no-ops and skips material-less meshes unless overridden", () => {
+        const f = fixture();
+        const material = syntheticMaterial(f);
+        const task = f.task();
+        addMeshesToTask(task, []);
+        removeMeshesFromTask(task, []);
+        expect(task._pendingMeshes).toBeUndefined();
+        const bare = {} as Mesh;
+        addMeshesToTask(task, [bare, material.mesh]);
+        expect(task._pendingMeshes).toEqual([{ mesh: material.mesh, material: material.material }]);
+        expect(material.rebuild).not.toHaveBeenCalled();
+        task.record();
+        const before = generation(task);
+        const bind = vi.spyOn(task._renderables[0]!, "bind");
+        addMeshesToTask(task, []);
+        addMeshesToTask(task, [bare]);
+        removeMeshesFromTask(task, []);
+        expect(generation(task)).toEqual(before);
+        expect(bind).not.toHaveBeenCalled();
+        addMeshesToTask(task, [bare], { material: material.material });
+        expect(bind).toHaveBeenCalledOnce();
+        expect(task._renderables.map((r) => r.mesh)).toEqual([material.mesh, bare]);
+        task.dispose();
+        expect(() => addMeshesToTask(task, [bare])).toThrow("RenderTask has been disposed.");
+        expect(() => removeMeshesFromTask(task, [bare])).toThrow("RenderTask has been disposed.");
+        expect(() => removeMeshFromTask(task, bare)).not.toThrow();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("supports live PCF shadow task batches with pass-specific material views", async () => {
+        const f = await familyFixture("standard");
+        await preloadPcfShadowTaskState([f.mainMesh]);
+        const depthTexture = f.device.createTexture({ format: "depth32float", size: [16, 16], usage: 16 });
+        const generator = {
+            _config: { _mapSize: 16 },
+            _depthTexture: depthTexture,
+            _lightMatrix: new Float32Array(16),
+            _viewMatrix: new Float32Array(16),
+        } as unknown as ShadowGenerator;
+        const task = ensurePcfShadowTaskState(f.engine, f.scene, generator, [], null)._task;
+        task.record();
+        const casters = [mesh(f.material), mesh(f.material)];
+        addMeshesToTask(task, casters, { material: getNoColorView(f.material, new Map()) });
+        expect(task._renderables.map((r) => r.mesh)).toEqual(casters);
+        expect(task._opaqueBindings).toHaveLength(2);
+        expect(task._targetSignature._colorFormat).toBeUndefined();
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
+        removeMeshesFromTask(task, casters);
+        expect(task._renderables).toHaveLength(0);
+        expect(task._opaqueBindings).toHaveLength(0);
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
     it("creates scene bindings only when recording and retries failed creation", () => {
         const f = fixture();
         const task = f.task();

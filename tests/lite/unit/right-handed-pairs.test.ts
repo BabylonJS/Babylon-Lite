@@ -308,6 +308,17 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
         expect(rh).toBe(lh.replace(`let usdTangent=${t};`, `let usdTangent=-(${t});`).replace(`let usdBitangent=-(${b});`, `let usdBitangent=${b};`));
     });
 
+    it("bent normals reverse both cotangent-frame axes", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { createBentNormalFragment } = await import(`${SRC}material/pbr/fragments/bent-normal-fragment`);
+            return String(createBentNormalFragment(false, false)._fragmentSlots!.AC);
+        });
+        const t = "bnDp2p*bnDuv1.x+bnDp1p*bnDuv2.x";
+        const b = "bnDp2p*bnDuv1.y+bnDp1p*bnDuv2.y";
+        expect(lh).toContain(`let bnT=${t};`);
+        expect(rh).toBe(lh.replace(`let bnT=${t};`, `let bnT=-(${t});`).replace(`let bnB=-(${b});`, `let bnB=${b};`));
+    });
+
     it("PBR skybox mode samples the IBL cubemap with Babylon.js's right-handed Z flip", async () => {
         const [lh, rh] = await bothBuilds(async () => {
             const { pbrExt: skybox } = await import(`${SRC}material/pbr/fragments/skybox-fragment`);

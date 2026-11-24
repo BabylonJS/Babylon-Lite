@@ -1,10 +1,11 @@
 import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
-import type { NpeGetter, NpeValue } from "../npe-value.js";
+import type { NpeGetter, NpeValue, ScalarGetter } from "../npe-value.js";
 
 const LOCK_NONE = 0;
 const LOCK_PER_PARTICLE = 1;
 const LOCK_PER_SYSTEM = 2;
+const LOCK_ONCE_PER_PARTICLE = 3;
 
 function randomBetween(min: number, max: number): number {
     return min + Math.random() * (max - min);
@@ -61,19 +62,31 @@ export function createRandomDraw(minGetter: NpeGetter, maxGetter: NpeGetter): Np
  * `ParticleRandomBlock` — a random value with a lock controlling re-draw frequency. `PerParticle`
  * (the default) draws once per particle, keyed by the particle id (read lazily from the buffer, since this
  * block can build before the buffer exists). Draws per component and never short-circuits. Vector/colour
- * results use reused scratch values.
+ * results use reused scratch values. `OncePerParticle` lazy-loads a per-particle cache that owns its columns.
  */
-export const particleRandomBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
         const minGetter = ctx.input(block, "min", () => 0);
         const maxGetter = ctx.input(block, "max", () => 1);
         const lockMode = typeof block.serialized.lockMode === "number" ? block.serialized.lockMode : LOCK_PER_PARTICLE;
 
         const buffer = ctx.state.buffer!;
-        let stored: NpeValue = 0;
-        let currentLockId = -2;
         const draw = createRandomDraw(minGetter, maxGetter);
 
+        if (lockMode === LOCK_ONCE_PER_PARTICLE) {
+            const valueType = block.inputs.find((input) => input.name === "min")?.valueType ?? block.inputs.find((input) => input.name === "max")?.valueType ?? "number";
+            ctx.setOutput(
+                block.id,
+                "output",
+                valueType === "number"
+                    ? (await import("./particle-random-once.js")).createOnceRandomGetter(buffer, block.id, draw as ScalarGetter)
+                    : (await import("./particle-random-once-typed.js")).createTypedOnceRandomGetter(buffer, block.id, draw, valueType)
+            );
+            return;
+        }
+
+        let stored: NpeValue = 0;
+        let currentLockId = -2;
         const getter: NpeGetter = (i) => {
             let lockId = -2;
             if (lockMode === LOCK_PER_PARTICLE) {

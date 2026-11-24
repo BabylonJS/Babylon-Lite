@@ -4,12 +4,9 @@ import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/crea
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { buildNodeParticleSetWithBlendModes } from "../../../packages/babylon-lite/src/particle/node/npe-blend-modes";
 import { buildNodeParticleSetWithEmitterProvider } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
-import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
 import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-graph-plumbing";
-import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
 import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 interface GraphSource {
@@ -255,9 +252,6 @@ describe("Phase 3C graph plumbing", () => {
 
     it.each([
         ["default", buildNodeParticleSet],
-        ["flow-map", buildNodeParticleSetWithFlowMaps],
-        ["noise", buildNodeParticleSetWithNoiseTextures],
-        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
         ["blend", buildNodeParticleSetWithBlendModes],
     ] as const)("builds one normalized LocalVariable graph through the %s family", async (_name, builder) => {
         const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(localGraph(1, false, true)));
@@ -292,7 +286,7 @@ describe("Phase 3C graph plumbing", () => {
 
     it("keeps direct pass-through omission unsupported while the helper enables it", async () => {
         const graph = parseNodeParticleSource(passThroughSource("ParticleElbowBlock"));
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported value block "ParticleElbowBlock"');
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("ParticleElbowBlock");
 
         const normalized = await normalizeNodeParticleGraph(graph);
         expect((await buildNodeParticleSet({} as EngineContext, {} as SceneContext, normalized)).systems[0]!.targetStopDuration).toBe(7);

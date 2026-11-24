@@ -210,9 +210,9 @@ export function disposeGlyphStorage(storage: GLGlyphStorage): void {
     for (const cs of storage._curveSets.values()) {
         const gpu = cs._atlas._gpu;
         if (gpu) {
-            disposeTexture(gpu._engine, gpu._curveTex);
-            disposeTexture(gpu._engine, gpu._bandTex);
-            disposeTexture(gpu._engine, gpu._metaTex);
+            disposeTexture(gpu._curveTex);
+            disposeTexture(gpu._bandTex);
+            disposeTexture(gpu._metaTex);
             cs._atlas._gpu = null;
         }
     }

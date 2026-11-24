@@ -35,7 +35,7 @@ export function _ktx2WorkerMain(): void {
     type DecoderModule = {
         KTX2Decoder: new () => { decode(data: Uint8Array, caps: unknown, options?: unknown): Promise<{ mipmaps: { data?: Uint8Array }[] }> };
         MSCTranscoder: { UseFromWorkerThread: boolean };
-        WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean };
+        WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean; LoadWASM?: (path: string) => Promise<ArrayBuffer> };
     };
     const scope = self as unknown as {
         importScripts(url: string): void;
@@ -75,6 +75,24 @@ export function _ktx2WorkerMain(): void {
                 }
                 mod.MSCTranscoder.UseFromWorkerThread = true;
                 mod.WASMMemoryManager.LoadBinariesFromCurrentThread = true;
+                // Retry a failed transcoder WASM fetch (3 attempts) before the decoder caches its rejection, as
+                // the main-thread decoder does (`retryKtx2WasmLoads` in ktx2-loader.ts; this body cannot import it).
+                const memory = mod.WASMMemoryManager;
+                const load = memory.LoadWASM;
+                if (typeof load === "function") {
+                    memory.LoadWASM = async (path: string): Promise<ArrayBuffer> => {
+                        for (let attempt = 1; ; attempt++) {
+                            try {
+                                return await load.call(memory, path);
+                            } catch (error) {
+                                if (attempt >= 3) {
+                                    throw error;
+                                }
+                                await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+                            }
+                        }
+                    };
+                }
                 const overrides = message.wasmUrls ?? {};
                 const targets = mod as unknown as Record<string, Record<string, string> | undefined>;
                 for (const name of Object.keys(overrides)) {

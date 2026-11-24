@@ -16,9 +16,8 @@
  * slot); this module mirrors that swap in the colors array and its
  * handle⇄slot maps so callers never see slots move.
  *
- * The engine's shadow ortho auto-fit and frustum logic read
- * `mesh.boundMin/boundMax`; for thin-instanced meshes those default to a unit
- * box at the origin, so this module maintains them over all instance AABBs.
+ * Mesh bounds stay geometry-local. The engine derives shadow caster bounds
+ * from the unit geometry and each instance transform.
  */
 
 import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
@@ -52,7 +51,6 @@ interface InstancePool {
     colors: Float32Array; // capacity * 4, mirrors engine slot order
     slotToHandle: number[];
     handleToSlot: Map<number, number>;
-    handleAabbs: Map<number, [number, number, number, number, number, number]>;
 }
 
 export interface PartRenderer {
@@ -159,7 +157,6 @@ export async function createPartRenderer(engine: EngineContext, _scene: SceneCon
             colors: new Float32Array(16 * 4),
             slotToHandle: [],
             handleToSlot: new Map(),
-            handleAabbs: new Map(),
         };
     };
 
@@ -251,10 +248,8 @@ export function freeInstance(r: PartRenderer, handle: InstanceHandle): void {
     }
     pool.slotToHandle.length = lastSlot;
     pool.handleToSlot.delete(handle);
-    pool.handleAabbs.delete(handle);
     s.handlePool.delete(handle);
     setThinInstanceColors(pool.mesh, pool.colors);
-    refreshBounds(pool);
 }
 
 /** Write an instance's TRS (position, 90°-step rotation quat, size in studs). */
@@ -285,14 +280,6 @@ export function writeInstance(
             setThinInstanceColors(pool.mesh, pool.colors);
         }
     }
-
-    // World AABB of this instance (rotated unit box): half-extent per world
-    // axis = Σ |basis row component| / 2, read off the composed matrix.
-    const hx = (Math.abs(m[0]!) + Math.abs(m[4]!) + Math.abs(m[8]!)) / 2;
-    const hy = (Math.abs(m[1]!) + Math.abs(m[5]!) + Math.abs(m[9]!)) / 2;
-    const hz = (Math.abs(m[2]!) + Math.abs(m[6]!) + Math.abs(m[10]!)) / 2;
-    pool.handleAabbs.set(handle, [pos.x - hx, pos.y - hy, pos.z - hz, pos.x + hx, pos.y + hy, pos.z + hz]);
-    refreshBounds(pool);
 }
 
 /** Write an instance's color. Alpha is preserved (it encodes the stud face). */
@@ -306,29 +293,4 @@ export function writeColor(r: PartRenderer, handle: InstanceHandle, rgb: readonl
     pool.colors[slot * 4 + 1] = rgb[1];
     pool.colors[slot * 4 + 2] = rgb[2];
     setThinInstanceColors(pool.mesh, pool.colors);
-}
-
-/** Recompute mesh.boundMin/boundMax over all of a pool's instances. */
-function refreshBounds(pool: InstancePool): void {
-    if (pool.handleAabbs.size === 0) {
-        pool.mesh.boundMin = [-0.5, -0.5, -0.5];
-        pool.mesh.boundMax = [0.5, 0.5, 0.5];
-        return;
-    }
-    let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
-    for (const b of pool.handleAabbs.values()) {
-        minX = Math.min(minX, b[0]);
-        minY = Math.min(minY, b[1]);
-        minZ = Math.min(minZ, b[2]);
-        maxX = Math.max(maxX, b[3]);
-        maxY = Math.max(maxY, b[4]);
-        maxZ = Math.max(maxZ, b[5]);
-    }
-    pool.mesh.boundMin = [minX, minY, minZ];
-    pool.mesh.boundMax = [maxX, maxY, maxZ];
 }

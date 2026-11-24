@@ -20,6 +20,48 @@ The first implementation is intentionally small:
 
 This gives Babylon Lite enough structure for offscreen RTT passes, per-pass cameras, and per-pass material overrides while keeping scheduling explicit, data-oriented, and tree-shakable. If Lite ever gets a node render graph, that higher-level authoring layer may be a DAG, but the executable frame graph remains an ordered list of tasks.
 
+## Mandatory explicit output textures (PR acceptance gate)
+
+**Every rendering frame-graph task MUST provide an explicit output parameter/field identifying the texture(s) it actually rendered into. This rule is mandatory for PR acceptance.**
+
+The contract applies to scene rendering, fullscreen/post-process passes, overlays, depth rendering, copy/resolve destinations and composite tasks, in both native and compat code. Publish typed resources such as `RenderTarget`; do not expose raw GPU handles to user code. A downstream task must be able to consume the producer's declared output directly, without searching a graph, inspecting private passes, or assuming that the input texture still contains the final result.
+
+### Caller-provided destinations and task-owned allocation are both valid
+
+**A destination texture does NOT always have to be supplied as an input.** Both of these models are valid:
+
+1. The caller supplies the target, and the task renders into and publishes that target.
+2. The task allocates and owns its output textures according to its documented configuration, and publishes those textures.
+
+`GeometryRendererTask` is a valid instance of the second model: it allocates its requested G-buffer attachments and exposes the results through `geometryDepthTexture`, `geometryWorldNormalTexture`, and its other typed output accessors. It does not need caller-provided textures for all those attachments. Private intermediate/history allocation is also allowed.
+
+The task API must document allocation, ownership, resizing, load/clear behavior, and resolve semantics. An optional target with a documented allocation/default mode is not inherently a violation; however, the task must still publish the actual result in every supported mode. Caller-provided destinations must be honored rather than silently replaced for compatibility.
+
+**Self-allocation does not authorize heuristic discovery of another task's destination.** Do not select an attachment by searching for the "last active resolver", by task names or registration order, or through a callback hiding the same heuristic. A documented default destination alone does not satisfy the output contract: the actual target must still be exposed.
+
+Reading the current view of a declared output after resize/device recovery, or replacing a task-owned allocation, is valid. Keep the published output current and let the composition owner rewire dependent tasks when required. For borrowed overlay color, `createRenderTask({ name: "overlay", rt: finalColor, rst: screen, ... }, engine, scene)` remains an explicit-destination model; replacing `finalColor` with `findLastResolver(scene)` is not valid.
+
+### Explicit produced-texture results
+
+Distinguish source inputs from rendering destinations: a task may read `inputTexture`, accept or allocate a destination, and publish the produced texture as `outputTexture` (names are illustrative, not a new common wrapper API). The published output must identify the actual destination used. It may alias a source input when the GPU operation permits in-place work, or be a different texture for an out-of-place/ping-pong pass. This does not authorize sampling a texture while it is simultaneously bound as a render attachment.
+
+For multiple attachments or an MSAA resolve, expose the corresponding outputs explicitly and distinguish the multisample color from its resolved result. Never publish an earlier intermediate, a historical attachment, or a requested target that the task silently stopped using.
+
+Publish typed resource handles on the factory's returned task/result or through an explicit output binding. Keep them current when resource identity changes, and let the composition owner rewire dependents explicitly. This contract does not require per-frame result-object allocations or changing the draw-count return value of `Task.execute()`.
+
+For `RenderTask`, the returned task's public `config` is also its explicit live output binding: `config.rt` identifies the primary rendered target, `config.rst` its optional resolved result, and `config.depth` an optional separate depth output. These are the canonical destinations consumed by pass encoding, not an independently cached copy of the input arguments. Post-process tasks expose their actual result through `outputTexture` and their declared resolve output. Reusing an existing typed output binding is valid; adding another wrapper or an output-discovery callback is not required.
+
+### Blocking review checklist
+
+1. Does the task explicitly publish every texture it actually produced so downstream tasks can consume the results directly?
+2. Is the destination either supplied by the caller or selected/allocated according to the task's documented contract, without heuristic discovery of other tasks' attachments?
+3. Are color/depth/resolve outputs distinguished, with ownership and any in-place aliases clearly defined?
+4. Do output handles remain current across allocation changes, with dependent bindings updated explicitly rather than through discovery or stale handles?
+
+**If any answer is no, request changes: the PR MUST NOT be approved or merged until the output contract is corrected.** Passing tests, screenshot parity, compatibility requirements and small bundle size do not override this gate. Not requiring a destination input is not, on its own, a reason to reject a task that manages and publishes its own outputs.
+
+Existing APIs that do not publish their actual results remain migration debt. Their migration belongs in a separate PR; this documentation-only policy update does not claim that every historical task has already been migrated.
+
 ## Public API Surface
 
 ```typescript
@@ -35,7 +77,7 @@ export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, addMeshesToTask, removeMeshFromTask, removeMeshesFromTask } from "./frame-graph/render-task.js";
 export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
@@ -480,6 +522,14 @@ wrappers preserve the target receiver when forwarding attachment release.
 and builds its cached `GPURenderPassDescriptor`; `_passes` remains empty. Per frame, `execute()` runs
 UBO/light/binding updates, patches live clear/resolve views, opens the render pass, draws, and ends it.
 
+`task.config` is the public live `RenderTaskConfig` object, identical to the internal `_config`.
+Changing clear state affects the next execution; changing target layout requires recreating the task
+and dependent pipelines. `scene.defaultRenderTask` provides the factory-created default producer by
+identity, including the task installed by `createOverlayScene`; it is absent for a scene created with
+`defaultRenderTask: false` until a factory installs such a task. An overlay receives explicit color
+and resolve targets, not a discovered "last resolver". Borrowed attachments use their current views
+at execution, while overlay-owned depth retains independent clear and disposal semantics.
+
 ```typescript
 export interface RenderTaskConfig {
     name: string;
@@ -755,6 +805,29 @@ addMeshToTask(task, mesh);
 addMeshToTask(task, mesh, { material: overrideMaterialOrView });
 ```
 
+For large editor selections, use the root-exported batch APIs:
+
+```typescript
+addMeshesToTask(task: RenderTask, meshes: readonly Mesh[], opts?: { material?: Material }): void;
+removeMeshesFromTask(task: RenderTask, meshes: readonly object[]): void;
+```
+
+Batch addition preserves input order and skips meshes without a material unless an override is
+provided. Before recording it only queues requests; on a live task it builds one candidate generation
+and binds once, not once per mesh. If building or binding fails, the live generation and the original
+pending queue remain unchanged: none of that batch is retained for retry. This differs from a failed
+single addition, which retains its request for retry. Refresh-enabled tasks also roll back newly
+tracked meshes and refresh dirtiness; their batch hook deduplicates tracked meshes just like single
+adds, while override requests retain duplicates. Task-specific population strategies supply a matching
+batch hook so refresh and material-view semantics are preserved.
+
+Batch removal uses a membership set and stable in-place compaction of the pending, renderable, and
+three binding lists. It retires removed owned resources and binding batches, then selects/releases
+the update-batch state once and invalidates bundles only if an active entry was removed. Source-list
+removal hooks still run in input order; refresh tracking has its own set-based batch removal hook.
+Repeated or absent meshes are harmless. Empty arrays do nothing (without enabling population), and
+both batch APIs reject disposed tasks.
+
 **Breaking API migration:** replace `task.addMesh(mesh, options)` with
 `addMeshToTask(task, mesh, options)`, imported from `@babylonjs/lite`. The constructor and
 synchronous queue/live-add behavior are unchanged. Scene-mirroring passes no longer retain
@@ -880,8 +953,8 @@ explicit recording share target, descriptor, and dimension preparation; the expl
 updates the task-owned context only after binding and scene-BG refresh succeed.
 
 An explicit task normally keeps the renderables resolved by `addMeshToTask()`. Applications that replace
-mesh geometry or change mesh materials at runtime can opt a task into following the corresponding
-scene-renderable rebuilds:
+mesh geometry, change mesh materials, or change mesh opacity across 1 (`1 ↔ <1`) at runtime can opt
+a task into following the corresponding scene-renderable rebuilds:
 
 ```typescript
 const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);

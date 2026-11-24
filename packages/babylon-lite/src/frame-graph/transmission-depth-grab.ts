@@ -2,14 +2,55 @@ import { TU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import { _installDepthGrab, type TransmissionDepthGrabState } from "./transmission.js";
+import type { RenderTarget } from "../engine/render-target.js";
+import type { TransmissionBlitState } from "./transmission.js";
 import { wgsl } from "../shader/wgsl.js";
 /**
  * Lazy depth-grab implementation for `TransmissionOptions.grabDepth`. This module is dynamic-imported ONLY when a
  * task actually enables `grabDepth` (see `transmission.ts` → task `_preload`), so transmission scenes that do not
- * ask for the opaque-depth snapshot never fetch these shaders or pipelines. It installs itself into `transmission.ts`
- * via a module-level side-effect (`_installDepthGrab`) so the shared transmission chunk holds only a nullable seam.
+ * ask for the opaque-depth snapshot retain none of its source tracking, shaders or pipelines.
  */
+
+/** @internal Per-recording controller for the declared depth attachment. */
+export interface TransmissionDepthGrab {
+    sync(): void;
+    record(): void;
+    dispose(): void;
+}
+
+interface TransmissionDepthGrabState {
+    readonly texture: Texture2D;
+    readonly _view: GPUTextureView;
+    readonly _blit: TransmissionBlitState;
+}
+
+/** @internal Own a depth snapshot without retaining the task or guessing its attachment. */
+export function createTransmissionDepthGrab(engine: EngineContext, target: RenderTarget, publish: (texture: Texture2D | null) => void): TransmissionDepthGrab {
+    let source: GPUTexture | null | undefined;
+    let depth: TransmissionDepthGrabState | null = null;
+    return {
+        sync(): void {
+            const current = target._depthTexture;
+            if (source === current) {
+                return;
+            }
+            depth?.texture.texture.destroy();
+            source = current;
+            depth = current && target._width > 0 && target._height > 0 ? createDepthGrab(engine, current, target._width, target._height, target._descriptor.samples > 1) : null;
+            publish(depth?.texture ?? null);
+        },
+        record(): void {
+            if (depth) {
+                recordDepthGrab(engine, depth);
+            }
+        },
+        dispose(): void {
+            depth?.texture.texture.destroy();
+            depth = null;
+            publish(null);
+        },
+    };
+}
 
 // Depth grab: copy the depth attachment's NDC depth into an `r32float` texel-for-texel (no filtering — depth must
 // never be interpolated across silhouettes). The MSAA variant resolves sample 0, matching `createDepthResolveTask`.
@@ -104,7 +145,3 @@ function recordDepthGrab(engine: EngineContext, depth: TransmissionDepthGrabStat
     pass.draw(3);
     pass.end();
 }
-
-// Importing this lazy feature wires the depth-grab builder + per-frame recorder into the shared
-// transmission seam, keeping these bytes out until a task enables grabDepth.
-_installDepthGrab({ create: createDepthGrab, record: recordDepthGrab });

@@ -20,12 +20,9 @@ import type { Camera } from "../../camera/camera.js";
 import { GEOMETRY_OUTPUT, MATERIAL_ALPHA_BLEND } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { getStandardGeometryGroupBuilder } from "./standard-geometry-renderable.js";
-import { _getStandardGeometrySkeletonVelocityLoader } from "./standard-geometry-feature-hooks.js";
-import type { createStandardGeometrySkeletonVelocity } from "./standard-geometry-skeleton-velocity.js";
+import { preloadGeometryDeformationVelocity } from "../geometry-deformation-hooks.js";
 import type { createThinInstanceFragment } from "../../shader/fragments/thin-instance-fragment.js";
 import type { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
-
-let _skeletonVelocityFactory: typeof createStandardGeometrySkeletonVelocity | null = null;
 
 /** Thin-instance helpers, dynamically injected only when a geometry-pass mesh
  *  actually carries thin instances. Keeping them out of the static import graph of
@@ -48,14 +45,7 @@ let _thinInstanceHelpers: StandardGeometryThinInstanceHelpers | null = null;
  *  contribute zero bytes to non-matching scenes. */
 export async function preloadStandardGeometryFeatures(meshes: readonly Mesh[], needsVelocity: boolean): Promise<void> {
     const loads: Promise<void>[] = [];
-    const loader = _getStandardGeometrySkeletonVelocityLoader();
-    if (needsVelocity && loader && meshes.some((mesh) => !!mesh.skeleton)) {
-        loads.push(
-            loader().then((mod) => {
-                _skeletonVelocityFactory = mod.createStandardGeometrySkeletonVelocity;
-            })
-        );
-    }
+    loads.push(preloadGeometryDeformationVelocity(meshes, needsVelocity));
     if (meshes.some((mesh) => !!mesh.thinInstances)) {
         loads.push(
             Promise.all([import("../../shader/fragments/thin-instance-fragment.js"), import("../../mesh/thin-instance-gpu.js")]).then(([fragMod, gpuMod]) => {
@@ -70,11 +60,6 @@ export async function preloadStandardGeometryFeatures(meshes: readonly Mesh[], n
     if (loads.length > 0) {
         await Promise.all(loads);
     }
-}
-
-/** @internal Return the preloaded skeletal velocity factory. */
-export function _getStandardGeometrySkeletonVelocityFactory(): typeof createStandardGeometrySkeletonVelocity | null {
-    return _skeletonVelocityFactory;
 }
 
 /** @internal Return the preloaded thin-instance helpers, or null if no geometry-pass

@@ -30,6 +30,8 @@ const HANDEDNESS_EXEMPT: Record<string, string> = {
         "a right-handed build reverses both cotangent-frame axes together, and the anisotropic lobe and bent normal are quadratic in them (dot², length, cross·cross): no visible change",
     "material/pbr/fragments/flat-normal-wgsl.ts":
         "the derivative face normal is re-oriented toward the viewer right after the cross product, so its sign never depends on the handedness",
+    "material/pbr/fragments/parallax-occlusion-fragment.ts":
+        "the POM solver orients the derivative face normal toward the eye; reflecting world position, normal and eye preserves the covariant screen-ray coefficients",
     "material/node/blocks/perturb-normal.ts": "node-material normal frame: Babylon.js's PerturbNormalBlock flips only on its invertX/invertY options, never with the handedness",
     "shader/wgsl-helpers.ts": "Standard bump frame: Babylon.js flips it only with invertNormalMapX/Y, which only its glTF loader ties to the handedness",
     "text/_gpu/text-pipeline.ts": "cullMode none: winding cannot change what is drawn",
@@ -169,6 +171,7 @@ const RH_TWIN_COVERAGE: Record<string, number[]> = {
     "loader-gltf/gltf-feature-registry.ts": [322, 324, 326, 343, 347],
     "loader-gltf/gltf-parser.ts": [322, 324, 326, 343, 347],
     "loader-gltf/load-gltf.ts": [322, 324, 326, 343, 347],
+    "material/glow/glow-node.ts": [358],
     "material/node/blocks/input-block.ts": [334, 335],
     "material/node/node-geometry-renderable.ts": [346],
     "material/node/node-pipeline.ts": [334, 335],

@@ -11,7 +11,7 @@
 
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     createArcRotateCamera,
     createBillboardCustomShader,
@@ -101,7 +101,7 @@ return vec4<f32>(pal.rgb, texel.a) * in.tint;`,
         color: [1, 1, 1, 0.82],
         flipY: true,
     });
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     await registerScene(scene);
     await startEngine(engine);

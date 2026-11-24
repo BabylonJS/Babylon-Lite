@@ -5,7 +5,7 @@
  * engine's depth attachment and gets occluded by (or occludes) regular
  * geometry based on its `layerZ`.
  *
- * Reached through `addDepthHostedSpriteLayer` when a depth-hosted `Sprite2DLayer`
+ * Reached through `addDepthHostedSpriteLayerToScene` when a depth-hosted `Sprite2DLayer`
  * is added to a scene. Pure-2D scenes and mesh-only scenes pay zero runtime bytes
  * for this module when the depth-hosted sprite API is not imported.
  *

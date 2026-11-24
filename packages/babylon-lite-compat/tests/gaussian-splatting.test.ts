@@ -17,6 +17,19 @@ function fakeLiteMesh(): LiteGaussianSplattingMesh {
  * parity of the un-loaded handle.
  */
 describe("GaussianSplattingMesh", () => {
+    it("exposes mutable BJS GPU-sort preferences while Lite keeps its CPU worker fallback", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        expect(GaussianSplattingMesh.UseGpuSort).toBe(false);
+        expect(GaussianSplattingMesh.GpuSortMinFrameInterval).toBe(1);
+        expect(gs.useGpuSort).toBeNull();
+        gs.useGpuSort = true;
+        GaussianSplattingMesh.UseGpuSort = true;
+        expect(gs.useGpuSort).toBe(true);
+        expect(GaussianSplattingMesh.UseGpuSort).toBe(true);
+        gs.useGpuSort = null;
+        GaussianSplattingMesh.UseGpuSort = false;
+    });
+
     it("reports the Babylon.js class name", () => {
         const gs = new GaussianSplattingMesh("splat");
         expect(gs.getClassName()).toBe("GaussianSplattingMesh");

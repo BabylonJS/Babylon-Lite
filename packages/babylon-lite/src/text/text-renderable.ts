@@ -10,8 +10,9 @@ import { composeTrsLocalMatrix, createWorldMatrixState } from "../scene/world-ma
 import { createEulerProxy } from "../scene/scene-node.js";
 import type { EulerProxy } from "../scene/scene-node.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
-import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _addSceneRenderable, _getSceneRenderables, _observeSceneRenderables, _removeSceneRenderable } from "../scene/scene-renderable-collection.js";
+import type { SceneRenderableChangeListener } from "../scene/scene-renderable-collection.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
@@ -169,11 +170,12 @@ function ensureGpu(
         } else {
             gpu._pipeline = pipeline;
             gpu._targetKey = key;
-            // Pipeline change — per-group bind groups must be rebuilt against the new bindGroupLayout.
-            for (const g of r._data._groups) {
-                g._bindGroup = null;
-                g._bindGroupVersion = -1;
-            }
+        }
+        // Group bind groups reference this record's buffers and the pipeline's layout, so a new record (including one
+        // recreated after the previous record was released) or a pipeline change must rebuild them.
+        for (const g of r._data._groups) {
+            g._bindGroup = null;
+            g._bindGroupVersion = -1;
         }
     }
     // Assigned unconditionally: a styling feature installed after this record was created
@@ -353,20 +355,44 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
 
 /** Release GPU buffers owned by a text renderable. The underlying `TextData` and `GlyphStorage` remain caller-owned. */
 export function disposeTextRenderable(renderable: TextRenderable): void {
-    if (renderable._gpu) {
-        renderable._gpu._textU.destroy();
-        renderable._gpu._instanceBuf.destroy();
-        renderable._gpu._styleBuf.destroy();
-        renderable._gpu = null;
-    }
+    detachTextGpu(renderable)();
 }
 
-/** Attach a `TextRenderable` to a scene. Uses the scene's deferred-renderables hook. */
-export function addTextRenderable(scene: SceneContext, renderable: TextRenderable): void {
-    addDeferredSceneRenderables(scene, () => {
-        return {
-            renderables: [renderable],
-            dispose: () => disposeTextRenderable(renderable),
-        };
-    });
+/** Detach the renderable's GPU record now, so its next draw creates a fresh one, and return the record's release. */
+function detachTextGpu(renderable: TextRenderable): () => void {
+    const gpu = renderable._gpu;
+    renderable._gpu = null;
+    return () => {
+        if (gpu) {
+            gpu._textU.destroy();
+            gpu._instanceBuf.destroy();
+            gpu._styleBuf.destroy();
+        }
+    };
+}
+
+/**
+ * Adds a `TextRenderable` to the scene so it is drawn once the scene builds. Adding a member again does nothing.
+ * The scene releases the renderable's GPU buffers when the renderable is removed or the scene is disposed.
+ */
+export function addTextRenderableToScene(scene: SceneContext, renderable: TextRenderable): void {
+    _addSceneRenderable(scene, "text", renderable, () => ({ _renderable: renderable, _detach: () => detachTextGpu(renderable) }));
+}
+
+/**
+ * Removes a `TextRenderable` from the scene. It stops drawing immediately; its GPU buffers are released once
+ * in-flight frames finish. Returns `false` when the renderable was not in the scene.
+ */
+export function removeTextRenderableFromScene(scene: SceneContext, renderable: TextRenderable): boolean {
+    return _removeSceneRenderable(scene, "text", renderable);
+}
+
+/** Returns a snapshot of the scene's text renderables, in add order. */
+export function getSceneTextRenderables(scene: SceneContext): readonly TextRenderable[] {
+    return _getSceneRenderables(scene, "text");
+}
+
+/** Subscribes to the scene's text-renderable membership changes. The returned callback unsubscribes (idempotent). */
+export function onSceneTextRenderablesChanged(scene: SceneContext, listener: SceneRenderableChangeListener<TextRenderable>): () => void {
+    return _observeSceneRenderables(scene, "text", listener);
 }

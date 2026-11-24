@@ -64,7 +64,13 @@ export let _pbrBindingIdentity: ((id: number | undefined) => number | undefined)
 export let _createPbrBindingDisposers: (() => (() => void)[]) | null = null;
 /** @internal Install generic context transport without unconditional per-scene property reads or allocation. */
 export function _installPbrBindingContext(augment: NonNullable<typeof bindingContext>): void {
-    bindingContext = augment;
+    const previous = bindingContext;
+    bindingContext = previous
+        ? (context, id, disposers) => {
+              previous(context, id, disposers);
+              augment(context, id, disposers);
+          }
+        : augment;
     _pbrBindingIdentity = (id) => id;
     _createPbrBindingDisposers = () => [];
 }
@@ -233,7 +239,7 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null,
+    meshCtx: _PbrBindCtx["_mesh"],
     refractionTexture?: Texture2D | null,
     lightingId?: number,
     disposers?: (() => void)[]

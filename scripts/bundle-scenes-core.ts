@@ -15,6 +15,7 @@ import { createHash } from "crypto";
 import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
+import type { Browser } from "@playwright/test";
 import {
     bytesToRoundedKB,
     ignoredScenePayloadCompatibilityBytes,
@@ -33,6 +34,7 @@ import {
     type SceneHeadroomInput,
 } from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
+import ts from "typescript";
 import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 /**
@@ -74,7 +76,21 @@ export function terserPropertyManglePlugin(): Plugin {
 
                 // ESM chunks have separate lexical scopes. Sharing identifier names lets
                 // an unrelated, unloaded chunk change the minification of a loaded one.
-                const nameCache = { props: propertyNameCache };
+                const exportedNames: Record<string, string> = Object.create(null) as Record<string, string>;
+                const source = ts.createSourceFile(chunk.fileName, chunk.code, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+                for (const statement of source.statements) {
+                    if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+                        for (const entry of statement.exportClause.elements) {
+                            if (ts.isIdentifier(entry.name) && entry.name.text.length <= 2 && !["do", "if", "in"].includes(entry.name.text)) {
+                                const local = (entry.propertyName ?? entry.name).text;
+                                exportedNames[`$${local}`] ??= entry.name.text;
+                            }
+                        }
+                    }
+                }
+                // Rolldown already chose short cross-chunk export names. Prefer those for the local
+                // bindings too, rather than spending five bytes on each avoidable `local as export`.
+                const nameCache = { props: propertyNameCache, vars: { props: exportedNames } };
                 const result = await terserMinify(chunk.code, {
                     // terser's published ECMA union stops at 2020 but accepts 2022 at runtime
                     ecma: 2022 as unknown as ECMA,
@@ -1070,7 +1086,7 @@ const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") 
 // Only scenes with a Babylon.js reference source (lab/src/bjs/<scene>.ts) get a `bjs-` variant.
 // Lite-only demos (e.g. the text-renderer scenes 180/181, marked skipParity) have no BJS
 // counterpart, so skip them rather than failing to resolve a non-existent entry module.
-const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.filter((s) => existsSync(resolve(labDir, `src/bjs/${s}.ts`))).map((s) => `bjs-${s}`);
+const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.filter((s) => existsSync(bjsSceneEntry(s))).map((s) => `bjs-${s}`);
 
 function getAllBundleFiles(dir: string): string[] {
     const results: string[] = [];
@@ -1379,13 +1395,18 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
 }
 
 /** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
- *  `--software` flag is passed; otherwise the real GPU (SwiftShader is far slower, and
- *  several heavy scenes never reach `dataset.ready` under it on Windows).
+ *  `--software` flag is passed; otherwise the real GPU. Select Dawn's adapter directly.
+ *  Linux also needs the matching software compositor for external-image interoperability.
  *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
     const swiftShaderArgs =
         process.env.CI || softwareRenderRequested()
-            ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+            ? [
+                  "--use-webgpu-adapter=swiftshader",
+                  ...(process.platform === "linux"
+                      ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+                      : []),
+              ]
             : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
@@ -1407,15 +1428,13 @@ function softwareRenderRequested(): boolean {
  *  CI-measured baseline for scenes it never touched. That delta is noise, not a
  *  regression; the run logs this note so it is not mistaken for one.
  *
- *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
- *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
- *  scenes is the canonical way to reproduce CI's numbers for them:
+ *  Native GPU rendering remains the local default. To reproduce CI's numbers, restrict
+ *  the explicit software run to the flagged scenes:
  *
  *      pnpm build:bundle-manifest:device
  *
- *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
- *  flaky-to-unusable on Windows, where these scenes also time out. On Windows, treat CI's
- *  measurement as the authoritative one for these three. */
+ *  Software runs select and verify Dawn's SwiftShader adapter directly. Linux retains its
+ *  software-compositor flags too, because image uploads must interoperate with that backend. */
 const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
 export async function buildBundleScenes(): Promise<void> {
@@ -1445,29 +1464,6 @@ export async function buildBundleScenes(): Promise<void> {
     }
 
     // ── 1. Build all scenes ──────────────────────────────────────────────
-    /** Modules that must keep side effects (they patch prototypes via bare import). */
-    const BJS_SIDE_EFFECT_MODULES = ["animatable", "thinInstanceMesh"];
-    function isBjsSideEffectModule(id: string): boolean {
-        return BJS_SIDE_EFFECT_MODULES.some((m) => id.includes(m));
-    }
-
-    /** Override sideEffects for @babylonjs packages so Rollup can tree-shake. */
-    function bjsSideEffectsFalsePlugin(): Plugin {
-        return {
-            name: "bjs-side-effects-false",
-            resolveId: {
-                order: "pre" as const,
-                async handler(source, importer, options) {
-                    if (!source.includes("@babylonjs")) return null;
-                    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
-                    if (!resolved) return null;
-                    if (isBjsSideEffectModule(source)) return { ...resolved, moduleSideEffects: true };
-                    return { ...resolved, moduleSideEffects: false };
-                },
-            },
-        };
-    }
-
     function minimalVitePreloadPlugin(): Plugin {
         const id = "\0minimal-vite-preload";
         return {
@@ -1495,9 +1491,7 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs
-                ? [bjsSideEffectsFalsePlugin()]
-                : [litePackageResolverPlugin(liteAliasDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs ? [] : [litePackageResolverPlugin(liteAliasDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
@@ -1527,11 +1521,6 @@ export async function buildBundleScenes(): Promise<void> {
                         banner: NAME_POLYFILL,
                         ...(!isBjs && { codeSplitting: createLiteCodeSplitting() }),
                     },
-                    ...(isBjs && {
-                        treeshake: {
-                            moduleSideEffects: (id: string) => !id.includes("@babylonjs") || isBjsSideEffectModule(id),
-                        },
-                    }),
                 },
                 ...(isBjs && { target: "esnext" }),
             },
@@ -1701,7 +1690,7 @@ function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<strin
 /** How many times to attempt measuring a single Lite scene before giving up. */
 const LITE_MEASURE_ATTEMPTS = 3;
 
-/** Default budget for a Lite scene to reach its `dataset.ready` signal. */
+/** Default budget for a Lite scene to reach its explicit render-readiness signal. */
 const READY_TIMEOUT_MS_DEFAULT = 50_000;
 
 /**
@@ -1739,7 +1728,8 @@ const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
     scene164: 150_000,
 };
 
-function readyTimeoutForScene(scene: string): number {
+/** @internal Shared with focused tests of the measurement readiness budgets. */
+export function readyTimeoutForScene(scene: string): number {
     return READY_TIMEOUT_OVERRIDES_MS[scene] ?? READY_TIMEOUT_MS_DEFAULT;
 }
 
@@ -1750,12 +1740,14 @@ function readyTimeoutForScene(scene: string): number {
  * silently under-counted: the render pipeline's lazily-imported chunks only load
  * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
  * measurement rather than recording a truncated size, so we retry a few times to
- * absorb transient network flakiness before failing the build loudly.
+ * absorb transient failures before failing the build loudly. Each retry replaces
+ * the browser process so failed GPU initialization cannot poison every attempt.
  */
-async function measureLiteSceneWithRetry(
+export async function measureLiteSceneWithRetry(
     browser: any,
     port: number,
-    scene: string
+    scene: string,
+    restartBrowser: () => Promise<Browser>
 ): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
@@ -1764,15 +1756,19 @@ async function measureLiteSceneWithRetry(
         } catch (err) {
             lastError = err;
             console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+            if (attempt < LITE_MEASURE_ATTEMPTS) {
+                console.warn(`  ${scene}: restarting the measurement browser before retrying.`);
+                browser = await restartBrowser();
+            }
         }
     }
     throw new Error(
-        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
-            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This can indicate a browser/GPU initialization ` +
+            `or remote-asset failure; refusing to record an incomplete runtime size. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
     );
 }
 
-async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
+export async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
 
@@ -1790,16 +1786,74 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
 
     const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
 
+    let browser: Browser | undefined;
+    const restartBrowser = async (): Promise<Browser> => {
+        await browser?.close();
+        browser = undefined;
+        browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+        return browser;
+    };
     try {
         const tBrowser = performance.now();
         console.log("Launching measurement browser...");
-        const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+        browser = await restartBrowser();
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
+        if (process.env.CI || softwareRenderRequested()) {
+            const probe = await browser.newPage();
+            try {
+                await probe.route("**/__bundle-adapter-check__", (route) =>
+                    route.fulfill({ contentType: "text/html", body: '<!doctype html><link rel="icon" href="data:,"><title>WebGPU adapter check</title>' })
+                );
+                await probe.goto(`http://localhost:${port}/__bundle-adapter-check__`);
+                const architecture = await probe.evaluate(async () => {
+                    if (!navigator.gpu) return null;
+                    return Promise.race([
+                        (async () => {
+                            const adapter = await navigator.gpu.requestAdapter();
+                            if (!adapter || adapter.info.architecture !== "swiftshader") return adapter?.info.architecture ?? null;
+                            const device = await adapter.requestDevice();
+                            let texture: GPUTexture | undefined;
+                            let bitmap: ImageBitmap | undefined;
+                            try {
+                                const response = await fetch("/brdf-lut.png");
+                                if (!response.ok) throw new Error(`Software measurement BRDF image fetch failed: HTTP ${response.status}.`);
+                                bitmap = await createImageBitmap(await response.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+                                const size = { width: bitmap.width, height: bitmap.height };
+                                texture = device.createTexture({
+                                    size,
+                                    format: "rgba8unorm",
+                                    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+                                });
+                                device.pushErrorScope("validation");
+                                device.queue.copyExternalImageToTexture({ source: bitmap, flipY: false }, { texture, premultipliedAlpha: false }, size);
+                                await device.queue.onSubmittedWorkDone();
+                                const error = await device.popErrorScope();
+                                if (error) throw new Error(`Software measurement image upload failed: ${error.message}`);
+                                return adapter.info.architecture;
+                            } finally {
+                                bitmap?.close();
+                                texture?.destroy();
+                                device.destroy();
+                            }
+                        })(),
+                        new Promise<never>((_resolve, reject) =>
+                            setTimeout(() => reject(new Error("Software measurement adapter/image upload probe timed out after 10s.")), 10_000)
+                        ),
+                    ]);
+                });
+                if (architecture !== "swiftshader") {
+                    throw new Error(`Software bundle measurement requires the SwiftShader WebGPU adapter, got ${architecture ?? "no adapter"}.`);
+                }
+                console.log(`Measurement WebGPU adapter: ${architecture}; external-image upload verified`);
+            } finally {
+                await probe.close();
+            }
+        }
 
         // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
+            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene, restartBrowser);
             manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1830,10 +1884,12 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
-
-        await browser.close();
     } finally {
-        server.close();
+        try {
+            await browser?.close();
+        } finally {
+            server.close();
+        }
     }
 
     if (pruneManifest) {
@@ -1987,6 +2043,14 @@ export async function measurePage(
     const chunkFiles: string[] = [];
     const responseReads: Promise<void>[] = [];
     const responseReadErrors: unknown[] = [];
+    const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    page.on("pageerror", (error: Error) => pageErrors.push(error.message));
+    page.on("console", (message: { type(): string; text(): string }) => {
+        if (message.type() === "error") {
+            consoleErrors.push(message.text());
+        }
+    });
 
     page.on("response", (resp: any) => {
         const url = resp.url();
@@ -2006,21 +2070,22 @@ export async function measurePage(
 
     await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
-    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
-    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    // bundleReady explicitly means all size-relevant code has rendered, independently
+    // of visual convergence. Scenes without that signal keep their existing ready contract.
     let notReadyReason: string | undefined;
     try {
         await page.waitForFunction(
             () => {
                 const c = document.querySelector("canvas");
-                return c?.dataset.ready === "true" || c?.dataset.error != null;
+                return c?.dataset.bundleReady === "true" || c?.dataset.ready === "true" || c?.dataset.error != null;
             },
             undefined,
             { timeout: readyTimeoutMs }
         );
         notReadyReason = await page.evaluate(() => {
             const c = document.querySelector("canvas");
-            if (c?.dataset.ready === "true") return undefined;
+            if (c?.dataset.error != null) return c.dataset.error;
+            if (c?.dataset.bundleReady === "true" || c?.dataset.ready === "true") return undefined;
             return c?.dataset.error ?? "canvas reported neither ready nor error";
         });
     } catch (err) {
@@ -2033,6 +2098,12 @@ export async function measurePage(
         }
         // waitForFunction timed out: the scene set neither ready nor error.
         notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
+        if (pageErrors.length) {
+            notReadyReason += `; uncaught page errors: ${pageErrors.join("; ")}`;
+        }
+        if (consoleErrors.length) {
+            notReadyReason += `; console errors: ${consoleErrors.join("; ")}`;
+        }
     }
 
     // For Lite scenes (requireReady), a scene that never rendered would under-count

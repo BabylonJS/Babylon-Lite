@@ -78,27 +78,38 @@ function setUnpack3DLayout(engine: GLEngineContext): void {
     engine._state._unpack3DLayoutKnown = true;
 }
 
-/** Bind a 3D texture to one sampler unit. `null` unbinds only `TEXTURE_3D`; repeated binds are elided. */
-export function bindTexture3D(engine: GLEngineContext, unit: number, tex: GLTexture3D | null): void {
-    if (engine._isLost || engine._disposed || tex?._disposed) {
+/** Bind a 3D texture to one sampler unit; repeated binds are elided. Use
+ *  {@link unbindTexture3D} to clear a unit. */
+export function bindTexture3D(tex: GLTexture3D, unit: number): void {
+    const engine = tex._engine;
+    if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
-    bindTexture3DRaw(engine, unit, tex?.handle ?? null, false);
+    bindTexture3DRaw(engine, unit, tex.handle, false);
+}
+
+/** Unbind only `TEXTURE_3D` on sampler `unit` (cached). No-op on a lost/disposed context. */
+export function unbindTexture3D(engine: GLEngineContext, unit: number): void {
+    if (engine._isLost || engine._disposed) {
+        return;
+    }
+    bindTexture3DRaw(engine, unit, null, false);
 }
 
 /**
  * Bind a volume to an effect's pre-assigned `sampler3D` unit without reissuing
  * `uniform1i`. Pass `null` to unbind only the 3D target on that unit.
  */
-export function setEffectTexture3D(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void {
-    if (engine._isLost || !effect.isReady) {
+export function setEffectTexture3D(effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void {
+    const engine = effect._engine;
+    if (engine._isLost || engine._disposed || !effect.isReady) {
         return;
     }
     const unit = effect.samplerUnits[samplerName];
-    if (unit === undefined) {
+    if (unit === undefined || tex?._disposed) {
         return;
     }
-    bindTexture3D(engine, unit, tex);
+    bindTexture3DRaw(engine, unit, tex === null ? null : tex.handle, false);
 }
 
 /**
@@ -177,6 +188,7 @@ export function createTexture3DFromPixels(
         _wrapT: address,
         _wrapR: address,
         _hasMipMaps: false,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: upload,
@@ -190,7 +202,8 @@ export function createTexture3DFromPixels(
 }
 
 /** Generate a full 3D mip chain for an existing volume and replay it on context restoration. No-op after loss or disposal. */
-export function generateTexture3DMipMaps(engine: GLEngineContext, tex: GLTexture3D): void {
+export function generateTexture3DMipMaps(tex: GLTexture3D): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
@@ -200,7 +213,8 @@ export function generateTexture3DMipMaps(engine: GLEngineContext, tex: GLTexture
 }
 
 /** Update changed 3D min/mag filters and retain them across context restoration. Unchanged values are elided. */
-export function updateTexture3DSamplingMode(engine: GLEngineContext, tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void {
+export function updateTexture3DSamplingMode(tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed || (tex._minFilter === minFilter && tex._magFilter === magFilter)) {
         return;
     }
@@ -234,7 +248,8 @@ function validTexture3DWrap(gl: WebGL2RenderingContext, mode: GLenum): boolean {
 }
 
 /** Update changed S/T/R wrapping and retain it across context restoration. Unchanged values are elided. */
-export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void {
+export function updateTexture3DWrapMode(tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed || (tex._wrapS === wrapS && tex._wrapT === wrapT && tex._wrapR === wrapR)) {
         return;
     }
@@ -260,7 +275,8 @@ export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3
 /** Dispose a 3D texture and invalidate any units that still reference its handle.
  * Deregistration is expected O(1); shared references retain their registry entry
  * until the final release, and repeated disposal is a no-op. */
-export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): void {
+export function disposeTexture3D(tex: GLTexture3D): void {
+    const engine = tex._engine;
     if (tex._disposed) {
         return;
     }

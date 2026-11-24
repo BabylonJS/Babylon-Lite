@@ -22,6 +22,9 @@ export interface RenderingContext {
 /** Return the surface's live rendering-context list in render order. */
 export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[];
 
+/** Move a registered context to its final position in the surface's render order. */
+export function moveRenderingContext(surface: SurfaceContext, context: RenderingContext, index: number): boolean;
+
 /** Return the rendering context's stable family identifier. */
 export function getRenderingContextKind(context: RenderingContext): string;
 
@@ -29,7 +32,29 @@ export function getRenderingContextKind(context: RenderingContext): string;
 export interface SceneContext extends RenderingContext {
     /** Optional display name for tooling and diagnostics. */
     name?: string;
+    /** Factory-created default producer; custom graphs retain their own task handles. */
+    readonly defaultRenderTask?: RenderTask;
 }
+
+/** Create a scene that composites over a base scene on the same surface. */
+export interface OverlaySceneOptions {
+    rt: RenderTarget;
+    rst?: RenderTarget;
+}
+export function createOverlayScene(baseScene: SceneContext, options: OverlaySceneOptions): SceneContext;
+
+/** A utility scene and the scene it composites onto. */
+export interface UtilityLayer {
+    readonly scene: SceneContext;
+    readonly mainScene: SceneContext;
+}
+export interface UtilityLayerOptions extends OverlaySceneOptions {
+    addDefaultLight?: boolean;
+    lightIntensity?: number;
+}
+export function createUtilityLayer(mainScene: SceneContext, options: UtilityLayerOptions): UtilityLayer;
+export function registerUtilityLayer(utility: UtilityLayer): Promise<void>;
+export function disposeUtilityLayer(utility: UtilityLayer): void;
 
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal — not user-facing. */
@@ -92,9 +117,16 @@ export function disposeEngine(engine: EngineContext): void;
 export function renderFrame(engine: EngineContext, delta: number, surfaces?: readonly [SurfaceContext, ...SurfaceContext[]]): void;
 
 export interface EngineOptions extends SurfaceOptions {
+    readonly device?: never;
     readonly requiredLimits?: Record<string, GPUSize64 | undefined>;
     readonly useHighPrecisionMatrix?: boolean;
     readonly useFloatingOrigin?: boolean;
+}
+
+export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
+    device: DeviceContext;
+    requiredLimits?: never;
+    requiredFeatures?: never;
 }
 
 export interface EngineFeatureOptions extends EngineOptions {
@@ -105,6 +137,7 @@ export function createEngineWithFeatures(canvas: RenderCanvas, options: EngineFe
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
+export function createEngine(canvas: RenderCanvas, options: EngineDeviceOptions): Promise<EngineContext>;
 ```
 
 ### Internal Types (not exported)
@@ -129,15 +162,81 @@ interface EngineContextInternal extends EngineContext {
 ### Initialization Sequence (`createEngine`)
 
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
-2. **Device request**: `createEngine` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. The opt-in `createEngineWithFeatures` wrapper additionally validates and requests explicit adapter-supported features such as `shader-f16`, without retaining feature-selection logic in ordinary engine bundles.
+2. **Device request**: `createDevice` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. `createEngineWithFeatures` installs an internal feature resolver that validates and adds explicit features such as `shader-f16`; bundles that never call it fold the resolver check away.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
 6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
 
+### Preparing a Device
+
+`createDevice()` performs steps 1-2 independently of a canvas. Import it from the
+package root into a small bootstrap bundle to overlap GPU initialization with
+downloading application code:
+
+```typescript
+const [device, app] = await Promise.all([createDevice(), import("./app.js")]);
+const engine = await createEngine(canvas, { device });
+await app.start(engine);
+```
+
+An engine created with `{ device }` skips acquisition; without it, `createEngine` calls
+`createDevice` itself. Configure limits when creating the device; its adapter and optional
+features are selected during acquisition. `EngineDeviceOptions` rejects conflicting
+acquisition options, including explicit features. `engine.device` exposes the context but
+never its native handle.
+
+A device context backs exactly one engine, which owns it: `disposeEngine` destroys the
+device, and passing the same context to a second engine throws. Ownership transfers only
+after initialization succeeds. If initialization fails, the caller can dispose or retry
+with a supplied context that remains unclaimed. A partially initialized canvas is not
+automatically unconfigured, matching existing failure behavior.
+
+Opt-in recovery requests a replacement with the context's original limits and updates
+the context in place.
+See [Device Context](device-context.md) for the full ownership and recovery specification.
+
 ### Rendering-Context Introspection
 
 `getRenderingContexts(surface)` returns the surface's existing registry array as a readonly live view; it does not allocate a snapshot. Registration and unregistration are therefore visible through a previously returned reference, in render order, with no per-frame work. `getRenderingContextKind(context)` returns `"scene"`, `"frame-graph-context"`, `"effect-renderer"`, `"sprite-renderer"`, or `"text-renderer"` for the current built-in contexts. Its return type is intentionally the open `string` type, so adding a new context family is not a breaking API change. It throws a `TypeError` when passed a structural public object that is not a rendering context created by Lite. A utility layer registers an ordinary scene context with the default name `"UtilityLayer"`; tools can display `SceneContext.name` without treating utility layers as a separate rendering-context family.
+
+### Render Order, Overlay Scenes, and Utility Layers
+
+`moveRenderingContext(surface, context, index)` moves an already registered context to its final integer position `index` (clamped to the registry bounds) and returns `false` without changing anything for an unregistered context. Non-integer indices throw `RangeError` before the registry is changed. It locates the context by identity, removes it, and inserts it into the same live registry array at the clamped position; moving an already-correct context also returns `true`. Contexts render in list order. Its standalone `rendering-context-order.ts` module imports the surface and context types only, allowing the operation to tree-shake from applications that never use it.
+
+Every ordinary scene clears its configured target. To composite another scene, call `createOverlayScene(baseScene, { rt, rst? })` with the explicit final color destination. The base supplies the surface and registration ordering only. `createUtilityLayer(mainScene, { rt, rst?, addDefaultLight?, lightIntensity? })` uses the same contract, follows the main camera and optionally adds its default light. Siblings and nested overlays must receive the intended color targets explicitly. Their order remains depth-first, with siblings in registration order and later text contexts on top.
+
+An overlay scene (including a utility layer) whose base scene is not registered on the surface (not yet registered, unregistered, or disposed) stays registered but skips its `_update` and `_record` work. When its base scene is registered again, scene registration moves it back before its associated overlays and groups those overlays after it. Explicitly moving contexts afterward can change this order, so callers using `moveRenderingContext` must preserve the overlay grouping.
+
+Overlay scenes may themselves host overlay scenes or utility layers. Their groups remain contiguous in depth-first order, with sibling overlays in registration order. An overlay is active only while every scene in its base chain is registered. Because an overlay's base is fixed at creation, `createOverlayScene` wraps the overlay's record once, at creation; unregistering and re-registering the overlay adds no callbacks or wrappers.
+
+Scene registration has one optional, module-level seam: `_installOverlaySceneRegistration(registered)` in `scene/scene-core.ts`. `createOverlayScene` installs it; `scene/overlay-scene.ts` owns the installed function, the inactive-base wrapper, descendant discovery, and explicit grouping. Apps that never import `createOverlayScene` tree-shake the installer, so the minifier removes the seam call entirely and single-scene or multi-surface apps carry no overlay code. Registration calls the installed function only after a new context is successfully inserted, including on the shadow-support registration path. The installed function resolves the topmost root of the overlay tree; while that root is unregistered nothing moves, so siblings registered meanwhile keep their registration order. Otherwise it moves the root before any earlier explicit descendant and recursively moves each direct child and its subtree after the root in their existing relative order. Once installed, the seam applies to every engine in the app; on a surface without overlays its grouping is a no-op. No sorting or registry search is added to the per-frame render loop.
+
+#### Explicit attachment contract (breaking change)
+
+**The mandatory [explicit-output PR acceptance rule](28-frame-graph.md#mandatory-explicit-output-textures-pr-acceptance-gate) applies to every rendering task: it must expose the texture(s) it actually produced. Tasks may receive destinations or allocate their own outputs, as `GeometryRendererTask` does; requiring all destinations as inputs is not a universal rule. Input and output textures may be identical or different when the GPU operation permits it. Reject missing or misleading output contracts; compatibility and passing visual tests are not exceptions.**
+
+This overlay API specifically borrows an existing color destination: `createOverlayScene(baseScene, { rt, rst? })` therefore requires the destination color target, and optionally its single-sample resolve target. `createUtilityLayer(mainScene, options)` requires the same fields in `UtilityLayerOptions`. This requirement is specific to these APIs, not a prohibition on other tasks allocating their own outputs. The base scene determines surface, ordering and registration lifetime only, never color-resource selection.
+
+The overlay is created without a default task, then installs one automatic scene-render task with `rt`, `rst`, `sharedRt: true`, and `clr: false`. It owns a separate depth/stencil target matching the color target's size, sample count and depth convention; depth is cleared even when color is loaded. It neither allocates nor disposes the borrowed color/resolve targets. Their producer must initialize them before the overlay executes; registration may occur in either order. Execution reads their live views, including after resize, without scanning tasks or overriding an attachment view.
+
+`scene.defaultRenderTask` exposes the factory-created producer by identity (undefined with `defaultRenderTask: false`). Every render task exposes its existing live configuration as `task.config`; the internal `_config` aliases the same object. Ordinary scenes can therefore pass `scene.defaultRenderTask.config` directly to an overlay without duplicating target creation or searching the graph. This is the default producer's configuration, not an automatically selected final post-process output. Custom producers continue to use `createSceneContext(surface, { defaultRenderTask: false })` and `addTask(scene, createRenderTask({ name: "scene", rt, rst, depth? }, engine, scene))`. Replacing a task, changing its format/sample count, or changing the output of a post-process chain requires explicit consumer rewiring/recreation; the overlay never discovers replacements and never infers task enablement. Callers must gate consumers together with disabled producers. Unregistered ancestors still suspend the overlay scene.
+
+The private overlay depth target reuses its color target's size resolver through the shared render-target state factory. Its size getter reads the supplied color target's current descriptor on every rebuild, including when a texture facade replaces the descriptor's size object. This preserves scaled/custom sizing without pulling scaled-size interpretation into ordinary overlay bundles. For `surface.scRT`, whose descriptor size is a placeholder, depth uses the live surface size instead. Draw-update dimensions come from the task-owned depth target when available, so overlays registered before their producer have valid dimensions without per-frame dimension synchronization.
+
+For post-processing, calculate AO and blur in single-sample textures, then write the final composite into the explicit MSAA color target used by overlays. Resolve to the screen after composition. Any later effect must write that same authoritative color chain, not modify only `scRT` before an older MSAA image is resolved over it. There is no swapchain readback, initialization shader, implicit color copy, or new WGSL. Single-sample overlays may target `scRT` directly regardless of the surface's default sample count.
+
+Transmission on a borrowed target must use `enableRenderTaskTransmission(task, engine, { linear: false })` and an explicitly configured linear/tone-mapping chain. Automatic linear-offscreen retargeting rejects borrowed targets rather than replacing their color destination. Segmented transmission clears the overlay's private depth on the first segment and loads it on resumed segments, independently of color load.
+
+Transmission source bindings are refreshed from the declared color and effective depth targets immediately before a grab when their GPU textures change. This supports an overlay recorded before its borrowed color producer is built, without rebinding unchanged sources or doing source-refresh work on frames with no grab. `grabDepth: true` snapshots `config.depth ?? config.rt`, matching the actual pass attachment rather than the borrowed color target's possibly unrelated depth.
+
+Depth-grab source tracking, publication and resource lifetime belong entirely to the lazily imported depth-grab module. The opt-in task preload supplies its factory; each recording creates a private depth controller from the declared depth target. Transmission invokes optional synchronize/record/dispose hooks without retaining depth-grab interpretation or a module-level registration side effect. Color blit sizing reads the source target directly when rebuilding its binding, rather than duplicating target dimensions in cached state.
+
+Migration: allocate the intended color target, pass it to `createRenderTask`, and pass `{ rt, rst }` to every sibling/nested overlay sharing it. A depth-bearing producer target can be borrowed safely: overlays always use their own separate depth. A replacement overlay task must itself specify `clr: false` and borrowed target ownership.
+
+#### Module: overlay scene
+
+The implementation is `scene/overlay-scene.ts`; the previous `swapchain-overlay.ts` discovery module is removed. Registration grouping and absent-ancestor suspension remain opt-in. The overlay task borrows color and resolve targets, owns its independent depth, and uses the ordinary render-task execution path. Focused registration/attachment tests cover explicit post-process output, independent depth, single-sample output on an MSAA surface, live view replacement, borrowed ownership and API validation. Browser integration coverage retains nested layers and text ordering at 1x and 4x MSAA.
 
 ### Render Targets
 
@@ -363,9 +462,9 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 
 ## Dependencies
 
-- **Imports**: `SceneContext` from `../scene/scene.js` (type-only, for `start()` parameter).
+- **Ordering helper**: type-only imports of `RenderingContext` and `SurfaceContext`.
+- **Utility overlay hooks**: engine and scene types, the ordering helper, and scene-overlay registration/configuration seams.
 - **External**: WebGPU API (`navigator.gpu`, `GPUDevice`, `GPUCanvasContext`, etc.).
-- **No other internal dependencies.**
 
 ## Test Specification
 
@@ -377,6 +476,7 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
 | `rendering-context query is live and readonly`    | Verify stable array identity, registration-order updates, and public kind discriminators       |
+| `rendering-context ordering`                      | Verify clamped moves, unregistered contexts, and stable utility-layer grouping and lifecycle   |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 
@@ -385,6 +485,8 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | File                                    | Size       | Purpose                                                                                                |
 | --------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `src/engine/engine.ts`                  | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/rendering-context-order.ts` | ~20 lines  | Tree-shakable move operation for a surface's rendering-context registry                                |
+| `src/scene/overlay-scene.ts`            | ~110 lines | Opt-in `createOverlayScene`, the installed registration seam, and contiguous ordering                  |
 | `src/engine/engine-dispose.ts`          | ~25 lines  | Explicit engine teardown and synchronous resource-retirement drain                                     |
 | `src/engine/gpu-resource-retirement.ts` | ~110 lines | Deferred retirement, exactly-once batch ownership, and awaitable teardown                              |
 | `src/engine/gpu-timer.ts`               | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |

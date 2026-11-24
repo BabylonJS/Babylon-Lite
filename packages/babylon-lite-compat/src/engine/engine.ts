@@ -45,6 +45,114 @@ import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
+let lastCreatedEngine: AbstractEngine | null = null;
+
+/** @internal Last compat engine constructed in this realm, matching Babylon.js EngineStore support checks. */
+export function _getLastCreatedEngine(): AbstractEngine | null {
+    return lastCreatedEngine;
+}
+
+function setLastCreatedEngine(engine: AbstractEngine): void {
+    lastCreatedEngine = engine;
+}
+
+/** Babylon.js `EngineFeatures` capability shape. */
+export interface EngineFeatures {
+    forceBitmapOverHTMLImageElement: boolean;
+    supportRenderAndCopyToLodForFloatTextures: boolean;
+    supportDepthStencilTexture: boolean;
+    supportShadowSamplers: boolean;
+    uniformBufferHardCheckMatrix: boolean;
+    allowTexturePrefiltering: boolean;
+    trackUbosInFrame: boolean;
+    checkUbosContentBeforeUpload: boolean;
+    supportCSM: boolean;
+    basisNeedsPOT: boolean;
+    support3DTextures: boolean;
+    needTypeSuffixInShaderConstants: boolean;
+    supportMSAA: boolean;
+    supportSSAO2: boolean;
+    supportIBLShadows: boolean;
+    supportMeshBlending: boolean;
+    supportExtendedTextureFormats: boolean;
+    supportSwitchCaseInShader: boolean;
+    supportSyncTextureRead: boolean;
+    needsInvertingBitmap: boolean;
+    useUBOBindingCache: boolean;
+    needShaderCodeInlining: boolean;
+    needToAlwaysBindUniformBuffers: boolean;
+    supportRenderPasses: boolean;
+    supportSpriteInstancing: boolean;
+    forceVertexBufferStrideAndOffsetMultiple4Bytes: boolean;
+    // Babylon.js publishes this underscore-prefixed field as part of EngineFeatures.
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal
+    _checkNonFloatVertexBuffersDontRecreatePipelineContext: boolean;
+}
+
+function createWebGpuEngineFeatures(): EngineFeatures {
+    return {
+        forceBitmapOverHTMLImageElement: true,
+        supportRenderAndCopyToLodForFloatTextures: true,
+        supportDepthStencilTexture: true,
+        supportShadowSamplers: true,
+        uniformBufferHardCheckMatrix: false,
+        allowTexturePrefiltering: true,
+        trackUbosInFrame: true,
+        checkUbosContentBeforeUpload: true,
+        supportCSM: true,
+        basisNeedsPOT: false,
+        support3DTextures: true,
+        needTypeSuffixInShaderConstants: true,
+        supportMSAA: true,
+        supportSSAO2: true,
+        supportIBLShadows: false,
+        supportMeshBlending: true,
+        supportExtendedTextureFormats: true,
+        supportSwitchCaseInShader: true,
+        supportSyncTextureRead: false,
+        needsInvertingBitmap: false,
+        useUBOBindingCache: false,
+        needShaderCodeInlining: true,
+        needToAlwaysBindUniformBuffers: true,
+        supportRenderPasses: true,
+        supportSpriteInstancing: true,
+        forceVertexBufferStrideAndOffsetMultiple4Bytes: true,
+        _checkNonFloatVertexBuffersDontRecreatePipelineContext: true,
+    };
+}
+
+function createNullEngineFeatures(): EngineFeatures {
+    return {
+        forceBitmapOverHTMLImageElement: false,
+        supportRenderAndCopyToLodForFloatTextures: false,
+        supportDepthStencilTexture: false,
+        supportShadowSamplers: false,
+        uniformBufferHardCheckMatrix: false,
+        allowTexturePrefiltering: false,
+        trackUbosInFrame: false,
+        checkUbosContentBeforeUpload: false,
+        supportCSM: false,
+        basisNeedsPOT: false,
+        support3DTextures: false,
+        needTypeSuffixInShaderConstants: false,
+        supportMSAA: false,
+        supportSSAO2: false,
+        supportIBLShadows: false,
+        supportMeshBlending: false,
+        supportExtendedTextureFormats: false,
+        supportSwitchCaseInShader: false,
+        supportSyncTextureRead: false,
+        needsInvertingBitmap: false,
+        useUBOBindingCache: false,
+        needShaderCodeInlining: false,
+        needToAlwaysBindUniformBuffers: false,
+        supportRenderPasses: true,
+        supportSpriteInstancing: false,
+        forceVertexBufferStrideAndOffsetMultiple4Bytes: false,
+        _checkNonFloatVertexBuffersDontRecreatePipelineContext: false,
+    };
+}
+
 /** Babylon.js `AbstractEngineOptions` subset accepted by the compat engine. */
 export interface AbstractEngineOptions extends LiteEngineOptions {
     antialias?: boolean;
@@ -96,6 +204,11 @@ export abstract class AbstractEngine {
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
 
+    /** Babylon.js engine capability flags for Lite's WebGPU backend. */
+    // Babylon.js publishes this underscore-prefixed property on AbstractEngine.
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal
+    public _features: EngineFeatures = createWebGpuEngineFeatures();
+
     /**
      * @internal Whether this engine has no GPU device (a {@link NullEngine}). Headless
      * engines build their Lite scene context with no frame-graph render task and are
@@ -124,6 +237,19 @@ export abstract class AbstractEngine {
      * configuration internally, so this is a settable no-op kept for API shape.
      */
     public useReverseDepthBuffer = false;
+    private _maxFramesInFlight = 0;
+    public get maxFramesInFlight(): number {
+        return this._maxFramesInFlight;
+    }
+    public set maxFramesInFlight(value: number) {
+        if (value !== 0) {
+            unsupported(
+                "WebGPUEngine.maxFramesInFlight",
+                "Lite's frame graph owns command submission and GPU-resource retirement; a nonzero limit needs a renderer-wide scheduling and lifetime policy in existing hot paths."
+            );
+        }
+        this._maxFramesInFlight = value;
+    }
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
@@ -165,6 +291,7 @@ export abstract class AbstractEngine {
     private _sceneMutationPauseRevision = 0;
 
     public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
+        setLastCreatedEngine(this);
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
@@ -466,6 +593,9 @@ export abstract class AbstractEngine {
         if (this._initialized) {
             disposeEngine(this._lite);
         }
+        if (lastCreatedEngine === this) {
+            lastCreatedEngine = null;
+        }
     }
 
     /** Babylon.js manual frame-pump entry point — unsupported (Lite's frame graph owns the frame). */
@@ -548,6 +678,7 @@ export abstract class AbstractEngine {
             scene._buildShadowGenerators();
             await scene._parseNodeMaterials();
             await scene._awaitPendingTextures();
+            scene._ensureRegisteredMaterialsRenderable();
             scene._bakeGroundUvs();
             scene._flushPendingAdds();
             scene._buildMorphTargets();
@@ -632,7 +763,24 @@ export class Engine extends ThinEngine {
  * (sibling to {@link Engine}). This is the natural engine for the compat layer
  * since Babylon Lite is WebGPU-only.
  */
-export class WebGPUEngine extends AbstractEngine {}
+export class WebGPUEngine extends AbstractEngine {
+    private _asynchronousPipelineCreation = false;
+
+    /** Babylon.js opt-in asynchronous render-pipeline creation. */
+    public get asynchronousPipelineCreation(): boolean {
+        return this._asynchronousPipelineCreation;
+    }
+
+    public set asynchronousPipelineCreation(value: boolean) {
+        if (value) {
+            unsupported(
+                "WebGPUEngine.asynchronousPipelineCreation",
+                "Lite's renderer creates pipelines inside its existing draw and frame-graph hot paths; omitting draws while pipelines compile requires a renderer-owned pass-replay, mesh-coherence, and snapshot-lifecycle policy."
+            );
+        }
+        this._asynchronousPipelineCreation = false;
+    }
+}
 
 /** A degenerate canvas stand-in for the deviceless {@link NullEngine}. */
 const NULL_CANVAS = { width: 0, height: 0 } as unknown as RenderCanvas;
@@ -656,6 +804,7 @@ export class NullEngine extends WebGPUEngine {
     public constructor() {
         super(NULL_CANVAS);
         this._headless = true;
+        this._features = createNullEngineFeatures();
         // Back the headless engine with Lite's real device-less engine context. No GPU
         // device to acquire — usable immediately, no `initAsync()` needed.
         this._lite = createNullEngine();

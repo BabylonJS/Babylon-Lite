@@ -29,6 +29,14 @@
         ".": {
             "import": "./src/index.ts",
             "types": "./src/index.ts"
+        },
+        "./native": {
+            "import": "./src/native/index.ts",
+            "types": "./src/native/index.ts"
+        },
+        "./family": {
+            "import": "./src/family.ts",
+            "types": "./src/family.ts"
         }
     },
     "files": [
@@ -45,6 +53,14 @@
             ".": {
                 "import": "./dist/index.js",
                 "types": "./dist/index.d.ts"
+            },
+            "./native": {
+                "import": "./dist/native/index.js",
+                "types": "./dist/native/index.d.ts"
+            },
+            "./family": {
+                "import": "./dist/family.js",
+                "types": "./dist/family.d.ts"
             }
         }
     },

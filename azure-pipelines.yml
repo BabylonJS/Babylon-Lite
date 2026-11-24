@@ -242,7 +242,7 @@ stages:
                   displayName: "Install dependencies"
 
                 - script: bash scripts/browserstack-wait.sh pnpm test:integration-cloud
-                  displayName: "Run nonvisual point-splatting WebGPU tests"
+                  displayName: "Run nonvisual WebGPU integration tests"
                   env:
                       CI: "true"
                       LAB_TEST_PORT: "5179"
@@ -708,8 +708,8 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Type-checks, builds, and unit-tests the opt-in compatibility layer so
           # regressions are caught in PR CI. NOTE: this job intentionally does NOT
-          # publish the package — @babylonjs/lite-compat is not released yet. The
-          # npm-publish pipeline only publishes packages/babylon-lite/build.
+          # publish the package — @babylonjs/lite-compat is published to npm by the
+          # internal Azure DevOps release pipeline alongside @babylonjs/lite.
           - job: Compat
             displayName: "Compat Layer"
             pool:

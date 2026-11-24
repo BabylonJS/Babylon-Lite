@@ -19,6 +19,8 @@ export interface DrawUpdateContext {
     readonly targetHeight: number;
     /** @internal Active pass camera. Null for camera-less passes. */
     readonly _camera?: Camera | null;
+    /** @internal Actual viewport-adjusted aspect used by the pass's scene UBO. */
+    _projectionAspect?: number;
 }
 
 /** @internal Feature-owned work collected during binding updates and flushed before the render pass. */

@@ -83,10 +83,8 @@ describe("camera replacement after the first frame", () => {
             _lastFoVersion: -1,
             _shadowUboData: new Float32Array(24),
             _casterMeshes: [],
-            _casterMaterials: [],
-            _casterMatGens: [],
-            _casterMeshGens: [],
-            _casterMatFeatures: [],
+            _casterSnapshots: new Map(),
+            _materialSnapshots: new Map(),
             _scene: scene,
         } satisfies PcfTaskState;
         const sg = {

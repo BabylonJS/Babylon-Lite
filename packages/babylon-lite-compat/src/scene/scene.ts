@@ -36,6 +36,9 @@ import {
     invertMat4,
     multiplyMat4,
     onPhysicsAfterStep,
+    getMeshSkeleton,
+    getParticleSystems,
+    getMaterialFamily,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -47,7 +50,12 @@ import type {
     PickingInfo as LitePickingInfo,
     Mat4,
     Material as LiteMaterial,
+    PbrMaterialProps,
+    StandardMaterialProps,
     EngineContext,
+    Skeleton as LiteSkeleton,
+    ParticleSystem as LiteParticleSystem,
+    AnimationGroup as LiteAnimationGroup,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -57,7 +65,8 @@ import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera, FreeCamera } from "../cameras/cameras.js";
-import { StandardMaterial } from "../materials/materials.js";
+import { PBRMaterial, StandardMaterial } from "../materials/materials.js";
+import type { Material } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
@@ -73,6 +82,10 @@ import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
+import { Skeleton } from "../bones/skeleton.js";
+import { ParticleSystem } from "../particles/particle-system.js";
+import type { MorphTargetManager } from "../morph/morph.js";
+import { PostProcessRenderPipelineManager } from "../post-processes/post-process-render-pipeline-manager.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -153,14 +166,7 @@ export class Scene extends AbstractScene {
      */
     public get animationGroups(): AnimationGroup[] {
         const liteGroups = this._lite.animationGroups ?? [];
-        return liteGroups.map((g) => {
-            let wrapper = this._animationGroupCache.get(g);
-            if (!wrapper) {
-                wrapper = AnimationGroup._fromLite(g, this._engine._lite, this);
-                this._animationGroupCache.set(g, wrapper);
-            }
-            return wrapper;
-        });
+        return liteGroups.map((g) => this._wrapAnimationGroup(g));
     }
 
     /** Babylon.js `scene.getAnimationGroupByName(name)` — first loaded animation group with a matching name, else `null`. */
@@ -168,8 +174,71 @@ export class Scene extends AbstractScene {
         return this.animationGroups.find((g) => g.name === name) ?? null;
     }
 
+    /** @internal Return the canonical compat wrapper for a loaded Lite animation group. */
+    public _wrapAnimationGroup(
+        lite: LiteAnimationGroup,
+        targetMapper: (target: object | undefined, path: string, componentIndex?: number) => readonly unknown[] = (target, path, componentIndex) =>
+            this._wrapAnimationTargets(target, path, componentIndex),
+        retained?: AnimationGroup
+    ): AnimationGroup {
+        let wrapper = retained ?? this._animationGroupCache.get(lite);
+        if (!wrapper) {
+            wrapper = AnimationGroup._fromLite(lite, this._engine._lite, this, targetMapper);
+        } else if (retained) {
+            wrapper._rebindLiteHost(this._engine._lite, this, targetMapper);
+        }
+        this._animationGroupCache.set(lite, wrapper);
+        return wrapper;
+    }
+
+    /** @internal Map a Lite animation target to Babylon.js node or morph-target wrappers. */
+    public _wrapAnimationTargets(target: object | undefined, path: string, componentIndex?: number): readonly unknown[] {
+        if (!target) {
+            return [target];
+        }
+        if (path !== "weights" || componentIndex === undefined) {
+            return [this._meshWrappers.get(target) ?? target];
+        }
+        const result: unknown[] = [];
+        for (const node of (target as { children?: object[] }).children ?? []) {
+            const wrapper = this._meshWrappers.get(node) as (Mesh & { morphTargetManager?: { getTarget(index: number): unknown } | null }) | undefined;
+            const morphTarget = wrapper?.morphTargetManager?.getTarget(componentIndex);
+            if (morphTarget) {
+                result.push(morphTarget);
+            }
+        }
+        return result.length > 0 ? result : [this._meshWrappers.get(target) ?? target];
+    }
+
     public get animatables(): Animatable[] {
         return this._runningAnimatables;
+    }
+
+    /** Babylon.js `scene.skeletons` — loader-produced skeletons currently used by scene meshes. */
+    public get skeletons(): Skeleton[] {
+        if (this._disposed) {
+            return this._skeletons;
+        }
+        for (const mesh of this._lite.meshes) {
+            const lite = getMeshSkeleton(mesh);
+            if (lite) {
+                this._wrapSkeleton(lite);
+            }
+        }
+        return this._skeletons;
+    }
+
+    /** Babylon.js `scene.particleSystems` — registered Lite node-particle systems in scene order. */
+    public get particleSystems(): ParticleSystem[] {
+        if (this._disposed) {
+            return this._particleSystems;
+        }
+        for (const system of getParticleSystems(this._lite)) {
+            if (!this._retiredParticleSystems.has(system)) {
+                this._wrapParticleSystem(system);
+            }
+        }
+        return this._particleSystems;
     }
 
     private readonly _engine: WebGPUEngine;
@@ -201,13 +270,24 @@ export class Scene extends AbstractScene {
     private readonly _shadowGenerators: CompatShadowGenerator[] = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
-    private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
+    private readonly _pendingMorphBuilds: Array<{
+        mesh: { _lite: unknown; morphTargetManager: unknown };
+        manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void };
+    }> = [];
+    private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
     private _materialPluginsRequested = false;
     private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
     /** @internal Lite manager that owns supported compat property animations. */
     private _propertyAnimationManager: AnimationManager | null = null;
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
+    private readonly _skeletonCache = new Map<LiteSkeleton, Skeleton>();
+    private readonly _skeletons: Skeleton[] = [];
+    private readonly _particleSystemCache = new Map<LiteParticleSystem, ParticleSystem>();
+    private readonly _loadedMaterialCache = new WeakMap<LiteMaterial, Material>();
+    private readonly _particleSystems: ParticleSystem[] = [];
+    private readonly _retiredParticleSystems = new Set<LiteParticleSystem>();
+    private _disposed = false;
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
     /** @internal Lite manager that weight/additive-blends loaded glTF groups (lazily created). */
@@ -215,6 +295,7 @@ export class Scene extends AbstractScene {
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
     private _imageProcessingConfiguration: ImageProcessingConfiguration | null = null;
+    private _postProcessRenderPipelineManager: PostProcessRenderPipelineManager | null = null;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -387,6 +468,11 @@ export class Scene extends AbstractScene {
         return this._engine;
     }
 
+    public get postProcessRenderPipelineManager(): PostProcessRenderPipelineManager {
+        this._postProcessRenderPipelineManager ??= new PostProcessRenderPipelineManager();
+        return this._postProcessRenderPipelineManager;
+    }
+
     /** Babylon.js `scene.getClassName()`. */
     public getClassName(): string {
         return "Scene";
@@ -457,6 +543,14 @@ export class Scene extends AbstractScene {
         }
     }
 
+    /** @internal Rebind resolved textures for loaded materials that entered Lite outside compat's deferred mesh-add path. */
+    public _ensureRegisteredMaterialsRenderable(): void {
+        const engine = this._engine._lite;
+        for (const material of this.materials) {
+            material._ensureRenderable(engine);
+        }
+    }
+
     /**
      * @internal Register a deferred ground-UV bake (for `CreateGroundFromHeightMap` with a
      * PBR `albedoTexture` whose `uScale`/`vScale` tiling must be baked into the geometry,
@@ -481,15 +575,101 @@ export class Scene extends AbstractScene {
      * start. Building is deferred so the mesh's base CPU geometry (set by primitive
      * builders / `VertexData.applyToMesh`) exists when per-target deltas are computed.
      */
-    public _registerMorphTargetManager(mesh: { _lite: unknown }, manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void }): void {
-        this._pendingMorphBuilds.push({ mesh, manager });
+    public _registerMorphTargetManager(mesh: { _lite: unknown; morphTargetManager: unknown }, manager: { _build(mesh: never, engine: EngineContext): void } | null): void {
+        const index = this._pendingMorphBuilds.findIndex((pending) => pending.mesh === mesh);
+        if (index !== -1) {
+            this._pendingMorphBuilds.splice(index, 1);
+        }
+        if (manager) {
+            this._pendingMorphBuilds.push({ mesh, manager });
+        }
+    }
+
+    /** @internal Retain manager-wrapper ownership until scene teardown, independently of mesh lifetime. */
+    public _retainMorphTargetManagerOwnership(manager: MorphTargetManager): void {
+        this._ownedMorphTargetManagers.add(manager);
+    }
+
+    /** @internal Return the Lite engine used to update loader-produced resources. */
+    public _getLiteEngine(): EngineContext {
+        return this._engine._lite;
+    }
+
+    /** @internal Return the canonical compat wrapper for a loader-produced skeleton. */
+    public _wrapSkeleton(lite: LiteSkeleton, preferred?: Skeleton): Skeleton {
+        let wrapper = this._skeletonCache.get(lite);
+        if (!wrapper) {
+            wrapper = preferred ?? Skeleton._fromLite(lite, this._skeletonCache.size);
+            this._skeletonCache.set(lite, wrapper);
+            this._skeletons.push(wrapper);
+        }
+        return wrapper;
+    }
+
+    /** @internal Remove a disposed asset-container skeleton from the scene collection. */
+    public _unregisterSkeleton(lite: LiteSkeleton): void {
+        const wrapper = this._skeletonCache.get(lite);
+        if (wrapper) {
+            this._skeletonCache.delete(lite);
+            const index = this._skeletons.indexOf(wrapper);
+            if (index !== -1) {
+                this._skeletons.splice(index, 1);
+            }
+        }
+    }
+
+    /** @internal Return the canonical compat wrapper for a registered Lite particle system. */
+    public _wrapParticleSystem(lite: LiteParticleSystem): ParticleSystem {
+        if (this._disposed) {
+            return ParticleSystem._fromLite(lite, this);
+        }
+        let wrapper = this._particleSystemCache.get(lite);
+        if (!wrapper) {
+            wrapper = ParticleSystem._fromLite(lite, this);
+            this._particleSystemCache.set(lite, wrapper);
+            this._particleSystems.push(wrapper);
+        }
+        return wrapper;
+    }
+
+    /** @internal Return the canonical compat wrapper for a loader-produced material when its family is adaptable. */
+    public _wrapLoadedMaterial(lite: LiteMaterial): Material | null {
+        let wrapper = this._loadedMaterialCache.get(lite);
+        if (wrapper) {
+            return wrapper;
+        }
+        const family = getMaterialFamily(lite);
+        if (family === "standard") {
+            wrapper = StandardMaterial._fromLite(lite.name ?? "loaded material", lite as StandardMaterialProps, this);
+        } else if (family === "pbr") {
+            wrapper = PBRMaterial._fromLite(lite.name ?? "loaded material", lite as PbrMaterialProps, this);
+        } else {
+            return null;
+        }
+        this._loadedMaterialCache.set(lite, wrapper);
+        return wrapper;
+    }
+
+    /** @internal Remove a disposed particle system from the Babylon.js scene collection. */
+    public _unregisterParticleSystem(lite: LiteParticleSystem): void {
+        this._retiredParticleSystems.add(lite);
+        const wrapper = this._particleSystemCache.get(lite);
+        if (wrapper) {
+            this._particleSystemCache.delete(lite);
+            const index = this._particleSystems.indexOf(wrapper);
+            if (index !== -1) {
+                this._particleSystems.splice(index, 1);
+            }
+        }
     }
 
     /** @internal Build all registered morph-target managers. Called by the engine before registration. */
     public _buildMorphTargets(): void {
         const engine = this._engine._lite;
         for (const { mesh, manager } of this._pendingMorphBuilds) {
-            manager._build(mesh as never, engine);
+            if (mesh.morphTargetManager === manager) {
+                manager._build(mesh as never, engine);
+            }
         }
         this._pendingMorphBuilds.length = 0;
     }
@@ -1296,6 +1476,10 @@ export class Scene extends AbstractScene {
     }
 
     public dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+        this._disposed = true;
         let hasError = false;
         let firstError: unknown;
         const runCleanup = (cleanup: () => void): void => {
@@ -1324,7 +1508,20 @@ export class Scene extends AbstractScene {
         if (this._blendManager) {
             runCleanup(() => clearAnimationManager(this._blendManager!));
         }
+        if (this._postProcessRenderPipelineManager) {
+            runCleanup(() => this._postProcessRenderPipelineManager!.dispose());
+        }
         this._runningAnimatables.length = 0;
+        runCleanup(() => this._skeletons.splice(0));
+        runCleanup(() => this._skeletonCache.clear());
+        runCleanup(() => this._particleSystems.splice(0));
+        runCleanup(() => this._particleSystemCache.clear());
+        runCleanup(() => this._retiredParticleSystems.clear());
+        runCleanup(() => this._pendingMorphBuilds.splice(0));
+        for (const manager of this._ownedMorphTargetManagers) {
+            runCleanup(() => manager.dispose());
+        }
+        this._ownedMorphTargetManagers.clear();
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

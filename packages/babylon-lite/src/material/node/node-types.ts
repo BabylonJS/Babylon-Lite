@@ -231,6 +231,9 @@ export interface NodeBuildState {
      *  (undefined) for the normal colour pass, keeping zero footprint on
      *  non-geometry node scenes. */
     _geometryInputs?: Map<GeometryTextureType, NodeExpr>;
+    /** @internal FragmentOutputBlock `glow` input (Babylon's `additionalColor`, cast to vec3f) and its `a` (f32), when
+     *  connected. The colour pass keeps its own output; a glow task replaces only the final output assignment with these. */
+    _glowOutput?: readonly [color: NodeExpr, alpha: NodeExpr | null];
 }
 
 export interface NodeTextureBinding {

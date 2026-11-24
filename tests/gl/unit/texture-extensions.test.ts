@@ -51,10 +51,10 @@ describe("lite-gl context caps: float render", () => {
 describe("lite-gl texture: raw update + sampling/wrap", () => {
     it("updateRawTexture re-uploads via texImage2D and can resize", () => {
         const { mock, engine } = makeEngine();
-        const tex = createRawTexture(engine, new Uint8Array([0, 0, 0, 0]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array([0, 0, 0, 0]), 1, 1);
         mock.clear();
         const next = new Uint8Array(2 * 2 * 4);
-        updateRawTexture(engine, tex, next, { width: 2, height: 2 });
+        updateRawTexture(tex, next, { width: 2, height: 2 });
         const ti = callsNamed(mock, "texImage2D")[0];
         expect(ti?.args[3]).toBe(2); // width
         expect(ti?.args[4]).toBe(2); // height
@@ -65,24 +65,24 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
 
     it("updateRawTexture applies UNPACK_ALIGNMENT (cached) and restores 4 on the next default upload", () => {
         const { mock, engine } = makeEngine();
-        const tex = createRawTexture(engine, new Uint8Array(3), 1, 1, engine.gl.RGB, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array(3), 1, 1, { format: engine.gl.RGB });
         mock.clear();
         // Align-1 upload: a single cached pixelStorei(ALIGNMENT, 1) — no per-call reset.
-        updateRawTexture(engine, tex, new Uint8Array(3), { unpackAlignment: 1 });
+        updateRawTexture(tex, new Uint8Array(3), { unpackAlignment: 1 });
         let align = callsNamed(mock, "pixelStorei").filter((c) => c.args[0] === engine.gl.UNPACK_ALIGNMENT);
         expect(align.map((c) => c.args[1])).toEqual([1]);
         mock.clear();
         // A subsequent default-alignment upload restores it to 4 via the cache (1 → 4).
-        updateRawTexture(engine, tex, new Uint8Array(3));
+        updateRawTexture(tex, new Uint8Array(3));
         align = callsNamed(mock, "pixelStorei").filter((c) => c.args[0] === engine.gl.UNPACK_ALIGNMENT);
         expect(align.map((c) => c.args[1])).toEqual([4]);
     });
 
     it("updateRawTexture survives context-restore with the latest data", () => {
         const { mock, canvas, engine } = makeEngine();
-        const tex = createRawTexture(engine, new Uint8Array([1, 1, 1, 1]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array([1, 1, 1, 1]), 1, 1);
         const latest = new Uint8Array([9, 9, 9, 9]);
-        updateRawTexture(engine, tex, latest);
+        updateRawTexture(tex, latest);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -94,15 +94,15 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
     it("createRawTexture initializes all four texture parameters", () => {
         const { mock, engine } = makeEngine();
         mock.clear();
-        createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        createRawTexture(engine, null, 1, 1);
         expect(mock.count("texParameteri")).toBe(4);
     });
 
     it("updateTextureSamplingMode sets min/mag filters", () => {
         const { mock, engine } = makeEngine();
-        const tex = createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, null, 1, 1);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, engine.gl.NEAREST, engine.gl.NEAREST);
+        updateTextureSamplingMode(tex, engine.gl.NEAREST, engine.gl.NEAREST);
         const tp = callsNamed(mock, "texParameteri");
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_MIN_FILTER && c.args[2] === engine.gl.NEAREST)).toBe(true);
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_MAG_FILTER && c.args[2] === engine.gl.NEAREST)).toBe(true);
@@ -110,9 +110,9 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
 
     it("updateTextureWrapMode supports MIRRORED_REPEAT", () => {
         const { mock, engine } = makeEngine();
-        const tex = createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, null, 1, 1);
         mock.clear();
-        updateTextureWrapMode(engine, tex, engine.gl.MIRRORED_REPEAT, engine.gl.REPEAT);
+        updateTextureWrapMode(tex, engine.gl.MIRRORED_REPEAT, engine.gl.REPEAT);
         const tp = callsNamed(mock, "texParameteri");
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_S && c.args[2] === engine.gl.MIRRORED_REPEAT)).toBe(true);
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_T && c.args[2] === engine.gl.REPEAT)).toBe(true);
@@ -165,20 +165,28 @@ describe("lite-gl texture: external handle wrap", () => {
 });
 
 describe("lite-gl texture: LDR internal-format resolution + passthrough", () => {
+    it("defaults format/type to RGBA / UNSIGNED_BYTE (RGBA8)", () => {
+        const { mock, engine } = makeEngine();
+        mock.clear();
+        createRawTexture(engine, null, 2, 2);
+        const args = callsNamed(mock, "texImage2D")[0]?.args;
+        expect([args?.[2], args?.[6], args?.[7]]).toEqual([engine.gl.RGBA8, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE]);
+    });
+
     it("resolves RG / RED byte formats to the sized RG8 / R8 internal formats", () => {
         const { mock, engine } = makeEngine();
         mock.clear();
-        createRawTexture(engine, null, 2, 2, engine.gl.RG, engine.gl.UNSIGNED_BYTE);
+        createRawTexture(engine, null, 2, 2, { format: engine.gl.RG });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(engine.gl.RG8);
         mock.clear();
-        createRawTexture(engine, null, 2, 2, engine.gl.RED, engine.gl.UNSIGNED_BYTE);
+        createRawTexture(engine, null, 2, 2, { format: engine.gl.RED });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(engine.gl.R8);
     });
 
     it("honors an explicit options.internalFormat passthrough", () => {
         const { mock, engine } = makeEngine();
         mock.clear();
-        createRawTexture(engine, null, 2, 2, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE, { internalFormat: engine.gl.RGBA8 });
+        createRawTexture(engine, null, 2, 2, { internalFormat: engine.gl.RGBA8 });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(engine.gl.RGBA8);
     });
 });
@@ -210,13 +218,13 @@ describe("lite-gl texture: float / half-float (HDR opt-in)", () => {
 
     it("generateTextureMipMaps issues exactly one generateMipmap; a no-op on a lost context", () => {
         const { mock, canvas, engine } = makeEngine();
-        const tex = createRawTexture(engine, null, 4, 4, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, null, 4, 4);
         mock.clear();
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(1);
         fireLost(canvas);
         mock.clear();
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 });
@@ -230,13 +238,13 @@ describe("lite-gl texture: UNPACK pixel-store state (no premultiply leak)", () =
         const { mock, engine } = makeEngine();
         const gl = engine.gl;
         // A premultiplying raw texture sets the global flag to 1.
-        createRawTexture(engine, new Uint8Array(4), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, { premultiplyAlpha: true });
+        createRawTexture(engine, new Uint8Array(4), 1, 1, { premultiplyAlpha: true });
         expect(premultiplyCalls(mock, gl).at(-1)?.args[1]).toBe(1);
 
         mock.clear();
         // A subsequent NON-premultiply upload MUST explicitly reset it to 0 — otherwise
         // it would inherit the leaked global 1 and silently premultiply.
-        createRawTexture(engine, new Uint8Array(4), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
+        createRawTexture(engine, new Uint8Array(4), 1, 1);
         const pm = premultiplyCalls(mock, gl);
         expect(pm).toHaveLength(1);
         expect(pm[0]?.args[1]).toBe(0);
@@ -245,10 +253,10 @@ describe("lite-gl texture: UNPACK pixel-store state (no premultiply leak)", () =
     it("elides a redundant UNPACK_PREMULTIPLY_ALPHA pixelStorei when it already matches the cache", () => {
         const { mock, engine } = makeEngine();
         const gl = engine.gl;
-        createRawTexture(engine, new Uint8Array(4), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE); // sets premultiply 0
+        createRawTexture(engine, new Uint8Array(4), 1, 1); // sets premultiply 0
         mock.clear();
         // Same flag value again → cached, no pixelStorei for premultiply.
-        createRawTexture(engine, new Uint8Array(4), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
+        createRawTexture(engine, new Uint8Array(4), 1, 1);
         expect(premultiplyCalls(mock, gl)).toHaveLength(0);
     });
 });

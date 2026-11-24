@@ -17,6 +17,8 @@ import type { Vector3 } from "../math/vector.js";
 import type { ShaderLanguage } from "../misc/engine-constants.js";
 import type { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+
+export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "../loading/khr-materials-scatter.js";
 import type { BaseTexture } from "../textures/textures.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
@@ -200,12 +202,6 @@ export class DefaultRenderingPipeline {
 export class FxaaPostProcess {
     public constructor() {
         unsupported("FxaaPostProcess", "FXAA is not implemented in Babylon Lite.");
-    }
-}
-
-export class SSAO2RenderingPipeline {
-    public constructor() {
-        unsupported("SSAO2RenderingPipeline", "SSAO is not implemented in Babylon Lite.");
     }
 }
 

@@ -62,6 +62,8 @@ export interface UboField {
 export type BindingKind =
     /** @internal */
     | { readonly _kind: "uniform-buffer" }
+    /** @internal Constructed with createReadOnlyStorageBinding so its emitter is installed. */
+    | { readonly _kind: "read-only-storage-buffer" }
     | {
           /** @internal */
           readonly _kind: "texture";

@@ -5,8 +5,13 @@ export const PBR_HAS_ALPHA_TEST = 1 << 3;
 export const PBR_HAS_TONEMAP = 1 << 4;
 /** Scene has fog enabled (scene.fog != null). A scene-feature bit (threaded via
  *  sceneFeatures), gating the PBR fog blend + calcFogFactor helper into the shader.
- *  Compile-time gated so non-fog PBR scenes stay byte-identical. */
+ *  Compile-time gated so non-fog PBR scenes stay byte-identical.
+ *  Material features bit 5 is separately reserved by parallax-occlusion-fragment.ts. */
 export const PBR_HAS_FOG = 1 << 5;
+// PBR_HAS_ENV / PBR_HAS_TONEMAP / PBR_HAS_FOG live only in `sceneFeatures`.
+// Their material `features` bits are extension-local (1<<2 remains free):
+//   1<<4  PBR_HAS_BENT_NORMAL  (bent-normal-fragment.ts)
+//   1<<5  PBR_HAS_PARALLAX_OCCLUSION  (parallax-occlusion-fragment.ts)
 // Scene bits 1<<6 and 1<<7 are rect-area-light-local (rect-area-light-fragment.ts).
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;

@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import type { _PbrBindCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
 
 beforeEach(() => vi.resetModules());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+});
 
 function engineFixture() {
     const device = {
@@ -19,6 +23,26 @@ function engineFixture() {
 }
 
 describe("fresh-runtime area emission opt-in", () => {
+    it("installs the PBR context augmenter once while retaining each binding's current identity and disposers", async () => {
+        const pipeline = await import("../../../packages/babylon-lite/src/material/pbr/pbr-pipeline.js");
+        const install = vi.spyOn(pipeline, "_installPbrBindingContext");
+        const { installRectAreaEmissionPbr } = await import("../../../packages/babylon-lite/src/material/pbr/fragments/rect-area-light-emission-fragment.js");
+        installRectAreaEmissionPbr();
+        installRectAreaEmissionPbr();
+        installRectAreaEmissionPbr();
+        expect(install).toHaveBeenCalledTimes(1);
+        const augment = install.mock.calls[0]![0];
+        const context = {} as _PbrBindCtx;
+        const first: (() => void)[] = [];
+        const second: (() => void)[] = [];
+        augment(context, 7, first);
+        expect(context._lightingId).toBe(7);
+        expect(context._disposers).toBe(first);
+        augment(context, 9, second);
+        expect(context._lightingId).toBe(9);
+        expect(context._disposers).toBe(second);
+    });
+
     it("rejects an ordinary emission image before a first preprocessing call without fetching, allocating, or publishing a solid fallback", async () => {
         const [{ createSceneContext, disposeScene }, { createRectAreaLight }, { createSolidTexture2D }, { enableRectAreaLights }, { releaseTexture }] = await Promise.all([
             import("../../../packages/babylon-lite/src/scene/scene.js"),

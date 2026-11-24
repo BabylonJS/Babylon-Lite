@@ -14,6 +14,9 @@ import {
     addToScene,
     removeFromScene,
     setMeshVisible,
+    setMeshOpacity,
+    getMeshOpacity,
+    getMaterialFamily,
     createBox,
     createSphere,
     createGround,
@@ -43,8 +46,9 @@ import {
     updateLineSystem,
     createLineMaterial,
     setLineMaterialColor,
+    shareMeshMorphTargets,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
+import type { Material as LiteMaterial, Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import type { Vector4 } from "../math/vector.js";
@@ -61,9 +65,151 @@ import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
 import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
-import type { MorphTargetManager } from "../morph/morph.js";
+import { MorphTargetManager } from "../morph/morph.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial | LinesMaterial;
+
+interface ComponentBinding3 {
+    setSilently(x: number, y: number, z: number): void;
+    unbind(): void;
+}
+
+interface ComponentBinding4 {
+    setSilently(x: number, y: number, z: number, w: number): void;
+    unbind(): void;
+}
+
+interface NumberPropertyBinding {
+    setSilently(value: number): void;
+    notifyOtherSubscribers(): void;
+    unbind(): void;
+}
+
+interface NumberPropertySubscription {
+    onAccess: () => void;
+    onChange: () => void;
+}
+
+interface NumberPropertyState {
+    descriptor: PropertyDescriptor | undefined;
+    read: () => number;
+    write: (value: number) => void;
+    subscriptions: Set<NumberPropertySubscription>;
+}
+
+let numberPropertyStates: WeakMap<object, Map<string, NumberPropertyState>> | undefined;
+
+function bindNumberProperty(target: object, key: string, onAccess: () => void, onChange: () => void): NumberPropertyBinding {
+    const states = (numberPropertyStates ??= new WeakMap());
+    let properties = states.get(target);
+    if (!properties) {
+        properties = new Map();
+        states.set(target, properties);
+    }
+    let state = properties.get(key);
+    if (!state) {
+        const descriptor = Object.getOwnPropertyDescriptor(target, key);
+        let stored = (target as Record<string, number>)[key]!;
+        const read = descriptor?.get ? () => descriptor.get!.call(target) as number : () => stored;
+        const write = descriptor?.set ? (value: number) => descriptor.set!.call(target, value) : (value: number) => (stored = value);
+        state = { descriptor, read, write, subscriptions: new Set() };
+        properties.set(key, state);
+        Object.defineProperty(target, key, {
+            enumerable: descriptor?.enumerable ?? true,
+            configurable: true,
+            get: () => {
+                for (const subscription of state!.subscriptions) {
+                    subscription.onAccess();
+                }
+                return state!.read();
+            },
+            set: (value: number) => {
+                for (const subscription of state!.subscriptions) {
+                    subscription.onAccess();
+                }
+                state!.write(value);
+                for (const subscription of state!.subscriptions) {
+                    subscription.onChange();
+                }
+            },
+        });
+    }
+    const subscription = { onAccess, onChange };
+    state.subscriptions.add(subscription);
+    return {
+        setSilently: state.write,
+        notifyOtherSubscribers() {
+            for (const other of state!.subscriptions) {
+                if (other !== subscription) {
+                    other.onChange();
+                }
+            }
+        },
+        unbind() {
+            state!.subscriptions.delete(subscription);
+            if (state!.subscriptions.size !== 0) {
+                return;
+            }
+            const value = state!.read();
+            const descriptor = state!.descriptor;
+            Object.defineProperty(
+                target,
+                key,
+                descriptor?.get || descriptor?.set
+                    ? descriptor
+                    : {
+                          ...descriptor,
+                          enumerable: descriptor?.enumerable ?? true,
+                          configurable: descriptor?.configurable ?? true,
+                          writable: descriptor?.writable ?? true,
+                          value,
+                      }
+            );
+            properties!.delete(key);
+        },
+    };
+}
+
+function bindVector3(value: Vector3, onAccess: () => void, onChange: () => void): ComponentBinding3 {
+    const x = bindNumberProperty(value, "x", onAccess, onChange);
+    const y = bindNumberProperty(value, "y", onAccess, onChange);
+    const z = bindNumberProperty(value, "z", onAccess, onChange);
+    return {
+        setSilently(nextX, nextY, nextZ) {
+            x.setSilently(nextX);
+            y.setSilently(nextY);
+            z.setSilently(nextZ);
+            x.notifyOtherSubscribers();
+        },
+        unbind() {
+            x.unbind();
+            y.unbind();
+            z.unbind();
+        },
+    };
+}
+
+function bindQuaternion(value: Quaternion, onAccess: () => void, onChange: () => void): ComponentBinding4 {
+    const x = bindNumberProperty(value, "x", onAccess, onChange);
+    const y = bindNumberProperty(value, "y", onAccess, onChange);
+    const z = bindNumberProperty(value, "z", onAccess, onChange);
+    const w = bindNumberProperty(value, "w", onAccess, onChange);
+    return {
+        setSilently(nextX, nextY, nextZ, nextW) {
+            x.setSilently(nextX);
+            y.setSilently(nextY);
+            z.setSilently(nextZ);
+            w.setSilently(nextW);
+            x.notifyOtherSubscribers();
+        },
+        unbind() {
+            x.unbind();
+            y.unbind();
+            z.unbind();
+            w.unbind();
+        },
+    };
+}
 
 class LinesMaterial extends CompatMaterialBase {
     public readonly _lite: LiteLineMaterial;
@@ -116,6 +262,15 @@ function liteNodeOf(node: Node | null): SceneNode | null {
     }
     const n = node as { _node?: SceneNode; _lite?: SceneNode };
     return n._node ?? n._lite ?? null;
+}
+
+function validateOpacityMaterial(api: string, name: string, material: LiteMaterial | null | undefined): void {
+    if (material) {
+        const family = getMaterialFamily(material);
+        if (family !== "standard" && family !== "pbr") {
+            unsupported(api, `Mesh "${name}" uses a "${family}" material; visibility below 1 supports only Standard and PBR materials.`);
+        }
+    }
 }
 
 // A degenerate single-triangle placeholder so an empty `new Mesh(name, scene)`
@@ -222,6 +377,15 @@ export class TransformNode extends Node {
     /** @internal The Lite scene node that carries this transform. */
     public readonly _node: SceneNode;
     public physicsBody: PhysicsBody | null = null;
+    private _rotation: Vector3;
+    private _rotationBinding: ComponentBinding3;
+    private _rotationQuaternion: Quaternion | null = null;
+    private _rotationQuaternionBinding?: ComponentBinding4;
+    private _nativeRotationVersion: number | undefined;
+    private readonly _nativeRotationValues: [number, number, number, number];
+    private _isSyncingRotationFromNative = false;
+    private _sceneDisposeObserver?: (scene: Scene) => void;
+    private _loadedSceneRegistered = false;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -231,17 +395,27 @@ export class TransformNode extends Node {
     public _container?: LiteAssetContainer;
 
     /**
-     * @internal Bind a loader-produced wrapper to the scene the container was added
-     * to. The loader already inserted the underlying Lite node (via
-     * `addToScene(container)`), so this only wires the compat-side scene reference
-     * and lists the wrapper in `scene.meshes` — it never re-inserts into Lite.
+     * @internal Bind a loader-produced wrapper to its owning scene. Detached
+     * containers retain scene-aware material adaptation without registry membership;
+     * adoption later lists the wrapper in `scene.meshes`. The underlying Lite node is
+     * never re-inserted here.
      */
-    public _bindLoadedScene(scene: Scene): void {
-        if (this._scene === scene) {
-            return;
+    public _bindLoadedScene(scene: Scene, register = true): boolean {
+        if (this._scene !== scene) {
+            if (this._sceneDisposeObserver) {
+                this._scene?.onDisposeObservable?.remove(this._sceneDisposeObserver);
+                this._sceneDisposeObserver = undefined;
+            }
+            this._scene = scene;
+            this._loadedSceneRegistered = false;
+            this._bindRotationSceneDisposal(scene);
         }
-        this._scene = scene;
-        scene._registerMesh(this, this._node);
+        if (register && !this._loadedSceneRegistered) {
+            scene._registerMesh(this, this._node);
+            this._loadedSceneRegistered = true;
+            return true;
+        }
+        return false;
     }
 
     /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
@@ -260,6 +434,22 @@ export class TransformNode extends Node {
                 addToScene(scene._lite, this._node);
             }
         }
+        const q = this._node.rotationQuaternion;
+        this._rotation = q ? new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles() : new Vector3();
+        this._nativeRotationVersion = q?.version;
+        this._nativeRotationValues = q ? [q.x, q.y, q.z, q.w] : [0, 0, 0, 1];
+        this._rotationBinding = bindVector3(
+            this._rotation,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
+            }
+        );
+        if (scene) {
+            this._bindRotationSceneDisposal(scene);
+        }
     }
 
     public override getClassName(): string {
@@ -274,10 +464,23 @@ export class TransformNode extends Node {
     }
 
     public get rotation(): Vector3 {
-        return liteBackedVector3(this._node.rotation);
+        this._syncRotationFromNative();
+        return this._rotation;
     }
     public set rotation(value: Vector3) {
-        this._node.rotation.set(value.x, value.y, value.z);
+        this._markNativeRotationSynced();
+        this._rotationBinding.unbind();
+        this._rotation = value;
+        this._rotationBinding = bindVector3(
+            value,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
+            }
+        );
+        this.rotationQuaternion = null;
     }
 
     public get scaling(): Vector3 {
@@ -287,28 +490,124 @@ export class TransformNode extends Node {
         this._node.scaling.set(value.x, value.y, value.z);
     }
 
-    /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
-    private _useQuat = false;
-
-    /**
-     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
-     * matrix from a quaternion (its euler `rotation` is a proxy over the same
-     * quaternion), so this reads/writes that quaternion. Returns `null` until
-     * explicitly assigned, matching Babylon.js's euler-by-default convention.
-     */
+    /** Babylon.js `rotationQuaternion`, kept live while Lite receives translated component writes. */
     public get rotationQuaternion(): Quaternion | null {
-        if (!this._useQuat) {
-            return null;
-        }
-        const q = this._node.rotationQuaternion;
-        return new Quaternion(q.x, q.y, q.z, q.w);
+        this._syncRotationFromNative();
+        return this._rotationQuaternion;
     }
     public set rotationQuaternion(value: Quaternion | null) {
+        this._markNativeRotationSynced();
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
+        this._rotationQuaternion = value;
         if (value) {
-            this._useQuat = true;
-            this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
+            this._rotation.setAll(0);
+            this._rotationQuaternionBinding = bindQuaternion(
+                value,
+                () => this._syncRotationFromNative(),
+                () => this._applyQuaternionRotation()
+            );
+            this._applyQuaternionRotation();
         } else {
-            this._useQuat = false;
+            this._applyEulerRotation();
+        }
+    }
+
+    private _applyEulerRotation(): void {
+        const q = Quaternion.FromEulerAngles(this._rotation.x, this._rotation.y, this._rotation.z);
+        this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+        this._markNativeRotationSynced();
+    }
+
+    private _applyQuaternionRotation(): void {
+        const q = this._rotationQuaternion;
+        if (q) {
+            this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+            this._markNativeRotationSynced();
+        }
+    }
+
+    private _markNativeRotationSynced(): void {
+        const q = this._node?.rotationQuaternion;
+        if (!q) {
+            return;
+        }
+        this._nativeRotationVersion = q.version;
+        this._nativeRotationValues[0] = q.x;
+        this._nativeRotationValues[1] = q.y;
+        this._nativeRotationValues[2] = q.z;
+        this._nativeRotationValues[3] = q.w;
+    }
+
+    private _syncRotationFromNative(): void {
+        if (this._isSyncingRotationFromNative) {
+            return;
+        }
+        const q = this._node?.rotationQuaternion;
+        const previous = this._nativeRotationValues;
+        if (!q) {
+            return;
+        }
+        const valuesChanged = q.x !== previous[0] || q.y !== previous[1] || q.z !== previous[2] || q.w !== previous[3];
+        if (q.version === this._nativeRotationVersion && !valuesChanged) {
+            return;
+        }
+        this._isSyncingRotationFromNative = true;
+        try {
+            if (this._rotationQuaternion) {
+                this._rotationQuaternionBinding?.setSilently(q.x, q.y, q.z, q.w);
+            } else {
+                const euler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+                this._rotationBinding.setSilently(euler.x, euler.y, euler.z);
+            }
+        } finally {
+            this._isSyncingRotationFromNative = false;
+        }
+        this._nativeRotationVersion = q.version;
+        previous[0] = q.x;
+        previous[1] = q.y;
+        previous[2] = q.z;
+        previous[3] = q.w;
+    }
+
+    /** @internal Preserve the source node's active rotation representation on a clone. */
+    public _copyRotationMode(source: TransformNode): void {
+        const q = source.rotationQuaternion;
+        const rotation = source.rotation;
+        if (!q && !rotation) {
+            return;
+        }
+        this._rotationBinding.unbind();
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
+        this._rotation = rotation.clone();
+        if (q) {
+            this._rotationQuaternion = q.clone();
+            this._rotationQuaternionBinding = bindQuaternion(
+                this._rotationQuaternion,
+                () => this._syncRotationFromNative(),
+                () => this._applyQuaternionRotation()
+            );
+        } else {
+            this._rotationQuaternion = null;
+        }
+        this._rotationBinding = bindVector3(
+            this._rotation,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
+            }
+        );
+        this._markNativeRotationSynced();
+    }
+
+    /** @internal Synchronize compat state after baking resets the Lite transform directly. */
+    protected _resetRotationAfterBake(): void {
+        this._rotationBinding?.setSilently(0, 0, 0);
+        if (this._rotationQuaternion) {
+            this.rotationQuaternion = Quaternion.Identity();
         }
     }
 
@@ -366,6 +665,24 @@ export class TransformNode extends Node {
         this._node.children.length = 0;
         removeFromScene(this._scene._lite, this._node);
     }
+
+    /** @internal Release component bindings when either the node or its scene retires this wrapper. */
+    public _releaseRotationBindings(): void {
+        this._scene?.onDisposeObservable?.remove(this._sceneDisposeObserver);
+        this._sceneDisposeObserver = undefined;
+        this._rotationBinding.unbind();
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
+    }
+
+    private _bindRotationSceneDisposal(scene: Scene): void {
+        this._sceneDisposeObserver = scene.onDisposeObservable?.addOnce(() => this._releaseRotationBindings());
+    }
+
+    protected override _retireFromScene(): void {
+        this._releaseRotationBindings();
+        super._retireFromScene();
+    }
 }
 
 /**
@@ -377,6 +694,8 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    /** @internal Lite material identity currently represented by `_material`. */
+    private _wrappedLiteMaterial: LiteMaterial | undefined;
     /**
      * @internal The mesh renders a material that exists only on its Lite node: a natively loaded glTF
      * material has no compat wrapper, so `material` reads `null`. Clones keep that Lite material, and the
@@ -384,12 +703,14 @@ export class AbstractMesh extends TransformNode {
      */
     public _liteOnlyMaterial = false;
     private _meshBlendingTag = 0;
+    protected _visibilityValue = 1;
     protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
         super(name, scene, lite);
         this._lite = lite;
         this._lite.name = name;
+        this._visibilityValue = "_gpu" in lite ? getMeshOpacity(lite) : 1;
         // Babylon Lite requires every mesh to carry a material to render, whereas
         // Babylon.js falls back to a shared `scene.defaultMaterial`. Mirror BJS by
         // assigning that default now; an explicit `mesh.material = …` overrides it.
@@ -416,19 +737,35 @@ export class AbstractMesh extends TransformNode {
      * `AbstractMesh.dispose` does in its own `Lights` loop. Container-retired wrappers prune too.
      */
     protected override _retireFromScene(): void {
+        super._retireFromScene();
         for (const light of this._scene?.lights ?? []) {
             light._pruneDisposedMesh(this);
         }
     }
 
     public get material(): CompatMaterial | null {
+        const liteMaterial = this._lite.material;
+        if (this._scene && liteMaterial && (this._liteOnlyMaterial || (!!this._wrappedLiteMaterial && liteMaterial !== this._wrappedLiteMaterial))) {
+            if (this._material?._lite === liteMaterial) {
+                this._liteOnlyMaterial = false;
+            } else {
+                const loaded = this._scene._wrapLoadedMaterial(liteMaterial);
+                this._material = loaded as CompatMaterial | null;
+                this._liteOnlyMaterial = !loaded;
+            }
+            this._wrappedLiteMaterial = liteMaterial;
+        }
         return this._material;
     }
     public set material(value: CompatMaterial | null) {
-        this._material = value;
-        this._liteOnlyMaterial = false;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
+        if (renderMaterial && (this._visibilityValue < 1 || this._opacityTargets().some((target) => getMeshOpacity(target) < 1))) {
+            this._validateCompatOpacityMaterial("Mesh.material", renderMaterial);
+        }
+        this._material = value;
+        this._wrappedLiteMaterial = renderMaterial?._lite;
+        this._liteOnlyMaterial = false;
         if (renderMaterial && scene) {
             if (scene._hasStarted) {
                 // The mesh already entered the scene, so the boot-time build (which
@@ -459,6 +796,47 @@ export class AbstractMesh extends TransformNode {
     public set isVisible(value: boolean) {
         this._visible = value;
         this._syncVisibility(this.isEnabled());
+    }
+
+    /** Raw finite Babylon visibility; rendering clamps it to [0, 1]. Independent of isVisible. */
+    public get visibility(): number {
+        return this._visibilityValue;
+    }
+    public set visibility(value: number) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+            throw new RangeError("Mesh.visibility must be a finite number.");
+        }
+        const targets = this._opacityTargets();
+        if (value < 1 && this._material) {
+            this._validateCompatOpacityMaterial("Mesh.visibility", this._material);
+        }
+        // Validate the entire primitive fan-out before any native setter can install,
+        // mutate a scalar, queue a rebuild, or write a live binding.
+        for (const target of targets) {
+            if (target._disposed) {
+                throw new Error(`Mesh "${target.name}" cannot set opacity: it was disposed when it left its last scene. Create a new mesh instead.`);
+            }
+            if (value < 1) {
+                validateOpacityMaterial("Mesh.visibility", target.name ?? this.name, target.material);
+            }
+        }
+        for (const target of targets) {
+            setMeshOpacity(target, value);
+        }
+        this._visibilityValue = value;
+    }
+
+    private _validateCompatOpacityMaterial(api: string, material: CompatMaterial): void {
+        if (!material._lite) {
+            unsupported(api, `Mesh "${this.name}" cannot fade a deferred ${material.getClassName()} material; visibility below 1 supports only Standard and PBR materials.`);
+        }
+        validateOpacityMaterial(api, this.name, material._lite);
+    }
+
+    /** A glTF node owns its immediate primitive meshes, never a child glTF node's primitives. */
+    private _opacityTargets(): LiteMesh[] {
+        const node: SceneNode = this._lite;
+        return "_gpu" in node ? [node as LiteMesh] : node.children.filter((child): child is LiteMesh => "_gpu" in child);
     }
 
     public get isPickable(): boolean {
@@ -796,6 +1174,7 @@ export class AbstractMesh extends TransformNode {
         node.position.set(0, 0, 0);
         node.rotation.set(0, 0, 0);
         node.scaling.set(1, 1, 1);
+        this._resetRotationAfterBake();
         return this;
     }
 
@@ -840,15 +1219,31 @@ export class Mesh extends AbstractMesh {
      * adopts the existing Lite node. Used by the loader to give
      * `AssetContainer.meshes` real, stable-identity mesh handles.
      */
-    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
+    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene, register = true): Mesh {
         const mesh = new Mesh(lite.name ?? "", lite);
         mesh._container = container;
         mesh._liteOnlyMaterial = !!lite.material;
         mesh._visible = lite.visible !== false;
         if (scene) {
-            mesh._bindLoadedScene(scene);
+            mesh._bindLoadedScene(scene, register);
         }
         return mesh;
+    }
+
+    /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
+    public override _bindLoadedScene(scene: Scene, register = true): boolean {
+        if (!super._bindLoadedScene(scene, register)) {
+            return false;
+        }
+        for (const manager of this._ownedMorphTargetManagers) {
+            scene._retainMorphTargetManagerOwnership(manager);
+        }
+        if (this._morphTargetManager?._lite) {
+            this._morphTargetManager._adoptEngine(scene._getLiteEngine());
+        } else if (this._morphTargetManager) {
+            scene._registerMorphTargetManager(this, this._morphTargetManager);
+        }
+        return true;
     }
 
     /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
@@ -857,26 +1252,33 @@ export class Mesh extends AbstractMesh {
         container?: LiteAssetContainer,
         scene?: Scene,
         registry: Map<unknown, Mesh> = new Map(),
-        parent: TransformNode | null = null
+        parent: TransformNode | null = null,
+        register = true
     ): Mesh {
         let wrapper = registry.get(lite) as Mesh | undefined;
         if (!wrapper) {
-            wrapper = Mesh._fromLite(lite, container, scene);
+            wrapper = Mesh._fromLite(lite, container, scene, register);
             registry.set(lite, wrapper);
         } else if (scene) {
-            wrapper._bindLoadedScene(scene);
+            wrapper._bindLoadedScene(scene, register);
         }
         wrapper._adoptLoadedParent(parent);
         const children = (lite as unknown as { children?: LiteMesh[] }).children;
         if (children) {
             for (const child of children) {
-                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper);
+                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper, register);
             }
         }
         return wrapper;
     }
 
     private _morphTargetManager: MorphTargetManager | null = null;
+    private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
+
+    private _retainMorphTargetManagerOwnership(manager: MorphTargetManager): void {
+        this._ownedMorphTargetManagers.add(manager);
+        this._scene?._retainMorphTargetManagerOwnership?.(manager);
+    }
 
     /**
      * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
@@ -885,13 +1287,40 @@ export class Mesh extends AbstractMesh {
      * CPU geometry exists) and assigns it onto the Lite mesh before registration.
      */
     public get morphTargetManager(): MorphTargetManager | null {
+        if (!this._morphTargetManager && this._lite.morphTargets) {
+            this._morphTargetManager = MorphTargetManager._fromLite(this._lite.morphTargets, this._scene?._getLiteEngine());
+            this._retainMorphTargetManagerOwnership(this._morphTargetManager);
+        }
         return this._morphTargetManager;
     }
     public set morphTargetManager(value: MorphTargetManager | null) {
-        this._morphTargetManager = value;
-        if (value && this._scene) {
-            this._scene._registerMorphTargetManager(this, value);
+        const lite = value?._lite ?? null;
+        if (this._morphTargetManager === value && this._lite.morphTargets === lite) {
+            return;
         }
+        this._morphTargetManager = value;
+        if (value) {
+            this._retainMorphTargetManagerOwnership(value);
+        }
+        this._scene?._registerMorphTargetManager(this, value?._lite ? null : value);
+        if (!value) {
+            shareMeshMorphTargets(this._lite, null);
+            return;
+        }
+        if (lite) {
+            shareMeshMorphTargets(this._lite, lite);
+            if (this._scene) {
+                value._adoptEngine(this._scene._getLiteEngine());
+            }
+        }
+    }
+
+    /** @internal Release manager ownership claims during scene/container teardown. */
+    public _releaseMorphTargetManagerOwnership(): void {
+        for (const manager of this._ownedMorphTargetManagers) {
+            manager.dispose();
+        }
+        this._ownedMorphTargetManagers.clear();
     }
 
     // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
@@ -1027,6 +1456,9 @@ export class Mesh extends AbstractMesh {
             (lite as LiteMesh).id = undefined;
         }
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
+        if (source instanceof TransformNode) {
+            wrapper._copyRotationMode(source);
+        }
         wrapper._container = (source as TransformNode | undefined)?._container;
         if (wrapper instanceof Mesh) {
             wrapper._scene = scene;
@@ -1040,6 +1472,8 @@ export class Mesh extends AbstractMesh {
             wrapper.metadata = source.metadata;
             wrapper.setEnabled(source.isEnabled(false));
             if (wrapper instanceof Mesh && source instanceof Mesh) {
+                // Native cloning already copied each mesh's scalar, not its binding records.
+                wrapper._visibilityValue = source._visibilityValue;
                 // The Lite clone already shares a Lite-only material; assigning the source's `null` would
                 // replace it with `scene.defaultMaterial`.
                 if (source._liteOnlyMaterial) {

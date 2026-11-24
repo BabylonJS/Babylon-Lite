@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateAttractorBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-attractor-block";
+import { npeBlock as updateAttractorBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-attractor-block";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import type { NpeGetter } from "../../../packages/babylon-lite/src/particle/node/npe-value";

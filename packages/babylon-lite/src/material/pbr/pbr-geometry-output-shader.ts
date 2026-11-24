@@ -32,6 +32,8 @@ import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { _rightHanded } from "#coordinate-system";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { pbrGeometryVelocity } from "./pbr-geometry-velocity-hooks.js";
+import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -39,45 +41,24 @@ const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
 // ─── PBR extension contributing the geometry-params fragment ──────────
 
-function needsGpUbo(attachments: readonly GeometryTextureType[]): boolean {
-    for (const t of attachments) {
-        if (t === GeometryTextureType.NORMALIZED_VIEW_DEPTH || t === GeometryTextureType.LINEAR_VELOCITY) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function needsVelocity(attachments: readonly GeometryTextureType[]): boolean {
-    return attachments.includes(GeometryTextureType.LINEAR_VELOCITY);
-}
-
-function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
-    return attachments.includes(GeometryTextureType.LOCAL_POSITION);
-}
-
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-pos varyings.
  *  PBR-specific: world-position varying is `out.worldPos`. */
-function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
+function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean, meshFeatures: number): ShaderFragment {
     const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
     const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
-    if (needsVelocityVaryings) {
-        varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
-    }
-    if (needsLocalPosVarying) {
-        varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
-    }
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
+        varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
         vbParts.push(wgsl`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.worldPos, 1.0);`);
         vbParts.push(wgsl`out.vPreviousClip = gp.previousViewProjection * vec4<f32>(out.worldPos, 1.0);`);
     }
     if (needsLocalPosVarying) {
+        varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
         vbParts.push(wgsl`out.vLocalPos = position;`);
     }
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
-    return {
+    const fragment: ShaderFragment = {
         _id: "pbr-geometry-params",
         _bindings: bindings,
         _helperFunctions: helpers,
@@ -85,6 +66,7 @@ function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityV
         _varyings: varyings,
         _vertexSlots: slots,
     };
+    return pbrGeometryVelocity && needsVelocityVaryings ? pbrGeometryVelocity.extendPbrGeometryParams(fragment, meshFeatures, needsLocalPosVarying) : fragment;
 }
 
 /** PBR extension that wires the geometry-params fragment + gp UBO bind entry.
@@ -108,23 +90,23 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
                 return null;
             }
             const att = getAttachments() ?? [];
-            const wantsGp = needsGpUbo(att);
-            const wantsVelocity = needsVelocity(att);
-            const wantsLocalPos = needsLocalPos(att);
-            if (!wantsGp && !wantsVelocity && !wantsLocalPos) {
+            const wantsVelocity = att.includes(GeometryTextureType.LINEAR_VELOCITY);
+            const wantsGp = wantsVelocity || att.includes(GeometryTextureType.NORMALIZED_VIEW_DEPTH);
+            const wantsLocalPos = att.includes(GeometryTextureType.LOCAL_POSITION);
+            if (!wantsGp && !wantsLocalPos) {
                 return null;
             }
-            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos);
+            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, ctx._meshFeatures);
         },
         bind(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number {
             if ((ctx._features2 & PBR2_GEOMETRY_OUTPUT) === 0) {
                 return b;
             }
-            const view = ctx._material as { _gpUBO?: GPUBuffer | null };
+            const view = ctx._material as PbrGeometryMaterialView;
             if (view._gpUBO) {
                 entries.push({ binding: b++, resource: { buffer: view._gpUBO } });
             }
-            return b;
+            return pbrGeometryVelocity?.bindPbrGeometryVelocity(view, entries, b) ?? b;
         },
     };
     _registerPbrExt(ext);
@@ -174,6 +156,9 @@ export function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: bo
             // BJS uses `surfaceAlbedo` for PBR (post diffuse / metallic split).
             return wgsl`vec4<f32>(surfaceAlbedo, ${wg})`;
         case GeometryTextureType.LINEAR_VELOCITY: {
+            if (pbrGeometryVelocity?.geometryVelocityKey()) {
+                return pbrGeometryVelocity.geometryVelocityOutput(wg);
+            }
             const cur = `(input.vCurrentClip.xy / input.vCurrentClip.w)`;
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
@@ -223,7 +208,7 @@ export function composePbrGeometryShader(
         singleLightType,
         esmShadowDepthCode,
         vbStrides,
-        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`,
+        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}${pbrGeometryVelocity?.geometryVelocityKey() ?? ""}`,
         uv2Mask,
         pluginIndex
     );

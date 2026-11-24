@@ -79,6 +79,12 @@ describe("Camera adoption (loaded .babylon cameras)", () => {
 });
 
 describe("Camera projection mode", () => {
+    it("exposes resetViewHistory with the frame-graph ownership blocker", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        expect(() => camera.resetViewHistory()).toThrow(LiteCompatError);
+        expect(() => camera.resetViewHistory()).toThrow(/camera-to-task registry/);
+    });
+
     it("exposes the Babylon.js projection mode constants", () => {
         expect(Camera.PERSPECTIVE_CAMERA).toBe(0);
         expect(Camera.ORTHOGRAPHIC_CAMERA).toBe(1);

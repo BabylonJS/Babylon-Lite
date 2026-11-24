@@ -1,5 +1,6 @@
 import type { EngineContext } from "./engine.js";
-import { _getAdapterOptions, resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { _getAdapterOptions } from "./device.js";
 import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 import { TU } from "./gpu-flags.js";
 import { _refreshScRT } from "./surface.js";
@@ -56,12 +57,14 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
         throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
     }
     const storageRecovery = engine._storageBuffers?.size ? await loadCpuStorageRecovery() : undefined;
-    engine._device = await runRecoveryStep("requesting a replacement device", () =>
+    const device = await runRecoveryStep("requesting a replacement device", () =>
         adapter.requestDevice({
             requiredFeatures: state._requiredFeatures,
-            requiredLimits: { ...engine._options?.requiredLimits, ...storageRecovery?.getCpuStorageRecoveryLimits(engine) },
+            // The device's creation options (from `createDevice`, or forwarded there by `createEngine`) carry the original limits.
+            requiredLimits: { ...engine.device._options?.requiredLimits, ...storageRecovery?.getCpuStorageRecoveryLimits(engine) },
         })
     );
+    engine._device = engine.device._device = device;
     engine._attachGpuEvents?.(engine);
     await runRecoveryStep("rebuilding engine storage buffers", async () => {
         const recovery = storageRecovery ?? (engine._storageBuffers?.size ? await loadCpuStorageRecovery() : undefined);

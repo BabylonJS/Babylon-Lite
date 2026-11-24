@@ -10,6 +10,7 @@
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
+import { pbrDiffuseOcclusion } from "../pbr-diffuse-occlusion.js";
 import { _rightHanded } from "#coordinate-system";
 
 // WebGPU shader stage constants
@@ -34,25 +35,33 @@ return vec3<f32>(v.x * c + v.z * s, v.y, ${_rightHanded ? "v.x*s-v.z*c" : "-v.x*
 }
 `;
 
-function makeIblCalculation(hasNormalMap: boolean, anisoBentNormalCode: WgslSource = wgsl``, skyboxCalculation: WgslSource = wgsl``): WgslSource {
-    // Skybox mode: caller passes pre-baked WGSL (from ibl-skybox-wgsl.ts) to avoid
-    // bundling that ~1 KB string into scenes that don't use skyboxMode.
-    if (skyboxCalculation) {
-        return skyboxCalculation;
-    }
+/**
+ * Create an IBL/environment fragment.
+ * @param hasNormalMap - Whether the material uses a normal map (enables horizon occlusion).
+ * @param anisoBentNormalCode - WGSL code for anisotropic bent normal (empty string = standard reflection).
+ * @param skyboxCalculation - Pre-baked skybox-mode WGSL from ibl-skybox-wgsl.ts (empty string = normal PBR).
+ * @param diffuseOcclusion - Typed diffuse-only visibility expression.
+ */
+export function createIblFragment(
+    hasNormalMap: boolean,
+    anisoBentNormalCode: WgslSource = wgsl``,
+    skyboxCalculation: WgslSource = wgsl``,
+    diffuseOcclusion: WgslSource = wgsl`occlusion`
+): ShaderFragment {
+    let calculation = skyboxCalculation;
+    if (!calculation) {
+        const ehoLine = hasNormalMap ? wgsl`let eho = environmentHorizonOcclusion(-V, N, N_geom);` : wgsl`let eho = 1.0;`;
 
-    const ehoLine = hasNormalMap ? wgsl`let eho = environmentHorizonOcclusion(-V, N, N_geom);` : wgsl`let eho = 1.0;`;
+        // Normal PBR: use reflected view or anisotropy bent normal.
+        const reflectionDir = anisoBentNormalCode ? anisoBentNormalCode : wgsl`let R_raw = reflect(-V, N);`;
 
-    // Normal PBR: use reflected view or anisotropy bent normal.
-    const reflectionDir = anisoBentNormalCode ? anisoBentNormalCode : wgsl`let R_raw = reflect(-V, N);`;
-
-    const irradianceCode = wgsl`let environmentIrradiance = (scene.vSphericalL00.rgb
+        const irradianceCode = wgsl`let environmentIrradiance = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
   + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
   + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
   + scene.vSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
 
-    return wgsl`${reflectionDir}
+        calculation = wgsl`${reflectionDir}
 let R = rotateY(R_raw, scene.envRotationY);
 let N_env = rotateY(N, scene.envRotationY);
 let brdf = textureSample(brdfLUT, brdfSampler_, vec2<f32>(NdotV, roughness));
@@ -68,19 +77,11 @@ let cubemapDim = f32(textureDimensions(iblTexture).x);
 var specLod = log2(cubemapDim * alphaG) * scene.vImageInfos.z;
 var environmentRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * material.environmentIntensity;
 environmentRadiance = mix(environmentRadiance, environmentIrradiance, alphaG);
-let finalIrradiance = environmentIrradiance * surfaceAlbedo * occlusion;
+let finalIrradiance = environmentIrradiance * surfaceAlbedo * ${diffuseOcclusion};
 let finalSpecularScaled = directSpecular * energyConservation;
 let finalRadianceScaled = environmentRadiance * colorSpecularEnvReflectance * energyConservation;
 color = finalIrradiance + finalRadianceScaled + finalSpecularScaled + directDiffuse + emissive;`;
-}
-
-/**
- * Create an IBL/environment fragment.
- * @param hasNormalMap - Whether the material uses a normal map (enables horizon occlusion).
- * @param anisoBentNormalCode - WGSL code for anisotropic bent normal (empty string = standard reflection).
- * @param skyboxCalculation - Pre-baked skybox-mode WGSL from ibl-skybox-wgsl.ts (empty string = normal PBR).
- */
-export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: WgslSource = wgsl``, skyboxCalculation: WgslSource = wgsl``): ShaderFragment {
+    }
     return {
         _id: "ibl",
 
@@ -97,7 +98,7 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: Wg
         _helperFunctions: IBL_HELPERS,
 
         _fragmentSlots: {
-            AI: makeIblCalculation(hasNormalMap, anisoBentNormalCode, skyboxCalculation),
+            AI: calculation,
             BA: wgsl`luminanceOverAlpha += dot(finalRadianceScaled, vec3<f32>(0.2126, 0.7152, 0.0722));`,
         },
     };
@@ -112,7 +113,12 @@ export const pbrExt: PbrExt = {
         if (!ctx._hasIbl) {
             return null;
         }
-        return createIblFragment(ctx._hasAnyNormal, ctx._anisoBentNormalCode, ctx._iblSkyboxCalc);
+        return createIblFragment(
+            ctx._hasAnyNormal,
+            ctx._anisoBentNormalCode,
+            ctx._iblSkyboxCalc,
+            ctx._iblSkyboxCalc ? undefined : (pbrDiffuseOcclusion?.(ctx._pi ?? 0, ctx._features, ctx._features2) ?? undefined)
+        );
     },
     bind(ctx, entries, b) {
         if (!ctx._env) {

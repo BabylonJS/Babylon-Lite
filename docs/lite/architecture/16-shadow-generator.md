@@ -326,7 +326,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
         | -dot(r,P) -dot(u,P) -dot(dir,P) 1 |
     ```
     Where `P = light.worldMatrix[12..14]`
-5. Transform all 8 corners of each caster's local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` → compute X/Y bounds in light space
+5. Transform all 8 corners of each ordinary caster's geometry-local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` to compute X/Y bounds in light space. For thin instances, first union the prototype corners transformed by `worldMatrix × instanceMatrix` into a world AABB, then transform that box through `view`. Do not include an uninstanced prototype or parked (zero linear transform) instances. Clamp the active count to the matrix slab length; an empty instance set contributes nothing.
 6. Expand bounds by 10% (`shadowOrthoScale = 0.1`): `lMinX -= (lMaxX - lMinX) * 0.1` etc.
 7. Z bounds from `orthoMinZ`/`orthoMaxZ` (camera near/far)
 8. Build orthographic projection (column-major, WebGPU z=[0,1]):
@@ -341,7 +341,23 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
     ```
 9. Multiply: `viewProj = proj * view` (standard 4×4 multiply)
 
-ESM owns its task-facing directional matrix helper as internal `_computeDirectionalLightMatrix()` in `shadow/esm-directional-shadow-generator.ts`. PCF owns the same orthographic helper as internal `_computeDirectionalLightMatrix()` in `shadow/pcf-directional-shadow-generator.ts` so directional shadow generator math remains with the relevant directional resource setup without becoming public API.
+Directional ESM and PCF share `computeDirectionalLightMatrix()` in `shadow/shadow-base.ts`. Their asynchronous caster preload calls `preloadDirectionalShadowBounds(casterMeshes)`, which imports `shadow/thin-instance-shadow-bounds.ts` only when a thin-instanced caster is present. CSM imports that same helper directly instead of maintaining a separate implementation.
+
+Before a directional refit, `prepareDirectionalShadowBounds(generator, casterMeshes)` also detects an ordinary registered caster converted to thin instancing, even when the caster-array identity is unchanged. If its helper is not ready, `_preloadRegisteredShadowCasters(generator)` in `frame-graph/shadow-inputs.ts` re-supplies the source caster set from its registration map, never a deformation wrapper's substitute list. Material-family holds use that same owner helper. This prevents a second morph/skeleton bounds application and keeps the source-list/pending checks in one place. The existing shadow-task preloader parks the generator, reports failed imports, and resumes only after a successful preload. PCF's matrix callback may return `null` to defer that refit; ESM similarly returns before fitting. Neither path advances its dirty-tracking versions or overwrites the previous shadow map while waiting. Static frames do not perform an additional caster scan.
+
+Directional fitting projects the local box intervals through the composed affine light-view/world transform, which is exactly equivalent to taking the extrema of all eight transformed corners but avoids repeated corner transforms. Each projection row is fit with double-precision scalar extrema and written directly by scaling/translating the light view into its F32 output. This needs neither a bounds scratch allocation nor a sparse 4x4 projection allocation/multiplication. The common `getShadowLightView(light, offX, offY, offZ)` owns the node-to-world direction and floating-origin conversion for directional and spot fits. The shared `multiply4x4()` wrapper uses the existing allocation-free `multiplyMat4IntoBuffer()` kernel instead of retaining a second multiplication implementation. Private cache members follow the shadow subsystem's existing internal `_` field convention.
+
+Generator-owned `_lightMatrix` and fitted `_viewProj` values are single packed F32 matrices, not arbitrary matrix slabs. Their copies use native `TypedArray.set()` directly. ESM's compare-and-copy helper updates the matrix only when a component differs, before bumping the generator version; UBO packing retains explicit zero initialization of the padding fields.
+
+`preloadPcfShadowTaskState(casterMeshes, loads = [])` appends material-family imports to an owned preload batch and awaits that batch. Directional PCF supplies `[preloadDirectionalShadowBounds(casterMeshes)]` as the batch so bounds and materials still load in parallel without a nested `Promise.all` or an extra async wrapper. Spot PCF and CSM keep the default empty batch.
+
+ESM kernel preparation selects the nearest paired-tap kernel directly: for `v = round(max(requested, 1))`, use `max(floor(v / 4) * 4 + 1, 3)`. This is the same `4k+1` selection as the former five-candidate search (ties prefer the smaller kernel), without allocating or scanning a candidate array. Gaussian weights and bilinear tap pairing are unchanged.
+
+`getShadowCasterWorldBounds(mesh)` returns a cached `{ min: [x,y,z], max: [x,y,z] }` world AABB for an ordinary or thin-instanced caster, or `null` when no active instance contributes. CSM uses this for all casters, eliminating its separate ordinary-box corner loop and avoiding repeated transforms during camera-only refits. Its lazy `WeakMap<Mesh, ...>` cache is keyed by instance version, matrix array identity, clamped active count, mesh world-matrix version, and all six geometry-bound coordinates. The instance path computes affine center/radius extrema, preserving signed scales and shears without visiting eight corners. Stable entries reuse their output storage. This CPU-only cache holds no device resources.
+
+The lazy directional adapter `getDirectionalShadowCaster(mesh)` returns ordinary meshes unchanged. For thin instances it reuses a cached plain bounds view whose `boundMin`/`boundMax` alias the cached world extrema and whose `worldMatrix` is identity; empty instance sets return `null`. The adapter and its identity matrix live only in the lazy feature module, not the always-loaded fitter. The fitter consumes this same matrix/bounds protocol for both cases; its caller's preload gate guarantees readiness. `getThinInstanceWorldBounds(mesh)` remains the internal bounds-only query, returning `undefined` for an ordinary mesh. Floating-origin subtraction happens after world-bound computation, exactly once, in the shared directional fit.
+
+`Mesh.boundMin`/`boundMax` always enclose the prototype geometry before either transform, including when a consumer supplies conservative custom bounds for deformation. They must not be replaced with an aggregate instance box: precise picking, culling and physics need the prototype box. Shadow fitting derives aggregate bounds without mutating these fields. No additional public bounding-box fields or projection settings are required.
 
 #### Spot PCF: `_computeSpotLightMatrix` (perspective)
 
@@ -442,18 +458,34 @@ PCF depth rendering uses the regular material renderable path with a pass-specif
 - **Fragment stage retained when needed** with a void entry point so material `discard` / alpha-test logic updates the depth attachment without writing color
 - No multisample
 
+**Incremental PCF casters.** The task, target, shadow camera and UBOs survive caster-set and material changes.
+The state caches no-colour views and keeps persistent snapshots of the actual queued meshes separately from
+`_casterMeshes`, which deformable-caster wrappers temporarily replace with the application's source array.
+Each caster record stores its receive material, terminal material and renderable generation (a null entry
+represents a held or materialless caster). A single cache keyed by terminal material stores each no-colour view
+with its generation and captured features. Override chains sharing a terminal therefore need neither duplicate
+cache entries nor separate chain pruning. Records change only when their caster is queued, so a joining caster
+shares a still-current view without requeueing its peers or rebuilding parallel arrays.
+One stable compaction drops removed/changed packets and reselects draw batches once. Packet resources retire
+behind the frame fence. Added/changed casters are queued without binding, then `_recordedVersion = -1` makes
+the scheduler resolve and bind the complete change once. `_lastCasterVersion = -1` forces the map to redraw;
+task bundle/version caches are invalidated only when membership changes. Reordering/re-supplying identical
+members keeps packets and bundles. Stale terminal views are invalidated before any new view is built, and
+cached terminals no live packet reaches are pruned. A replaced generator depth texture or map size still retires the whole
+task behind the frame fence and creates a new target.
+
 **Caster material changes.** The PCF state snapshots each caster's terminal material, its `_csmGen` and its
 `_renderFeatures`, and the caster's `_renderableGen`. A new caster array, a switched or re-pointed caster material, a
 rebuilt one, a terminal material whose render features were recomputed, or a caster whose own renderable was rebuilt
-makes the next ensure build a fresh task (the old one retires behind the frame fence). The features matter when the
+makes the next ensure requeue only the affected casters. The features matter when the
 terminal material is rebuilt only through meshes outside the caster set, for example an override that is also the
 material of a mesh that casts no shadow: that rebuild moves only that mesh's generation, while the caster's view still
 holds the features it was built from (alpha testing, culling). Features that were dropped and not recomputed yet do not
-count, as for the CSM: a view built then would read none of them. A caster whose view cannot be built yet is left out of that task and kept in `_held`,
+count, as for the CSM: a view built then would read none of them. A caster whose view cannot be built yet is left out of that task with a null caster snapshot,
 using the same `holdShadowCaster` check as the CSM reconcile: the no-colour view factory of its family is not imported
 (the registered set is re-supplied, so the generator is parked once while it imports), or the material it casts through
 itself has no completed group build in this scene. While the held casters stay held, an ensure returns the existing task;
-once a hold lifts, or the change is reverted, the next ensure rebuilds the task with the caster. This applies to the first
+once a hold lifts, or the change is reverted, the next ensure queues the caster into the same task. This applies to the first
 build too, since a caster can switch family while the registration preload imports.
 
 ### PCF Main-Pass Integration

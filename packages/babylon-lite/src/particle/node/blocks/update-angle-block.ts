@@ -1,7 +1,7 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `UpdateAngleBlock` — write the evaluated rotation into the angle column. */
-export const updateAngleBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         if (!ctx.isConnected(block, "angle")) {
             return;

@@ -24,7 +24,8 @@ import {
     startEngine,
 } from "babylon-lite";
 
-const SPONZA_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/Sponza/glTF/Sponza.gltf";
+// Pin the unchanged model and texture set to avoid inconsistent CDN cache entries.
+const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/5bad5aaa0bbb5d0f9cdc934e626f27d0df1e79b8/Models/Sponza/glTF/Sponza.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -190,9 +191,10 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    const dataset = canvas.dataset;
+    dataset.drawCalls = String(engine.drawCallCount);
+    dataset.initMs = String(performance.now() - __initStart);
+    dataset.ready = "true";
 }
 
 main().catch((err) => {

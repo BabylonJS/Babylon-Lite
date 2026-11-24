@@ -1,0 +1,83 @@
+name: Dependency Review
+
+# Blocks pull requests that add dependencies with known high or critical
+# vulnerabilities. It compares the dependency graph between the base and head
+# commits; it does not scan the existing dependency backlog and is not malware
+# detection. No dependencies are installed and no repository code is executed.
+
+on:
+    pull_request:
+    merge_group:
+        types:
+            - checks_requested
+
+permissions: {}
+
+jobs:
+    dependency-review:
+        name: dependency-review
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            # Base/head refs come from the pull_request or merge_group event payload.
+            - name: Review dependency changes
+              uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+              with:
+                  fail-on-severity: high
+                  fail-on-scopes: runtime, development, unknown
+                  license-check: false
+
+            # The action omits advisories below fail-on-severity from its report,
+            # so list added low/moderate advisories as non-blocking warnings.
+            - name: Report lower-severity advisories
+              if: ${{ !cancelled() }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+              run: |
+                  if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                      echo "::warning title=Dependency review::Base/head commit SHAs are unavailable; lower-severity report skipped."
+                      exit 0
+                  fi
+                  # --paginate follows Link headers, as dependency-review-action does;
+                  # jq -s merges the per-page arrays.
+                  if ! changes="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}")"; then
+                      echo "::warning title=Dependency review::Could not fetch the dependency comparison; lower-severity report skipped."
+                      exit 0
+                  fi
+                  if ! advisories="$(jq -c -s '
+                      [ add // [] | .[] | select(.change_type == "added") | . as $change
+                        | (.vulnerabilities // [])[]
+                        | select(.severity == "low" or .severity == "moderate")
+                        | {severity, ghsa: .advisory_ghsa_id, summary: .advisory_summary, url: .advisory_url,
+                           name: $change.name, version: $change.version, manifest: $change.manifest,
+                           scope: ($change.scope // "unknown")} ]
+                  ' <<< "$changes")"; then
+                      echo "::warning title=Dependency review::Could not parse the dependency comparison; lower-severity report skipped."
+                      exit 0
+                  fi
+                  if [[ "$advisories" == "[]" ]]; then
+                      echo "No added low or moderate severity advisories."
+                      exit 0
+                  fi
+                  jq -r '
+                      def escape: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+                      .[] | "::warning title=Dependency review (non-blocking)::" + ("\(.severity): \(.name)@\(.version) in \(.manifest) (\(.scope) scope) - \(.ghsa) \(.summary) \(.url)" | escape)
+                  ' <<< "$advisories"
+                  {
+                      echo "### Non-blocking low/moderate advisories"
+                      echo
+                      echo "These added dependencies have advisories below the blocking threshold (high):"
+                      echo
+                      jq -r '
+                          .[] | "- \(.severity): `\(.name)@\(.version)` in `\(.manifest)` ([\(.ghsa)](\(.url)))" | gsub("[\r\n]"; " ")
+                      ' <<< "$advisories"
+                  } >> "$GITHUB_STEP_SUMMARY"

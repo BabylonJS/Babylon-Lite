@@ -21,6 +21,8 @@ import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identit
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { getShadowCasterWorldBounds } from "./thin-instance-shadow-bounds.js";
+import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -429,45 +431,6 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
     return drop;
 }
 
-/** @internal Remove every mesh in `drop` from one task with one pass over each of its lists, instead of one
- *  `removeMeshFromTask` scan and draw-batch re-selection per removed mesh. Like `_removeMeshFromRenderTask`, it
- *  re-selects the batches and invalidates the bundle only when something was removed. The task's `_removeMesh`
- *  hook is deliberately not called: CSM cascade tasks are internal and never wrapped by
- *  `enableRenderTaskMeshRefresh`. */
-export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undefined>): void {
-    let removed = false;
-    // Compact `list` in place, keeping the entries whose mesh is not dropped.
-    const prune = <T>(list: T[], meshOf: (entry: T) => Mesh | undefined, onDrop?: (entry: T) => void): void => {
-        let kept = 0;
-        for (const entry of list) {
-            if (drop.has(meshOf(entry))) {
-                onDrop?.(entry);
-                removed = true;
-            } else {
-                list[kept++] = entry;
-            }
-        }
-        list.length = kept;
-    };
-    prune(task._pendingMeshes ?? [], (request) => request.mesh);
-    // Fenced: a frame that is still in flight may reference the dropped packet.
-    prune(
-        task._renderables,
-        (renderable) => renderable.mesh,
-        (renderable) => task._retireRenderable?.(task.engine, renderable)
-    );
-    for (const bindings of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
-        prune(bindings, (binding) => binding.renderable.mesh);
-    }
-    if (removed) {
-        const previous = task._batchState;
-        task._batchState = previous?._select([task._opaqueBindings, task._directBindings, task._transparentBindings]);
-        previous?._release(task.engine, [task._batchState]);
-        task._ob.length = 0;
-        task._lastVersion = -1;
-    }
-}
-
 /** Render every cascade layer for this frame, recomputing splits/matrices from the active camera. */
 export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig): number {
     const casterMeshes = state._casterMeshes;
@@ -549,8 +512,6 @@ const FRUSTUM_NDC: ReadonlyArray<readonly [number, number, number]> = [
     [1, -1, 0],
     [-1, -1, 0],
 ];
-const DEFAULT_BOUND_MIN = [-0.5, -0.5, -0.5] as const;
-const DEFAULT_BOUND_MAX = [0.5, 0.5, 0.5] as const;
 
 /** @internal Build a light-space view matrix into caller-owned storage. */
 export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): void {
@@ -850,36 +811,14 @@ function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascad
         maxY = -Infinity,
         maxZ = -Infinity;
     for (const mesh of casterMeshes) {
-        const ti = mesh.thinInstances;
-        if (ti && ti.count > 0 && ti.matrices) {
-            const cached = _thinInstanceWorldAabb(mesh, ti);
-            if (cached) {
-                const bounds = cached._bounds;
-                minX = Math.min(minX, bounds[0]!);
-                minY = Math.min(minY, bounds[1]!);
-                minZ = Math.min(minZ, bounds[2]!);
-                maxX = Math.max(maxX, bounds[3]!);
-                maxY = Math.max(maxY, bounds[4]!);
-                maxZ = Math.max(maxZ, bounds[5]!);
-            }
-            continue;
-        }
-        const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin ?? DEFAULT_BOUND_MIN;
-        const bmax = mesh.boundMax ?? DEFAULT_BOUND_MAX;
-        for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmax[0]! : bmin[0]!;
-            const ly = k & 2 ? bmax[1]! : bmin[1]!;
-            const lz = k & 4 ? bmax[2]! : bmin[2]!;
-            const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]!;
-            const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]!;
-            const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]!;
-            minX = Math.min(minX, wx);
-            minY = Math.min(minY, wy);
-            minZ = Math.min(minZ, wz);
-            maxX = Math.max(maxX, wx);
-            maxY = Math.max(maxY, wy);
-            maxZ = Math.max(maxZ, wz);
+        const bounds = getShadowCasterWorldBounds(mesh);
+        if (bounds) {
+            minX = Math.min(minX, bounds.min[0]);
+            minY = Math.min(minY, bounds.min[1]);
+            minZ = Math.min(minZ, bounds.min[2]);
+            maxX = Math.max(maxX, bounds.max[0]);
+            maxY = Math.max(maxY, bounds.max[1]);
+            maxZ = Math.max(maxZ, bounds.max[2]);
         }
     }
     if (!Number.isFinite(minX)) {
@@ -892,98 +831,6 @@ function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascad
     aabb[4] = maxY;
     aabb[5] = maxZ;
     return true;
-}
-
-interface ThinCasterAabbEntry {
-    _version: number;
-    _worldVersion: number;
-    _bounds: number[];
-}
-
-/** Per-mesh cache of a thin-instanced caster's world AABB.
- *  Lazily allocated so this module keeps zero import-time side effects and stays tree-shakable. */
-let _thinCasterAabbCache: WeakMap<Mesh, ThinCasterAabbEntry> | null = null;
-function _getThinCasterAabbCache(): WeakMap<Mesh, ThinCasterAabbEntry> {
-    if (!_thinCasterAabbCache) {
-        _thinCasterAabbCache = new WeakMap();
-    }
-    return _thinCasterAabbCache;
-}
-
-/** Compute a thin-instanced caster's world AABB in a stable cache entry. */
-function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabbEntry | null {
-    const cache = _getThinCasterAabbCache();
-    const worldVersion = mesh.worldMatrixVersion;
-    let entry = cache.get(mesh);
-    if (entry && entry._version === ti._version && entry._worldVersion === worldVersion) {
-        return Number.isFinite(entry._bounds[0]) ? entry : null;
-    }
-    if (!entry) {
-        entry = { _version: 0, _worldVersion: 0, _bounds: [0, 0, 0, 0, 0, 0] };
-        cache.set(mesh, entry);
-    }
-    // Hoist the prototype world matrix once (worldMatrix is a getter) — it is constant across all instances.
-    const world = mesh.worldMatrix;
-    const bmin = mesh.boundMin ?? DEFAULT_BOUND_MIN;
-    const bmax = mesh.boundMax ?? DEFAULT_BOUND_MAX;
-    const mats = ti.matrices;
-    const count = Math.min(ti.count, (mats.length / 16) | 0);
-    let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
-    for (let i = 0; i < count; i++) {
-        const o = i * 16;
-        // Skip parked instances (zero 3×3 linear part → zero-area triangles that rasterize to nothing).
-        const lin =
-            Math.abs(mats[o]!) +
-            Math.abs(mats[o + 1]!) +
-            Math.abs(mats[o + 2]!) +
-            Math.abs(mats[o + 4]!) +
-            Math.abs(mats[o + 5]!) +
-            Math.abs(mats[o + 6]!) +
-            Math.abs(mats[o + 8]!) +
-            Math.abs(mats[o + 9]!) +
-            Math.abs(mats[o + 10]!);
-        if (lin < 1e-9) {
-            continue;
-        }
-        for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmax[0]! : bmin[0]!;
-            const ly = k & 2 ? bmax[1]! : bmin[1]!;
-            const lz = k & 4 ? bmax[2]! : bmin[2]!;
-            // 1) instance-local: ip = instanceMatrix * localCorner
-            const ix = mats[o]! * lx + mats[o + 4]! * ly + mats[o + 8]! * lz + mats[o + 12]!;
-            const iy = mats[o + 1]! * lx + mats[o + 5]! * ly + mats[o + 9]! * lz + mats[o + 13]!;
-            const iz = mats[o + 2]! * lx + mats[o + 6]! * ly + mats[o + 10]! * lz + mats[o + 14]!;
-            // 2) world: wp = mesh.world * ip  (matches finalWorld = mesh.world * instanceMatrix)
-            const wx = world[0]! * ix + world[4]! * iy + world[8]! * iz + world[12]!;
-            const wy = world[1]! * ix + world[5]! * iy + world[9]! * iz + world[13]!;
-            const wz = world[2]! * ix + world[6]! * iy + world[10]! * iz + world[14]!;
-            minX = Math.min(minX, wx);
-            minY = Math.min(minY, wy);
-            minZ = Math.min(minZ, wz);
-            maxX = Math.max(maxX, wx);
-            maxY = Math.max(maxY, wy);
-            maxZ = Math.max(maxZ, wz);
-        }
-    }
-    entry._version = ti._version;
-    entry._worldVersion = worldVersion;
-    const bounds = entry._bounds;
-    if (!Number.isFinite(minX)) {
-        bounds[0] = Infinity;
-        return null;
-    }
-    bounds[0] = minX;
-    bounds[1] = minY;
-    bounds[2] = minZ;
-    bounds[3] = maxX;
-    bounds[4] = maxY;
-    bounds[5] = maxZ;
-    return entry;
 }
 
 export function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig): void {

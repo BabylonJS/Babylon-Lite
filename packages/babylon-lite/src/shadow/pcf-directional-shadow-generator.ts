@@ -20,7 +20,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
-import { computeDirectionalLightMatrix, createSharedShadowUBO, createShadowParamsUBO } from "./shadow-base.js";
+import { computeDirectionalLightMatrix, createSharedShadowUBO, createShadowParamsUBO, preloadDirectionalShadowBounds, prepareDirectionalShadowBounds } from "./shadow-base.js";
 import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap, type PcfTaskState } from "./pcf-shadow-task-hooks.js";
 
 /** Configuration for a directional-light PCF shadow generator: map size, depth bias, darkness, and ortho projection bounds. */
@@ -87,7 +87,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _config,
         _version: 0,
     };
-    sg._preloadShadowTask = preloadPcfShadowTaskState;
+    sg._preloadShadowTask = (casterMeshes) => preloadPcfShadowTaskState(casterMeshes, [preloadDirectionalShadowBounds(casterMeshes)]);
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);
         sg._shadowTaskState = state;
@@ -95,7 +95,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
     };
     sg._renderShadowMap = (engine, state) => {
         return renderPcfShadowMap(engine, sg, state as PcfTaskState, (casterMeshes, offX, offY, offZ) =>
-            computeDirectionalLightMatrix(_light, casterMeshes, orthoMinZ, orthoMaxZ, offX, offY, offZ)
+            prepareDirectionalShadowBounds(sg, casterMeshes) ? computeDirectionalLightMatrix(_light, casterMeshes, orthoMinZ, orthoMaxZ, offX, offY, offZ) : null
         );
     };
     return sg;

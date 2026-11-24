@@ -459,13 +459,15 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined)).toBe(true);
     });
 
-    it.each(["lightmaps", "dielectric-reflectance extensions"] as const)("rejects %s opt-in introduced after registration", async (feature) => {
+    it.each(["lightmaps", "bent normals", "dielectric-reflectance extensions"] as const)("rejects %s opt-in introduced after registration", async (feature) => {
         const asset = await loadMeshLoD(engine, statueSource());
         const material = createPbrMaterial();
         const scene = fakeScene(engine);
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
         if (feature === "lightmaps") {
             setPbrLightmap(material, createSolidTexture2D(engine, 1, 1, 1), { coordIndex: 0 });
+        } else if (feature === "bent normals") {
+            material.bentNormalTexture = createSolidTexture2D(engine, 1, 1, 1);
         } else {
             setPbrMetallicReflectance(material, { f0Factor: 0 });
         }
@@ -483,6 +485,21 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const allocations = mock.device.buffers.length;
         await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" });
         expect(mock.device.buffers).toHaveLength(allocations);
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects a dirty bent-normal texture without a material upload (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        const scene = await build(asset, material, 1);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        material.bentNormalTexture = createSolidTexture2D(engine, 1, 1, 1);
+        markMaterialUboDirty(material);
+        const uploads = mock.device.writes.length;
+        expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "bent normals" }));
+        expect(mock.device.writes).toHaveLength(uploads);
     });
 
     it.each(["cpu", "gpu"] as const)("rejects dirty alpha-only blending without a material upload (%s)", async (selectionMode) => {

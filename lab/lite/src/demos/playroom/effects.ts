@@ -1,6 +1,6 @@
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     billboardBlendAdditive,
     billboardBlendAlpha,
@@ -109,7 +109,7 @@ export interface PlayroomEffects {
 function createEffectSystem(scene: SceneContext, texture: Texture2D, capacity: number, additive: boolean): FacingBillboardSpriteSystem {
     const atlas = createGridSpriteAtlas(texture, { cellWidthPx: texture.width, cellHeightPx: texture.height });
     const system = createFacingBillboardSystem(atlas, { capacity, blendMode: additive ? billboardBlendAdditive : billboardBlendAlpha, order: 220 });
-    addFacingBillboardSystem(scene, system);
+    addBillboardSystemToScene(scene, system);
     return system;
 }
 

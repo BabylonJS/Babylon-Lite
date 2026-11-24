@@ -77,6 +77,7 @@ log/
 browserstack.err
 local.log
 .perf-baseline-worktree/
+.ao-reference-cache/
 
 _diag.mjs
 _lite72*.wgsl

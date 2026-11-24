@@ -21,8 +21,8 @@ const SCISSOR_TEST = 0x0c11;
  * @param engine - The engine.
  * @param x - Lower-left X of the scissor rectangle, in pixels.
  * @param y - Lower-left Y of the scissor rectangle, in pixels.
- * @param width - Rectangle width in pixels.
- * @param height - Rectangle height in pixels.
+ * @param width - Rectangle width in pixels; a nonnegative integer.
+ * @param height - Rectangle height in pixels; a nonnegative integer.
  */
 export function setScissor(engine: GLEngineContext, x: number, y: number, width: number, height: number): void {
     if (engine._isLost || engine._disposed) {

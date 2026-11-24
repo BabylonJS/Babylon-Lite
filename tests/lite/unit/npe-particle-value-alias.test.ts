@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { particleMathBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-math-block";
+import { npeBlock as particleMathBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-math-block";
 import { createRandomDraw } from "../../../packages/babylon-lite/src/particle/node/blocks/particle-random-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import type { NpeGetter } from "../../../packages/babylon-lite/src/particle/node/npe-value";

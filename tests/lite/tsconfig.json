@@ -4,6 +4,7 @@
         "noEmit": true,
         "types": ["@webgpu/types", "webxr"],
         "paths": {
+            "babylon-lite": ["../../packages/babylon-lite/src/index.ts"],
             "babylon-lite/shader/wgsl.js": ["../../packages/babylon-lite/src/shader/wgsl.ts"]
         }
     },

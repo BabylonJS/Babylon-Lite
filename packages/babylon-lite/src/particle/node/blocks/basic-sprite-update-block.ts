@@ -5,7 +5,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  * cell index. Graph construction validates and captures the sprite handle after the setup-sprite-sheet block
  * has built.
  */
-export const basicSpriteUpdateBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(_block, ctx) {
         const system = ctx.state.system!;
         const sheet = system._spriteSheet;

@@ -65,6 +65,7 @@ import type {
     PointerDragEndEvent,
     PickingInfo as LitePickingInfo,
     Mesh as LiteMesh,
+    OverlaySceneOptions,
 } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
@@ -172,9 +173,12 @@ export class UtilityLayerRenderer {
     public readonly _engine: EngineContext;
     private _registered = false;
 
-    public constructor(scene: Scene) {
+    public constructor(scene: Scene, targets: OverlaySceneOptions) {
+        if (!targets) {
+            throw new Error("UtilityLayerRenderer requires explicit color targets on a GPU scene.");
+        }
         this._engine = scene.getEngine()._lite;
-        this._lite = createUtilityLayer(this._engine, scene._lite);
+        this._lite = createUtilityLayer(scene._lite, targets);
         // Babylon Lite registers a utility layer *after* its gizmos are created and
         // after the main scene is registered. Gizmo creation is synchronous (all
         // gizmos exist by the time the engine starts), so defer registration to the
@@ -776,8 +780,8 @@ export class GizmoManager {
     private readonly _layer: UtilityLayerRenderer;
     private _attached: AbstractMesh | null = null;
 
-    public constructor(scene: Scene) {
-        this._layer = new UtilityLayerRenderer(scene);
+    public constructor(scene: Scene, targets: OverlaySceneOptions) {
+        this._layer = new UtilityLayerRenderer(scene, targets);
     }
 
     public set positionGizmoEnabled(enabled: boolean) {

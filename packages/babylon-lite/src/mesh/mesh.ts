@@ -112,6 +112,10 @@ export interface Mesh extends SceneNode {
     id?: string;
     material: Material;
     receiveShadows: boolean;
+    /** @internal When true, colour and geometry draws of this mesh are omitted.
+     *  Shadow casting, picking and `visible` are unaffected.
+     *  Written only by opt-in features (mesh opacity). */
+    _skipColorDraw?: boolean;
     /** OBJECT-LOCAL axis-aligned bounding box of this mesh's own geometry — the box the vertex
      *  buffer occupies BEFORE `worldMatrix`, and before any thin-instance matrix. Every reader
      *  composes it the same way the shaders do:
@@ -134,9 +138,9 @@ export interface Mesh extends SceneNode {
      *  Consumers that need a loaded model's box in its ROOT frame must compose it with the node
      *  world-at-load matrix themselves.
      *
-     *  A consumer MAY overwrite these with a wider hand-computed box (e.g. a thin-instance prototype
-     *  publishing the union of all its placements onto an identity-world mesh) — the contract is only that
-     *  the box is stated in the frame `worldMatrix` maps out of. */
+     *  A consumer MAY supply conservative custom bounds enclosing the prototype geometry (for example
+     *  to cover vertex deformation), but MUST NOT replace them with the union of thin-instance placements.
+     *  Shadow fitting derives aggregate instance bounds without changing this geometry-local box. */
     boundMin?: [number, number, number];
     boundMax?: [number, number, number];
     /** Skeleton GPU data (skeletal animation). Type-only — no module dependency. */

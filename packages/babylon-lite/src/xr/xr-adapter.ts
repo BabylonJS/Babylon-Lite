@@ -1,9 +1,10 @@
-import { _installAdapterOptions } from "../engine/engine.js";
+import { _installAdapterOptions } from "../engine/device.js";
 
 /**
  * Request an **XR-compatible** GPU adapter for engines created after this call.
  *
- * Call this once, **before** {@link createEngine}, if you intend to enter an immersive WebGPU XR
+ * Call this once, **before** {@link createDevice} (or {@link createEngine} when it creates
+ * its own device), if you intend to enter an immersive WebGPU XR
  * session with that engine. The draft WebXR/WebGPU binding throws `InvalidStateError` when
  * `XRGPUBinding` is constructed with a device whose adapter was not XR-compatible, and WebGPU offers
  * no way to upgrade an existing device (unlike WebGL's `makeXRCompatible()`), so the adapter must be

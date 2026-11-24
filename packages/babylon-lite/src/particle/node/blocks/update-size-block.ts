@@ -1,7 +1,7 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `UpdateSizeBlock` — write the evaluated size input into the size column each step. */
-export const updateSizeBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

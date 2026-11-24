@@ -13,39 +13,24 @@ import { drawList, type RenderTaskBase } from "./render-task-base.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createImageProcessingTask } from "./image-processing-task.js";
 import { wgsl } from "../shader/wgsl.js";
+import type { TransmissionDepthGrab } from "./transmission-depth-grab.js";
 
 export interface RenderTaskTransmissionState {
     readonly texture: Texture2D;
     /** @internal */
     readonly _baseView: GPUTextureView;
     /** @internal */
-    _sourceWidth: number;
-    /** @internal */
-    _sourceHeight: number;
-    /** @internal */
     _sourceTexture: GPUTexture | null;
     /** @internal */
     _blit: TransmissionBlitState | null;
-    /** @internal Depth grab (the `grabDepth` option): the task's depth attachment snapshotted at the same
-     *  mid-pass break as the scene-colour copy, resolved into a single-sample `r32float`. Null when the
-     *  option is off, the task has no depth attachment, or the target hasn't built yet. */
-    _depth: TransmissionDepthGrabState | null;
+    /** @internal Installed only by the lazy depth-grab feature. */
+    _depth?: TransmissionDepthGrab;
     /** @internal */
     readonly _copyCount: number;
     /** @internal */
     readonly _generateMipmaps: boolean;
     /** @internal */
     _copies: number;
-}
-
-/** @internal Depth-grab state built by the lazy `transmission-depth-grab` module and consumed by the per-frame
- *  grab in `updateTransmissionTexture`. Exported so the lazy module can construct it. */
-export interface TransmissionDepthGrabState {
-    readonly texture: Texture2D;
-    /** @internal */
-    readonly _view: GPUTextureView;
-    /** @internal */
-    readonly _blit: TransmissionBlitState;
 }
 
 /** @internal */
@@ -56,25 +41,11 @@ export interface TransmissionBlitState {
     readonly _bindGroup: GPUBindGroup;
 }
 
-/** @internal Builds the depth-grab target + resolve blit, and records the per-frame resolve pass. Lives in the
- *  lazily-imported `transmission-depth-grab` module so its shaders/pipelines/pass-descriptor cost zero bytes for
- *  transmission scenes that never set `grabDepth`. */
-export interface DepthGrabImpl {
-    create: (engine: EngineContext, source: GPUTexture, width: number, height: number, multisampled: boolean) => TransmissionDepthGrabState;
-    record: (engine: EngineContext, depth: TransmissionDepthGrabState) => void;
-}
-
-let _depthGrab: DepthGrabImpl | null = null;
-
-/** @internal Called at the top level of `transmission-depth-grab.ts` (module side-effect) to wire the builder into
- *  this shared module. The dynamic `import("./transmission-depth-grab.js")` in a grabDepth task's `_preload` runs
- *  before the frame graph builds, so `_depthGrab` is installed by the time `configureTransmissionSource` runs. */
-export function _installDepthGrab(impl: DepthGrabImpl): void {
-    _depthGrab = impl;
-}
-
-const BLIT_SHADER = wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}@fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;
-const BLIT_MSAA_SHADER = wgsl`@group(0)@binding(0)var t:texture_multisampled_2d<f32>;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}fn l(p:vec2i)->vec4f{let n=textureNumSamples(t);var c=vec4f(0);for(var i=0u;i<n;i++){c+=textureLoad(t,p,i);}return c/f32(n);}@fragment fn fs(v:V)->@location(0)vec4f{let d=vec2i(textureDimensions(t));let q=clamp(v.u*vec2f(d)-.5,vec2f(0),vec2f(d-vec2i(1)));let p=vec2i(floor(q));let f=fract(q);let p1=min(p+vec2i(1),d-vec2i(1));return mix(mix(l(p),l(vec2i(p1.x,p.y)),f.x),mix(l(vec2i(p.x,p1.y)),l(p1),f.x),f.y);}`;
+const BLIT_VERTEX_SHADER = wgsl`struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}`;
+const BLIT_BINDINGS = wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;`;
+const BLIT_MSAA_BINDINGS = wgsl`@group(0)@binding(0)var t:texture_multisampled_2d<f32>;`;
+const BLIT_FRAGMENT_SHADER = wgsl`@fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;
+const BLIT_MSAA_FRAGMENT_SHADER = wgsl`fn l(p:vec2i)->vec4f{let n=textureNumSamples(t);var c=vec4f(0);for(var i=0u;i<n;i++){c+=textureLoad(t,p,i);}return c/f32(n);}@fragment fn fs(v:V)->@location(0)vec4f{let d=vec2i(textureDimensions(t));let q=clamp(v.u*vec2f(d)-.5,vec2f(0),vec2f(d-vec2i(1)));let p=vec2i(floor(q));let f=fract(q);let p1=min(p+vec2i(1),d-vec2i(1));return mix(mix(l(p),l(vec2i(p1.x,p.y)),f.x),mix(l(vec2i(p.x,p1.y)),l(p1),f.x),f.y);}`;
 const REFRACTION_LOD_BIAS = 4;
 let blitPipelines: Map<string, GPURenderPipeline> | null = null;
 let blitShader: GPUShaderModule | null = null;
@@ -85,39 +56,60 @@ let blitDevice: GPUDevice | null = null;
 
 /** Enable scene-color transmission for every render task currently registered in a scene. PBR materials are marked for linear transmission, and a trailing image-processing task is appended when needed. */
 export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
-    markPbrMaterialsLinear(scene);
-    enableSceneTransmissionTasks(scene, engine);
+    _t(scene, engine)[0]();
 }
 
 /** @internal Prepare linear PBR flags, then commit transmission only after renderable construction succeeds. */
 export function _t(scene: SceneContext, engine: EngineContext): readonly [commit: () => void, rollback: () => void] {
-    const states = scene.meshes.flatMap((mesh) => {
-        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown } | null;
-        return mat ? [[mat, mat._linearImageProcessing, mat._renderFeatures] as const] : [];
-    });
-    markPbrMaterialsLinear(scene);
+    type TransmissionMaterial = { _linearImageProcessing?: boolean; _renderFeatures?: unknown };
+    const states: [TransmissionMaterial, boolean | undefined, unknown][] = [];
+    for (const mesh of scene.meshes) {
+        const mat = mesh.material as TransmissionMaterial | null;
+        if (mat) {
+            states.push([mat, mat._linearImageProcessing, mat._renderFeatures]);
+            mat._linearImageProcessing = true;
+            mat._renderFeatures = undefined;
+        }
+    }
+    const rollback = (): void => {
+        // Reverse the journal so meshes sharing a material restore its original state.
+        for (let i = states.length - 1; i >= 0; i--) {
+            const [mat, linear, features] = states[i]!;
+            mat._linearImageProcessing = linear;
+            mat._renderFeatures = features;
+        }
+    };
     return [
-        () => enableSceneTransmissionTasks(scene, engine),
         () => {
-            for (const [mat, linear, features] of states) {
-                mat._linearImageProcessing = linear;
-                mat._renderFeatures = features;
+            try {
+                enableSceneTransmissionTasks(scene, engine);
+            } catch (error) {
+                rollback();
+                throw error;
             }
         },
+        rollback,
     ];
 }
 
 function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
+    scene._outputPipelineChange?.(false);
     let lastRenderTask: RenderTaskBase | null = null;
-    for (const task of scene._frameGraph._tasks) {
-        if ("_renderables" in task) {
-            const renderTask = task as RenderTaskBase;
-            enableTransmission(renderTask, engine);
-            lastRenderTask = renderTask;
+    try {
+        for (const task of scene._frameGraph._tasks) {
+            if ("_renderables" in task) {
+                const renderTask = task as RenderTaskBase;
+                enableTransmission(renderTask, engine);
+                lastRenderTask = renderTask;
+            }
         }
-    }
-    if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
-        scene._frameGraph._tasks.push(createImageProcessingTask({ name: "transmission-image-processing", source: lastRenderTask._config.rt }, engine, scene));
+        if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
+            scene._frameGraph._tasks.push(
+                createImageProcessingTask({ name: "transmission-image-processing", source: () => scene._outputTexture ?? lastRenderTask!._config.rt }, engine, scene)
+            );
+        }
+    } finally {
+        scene._outputPipelineChange?.(true);
     }
 }
 
@@ -173,16 +165,14 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
 function enableTransmission(task: RenderTaskBase, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
     const linear = options?.linear !== false;
     applyTransmissionOptions(task, options);
-    // grabDepth is opt-in: only when set do we dynamic-import the depth-grab shaders/pipelines (installed via the
-    // module side-effect). `_preload` is awaited before the frame graph builds, so `_createDepthGrab` is ready by
-    // the time `configureTransmissionSource` runs in record(). Transmission scenes without grabDepth never fetch it.
+    // Preload the optional controller before record() builds the task's attachments.
     if (task._config.transmission?.grabDepth) {
         const priorPreload = task._preload?.bind(task);
         task._preload = async (): Promise<void> => {
             if (priorPreload) {
                 await priorPreload();
             }
-            await import("./transmission-depth-grab.js");
+            task._createTransmissionDepthGrab = (await import("./transmission-depth-grab.js")).createTransmissionDepthGrab;
         };
     }
     const grab: SceneColorGrab = {
@@ -206,9 +196,16 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
     task.record = () => {
         disposeRenderTaskTransmission(state);
         state = createRenderTaskTransmission(task, engine);
-        (task._targetSignature as { _transmissionTexture?: Texture2D })._transmissionTexture = state.texture;
+        const signature = task._targetSignature as { _transmissionTexture?: Texture2D; _transmissionDepthTexture?: Texture2D | null };
+        signature._transmissionTexture = state.texture;
+        if (task._config.transmission?.grabDepth) {
+            state._depth = task._createTransmissionDepthGrab?.(engine, task._config.depth ?? task._config.rt, (texture) => {
+                signature._transmissionDepthTexture = texture;
+            });
+        }
         record();
         configureTransmissionSource(state, task, engine);
+        state._depth?.sync();
     };
     if (linear && execute) {
         task.execute = () => executeRenderTaskLinear(task.scene, execute);
@@ -224,6 +221,9 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
 
 function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
+    if (cfg.sharedRt) {
+        throw new Error("Transmission cannot retarget borrowed color attachments. Use linear: false and supply an explicit linear composition chain.");
+    }
     const oldDesc = cfg.rt._descriptor;
     const oldSize = oldDesc.size;
     const surface = task.scene.surface;
@@ -319,18 +319,7 @@ function clamp01(v: number): number {
     return Math.min(Math.max(v, 0), 1);
 }
 
-function markPbrMaterialsLinear(scene: SceneContext): void {
-    for (const mesh of scene.meshes) {
-        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown } | undefined;
-        if (mat) {
-            mat._linearImageProcessing = true;
-            mat._renderFeatures = undefined;
-        }
-    }
-}
-
 function createRenderTaskTransmission(task: RenderTaskBase, engine: EngineContext): RenderTaskTransmissionState {
-    const rt = task._config.rt;
     const width = 1024;
     const height = 1024;
     const format: GPUTextureFormat = "rgba16float";
@@ -354,11 +343,8 @@ function createRenderTaskTransmission(task: RenderTaskBase, engine: EngineContex
     return {
         texture: tex,
         _baseView: texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }),
-        _sourceWidth: rt._width,
-        _sourceHeight: rt._height,
         _sourceTexture: null,
         _blit: null,
-        _depth: null,
         _copyCount: normalizeCopyCount(task._config.transmission),
         _generateMipmaps: generateMipmaps,
         _copies: 0,
@@ -367,28 +353,17 @@ function createRenderTaskTransmission(task: RenderTaskBase, engine: EngineContex
 
 function configureTransmissionSource(state: RenderTaskTransmissionState, task: RenderTaskBase, engine: EngineContext): void {
     const rt = task._config.rt;
-    state._sourceWidth = rt._width;
-    state._sourceHeight = rt._height;
     state._sourceTexture = rt._colorTexture;
     const sampleCount = task._targetSignature._sampleCount;
-    // Depth grab (grabDepth): (re)build the r32float snapshot + its resolve blit against the task's CURRENT
-    // depth attachment, and publish it on the target signature so `SceneColorGrab.depthTexture` stays live.
-    const sig = task._targetSignature as { _transmissionDepthTexture?: Texture2D | null };
-    sig._transmissionDepthTexture = null;
-    const depthSource = rt._depthTexture;
-    if (task._config.transmission?.grabDepth && _depthGrab && depthSource && rt._width > 0 && rt._height > 0) {
-        state._depth = _depthGrab.create(engine, depthSource, rt._width, rt._height, sampleCount > 1);
-        sig._transmissionDepthTexture = state._depth.texture;
-    }
-    if (!state._sourceTexture) {
-        return;
-    }
-    state._blit = shouldBlitTransmission(state, sampleCount) ? createTransmissionBlit(state, engine, state._sourceTexture, sampleCount > 1) : null;
+    state._blit =
+        state._sourceTexture && (sampleCount > 1 || rt._width !== state.texture.width || rt._height !== state.texture.height)
+            ? createTransmissionBlit(state, engine, state._sourceTexture, sampleCount > 1)
+            : null;
 }
 
 function disposeRenderTaskTransmission(state: RenderTaskTransmissionState | null | undefined): void {
     state?.texture.texture.destroy();
-    state?._depth?.texture.texture.destroy();
+    state?._depth?.dispose();
 }
 
 export function executePassWithTransmission(task: RenderTaskBase, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
@@ -414,13 +389,13 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
         const transmissive = binding.renderable._transmissive === true;
         if (transmissive && canUpdateTransmission(state)) {
             pass.end();
-            updateTransmissionTexture(state, engine);
+            updateTransmissionTexture(state, task, engine);
             pass = beginTaskPass(task, resolveView, sampleCount, true);
             setPassState(task, pass);
             lastPipeline = null;
         }
         const mesh = binding.renderable.mesh;
-        if (mesh && mesh.visible === false) {
+        if (mesh && (mesh.visible === false || mesh._skipColorDraw)) {
             continue;
         }
         if (binding.pipeline !== lastPipeline) {
@@ -430,13 +405,16 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
         draws += binding.draw(pass, engine);
     }
     if (overlay) {
-        draws += drawList(pass, overlay, engine);
+        draws += drawList(pass, overlay, engine, true);
     }
     pass.end();
     return draws;
 }
 
-function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: EngineContext): void {
+function updateTransmissionTexture(state: RenderTaskTransmissionState, task: RenderTaskBase, engine: EngineContext): void {
+    if (state._sourceTexture !== task._config.rt._colorTexture) {
+        configureTransmissionSource(state, task, engine);
+    }
     if (!state._sourceTexture) {
         throw new Error("No transmission source");
     }
@@ -455,10 +433,15 @@ function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: E
     // Depth grab rides the same mid-pass break: the depth attachment is unbound here (the pass just ended),
     // so it is legal to sample; the resumed segment re-attaches it with loadOp "load". The record body lives in
     // the lazy depth-grab module (installed only when grabDepth is enabled), so it costs zero bytes otherwise.
-    if (state._depth) {
-        _depthGrab?.record(engine, state._depth);
-    }
+    state._depth?.sync();
+    state._depth?.record();
     state._copies++;
+}
+
+function createBlitShader(device: GPUDevice, multisampled: boolean): GPUShaderModule {
+    return device.createShaderModule({
+        code: wgsl`${multisampled ? BLIT_MSAA_BINDINGS : BLIT_BINDINGS}${BLIT_VERTEX_SHADER}${multisampled ? BLIT_MSAA_FRAGMENT_SHADER : BLIT_FRAGMENT_SHADER}`,
+    });
 }
 
 function getBlitPipeline(engine: EngineContext, format: GPUTextureFormat, multisampled: boolean): GPURenderPipeline {
@@ -473,12 +456,12 @@ function getBlitPipeline(engine: EngineContext, format: GPUTextureFormat, multis
         blitDevice = device;
     }
     if (multisampled) {
-        blitMsaaShader ??= device.createShaderModule({ code: BLIT_MSAA_SHADER });
+        blitMsaaShader ??= createBlitShader(device, true);
         blitMsaaBgl ??= device.createBindGroupLayout({
             entries: [{ binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "unfilterable-float", multisampled: true } }],
         });
     } else {
-        blitShader ??= device.createShaderModule({ code: BLIT_SHADER });
+        blitShader ??= createBlitShader(device, false);
         blitBgl ??= device.createBindGroupLayout({
             entries: [
                 { binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
@@ -501,10 +484,6 @@ function getBlitPipeline(engine: EngineContext, format: GPUTextureFormat, multis
         blitPipelines.set(key, pipeline);
     }
     return pipeline;
-}
-
-function shouldBlitTransmission(state: RenderTaskTransmissionState, sampleCount: number): boolean {
-    return sampleCount > 1 || state._sourceWidth !== state.texture.width || state._sourceHeight !== state.texture.height;
 }
 
 function createTransmissionBlit(state: RenderTaskTransmissionState, engine: EngineContext, source: GPUTexture, multisampled: boolean): TransmissionBlitState {
@@ -539,7 +518,8 @@ function canUpdateTransmission(state: RenderTaskTransmissionState): boolean {
 
 function beginTaskPass(task: RenderTaskBase, resolveTarget: GPUTextureView | null, sampleCount: number, load: boolean): GPURenderPassEncoder {
     const att = task._colorAttachment;
-    const depthLoadOp = load || !task._config.clr ? "load" : "clear";
+    const config = task._config;
+    const depthLoadOp = load || (config.depth ? config.depth._eager : config.depthClear === false) ? "load" : "clear";
     if (load) {
         att.loadOp = "load";
     }
@@ -589,7 +569,7 @@ function drawBaseTask(task: RenderTaskBase, pass: GPURenderPassEncoder): number 
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
-            depthStencilFormat: desc.dFormat,
+            depthStencilFormat: task._targetSignature._depthStencilFormat,
             sampleCount: desc.samples ?? 1,
         });
         be.setBindGroup(0, task._sceneBG!);

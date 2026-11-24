@@ -15,9 +15,14 @@ interface FakeElement {
     offsetWidth: number;
     offsetHeight: number;
     parentNode: Node | null;
+    parentElement: Element | null;
     nextSibling: Node | null;
     inert: boolean;
+    attributes: Map<string, string>;
     contains(other: unknown): boolean;
+    hasAttribute(name: string): boolean;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
 }
 
 function makeElement(width = 256, height = 128): HTMLElement {
@@ -25,9 +30,18 @@ function makeElement(width = 256, height = 128): HTMLElement {
         offsetWidth: width,
         offsetHeight: height,
         parentNode: null,
+        parentElement: null,
         nextSibling: null,
         inert: false,
+        attributes: new Map(),
         contains: (other) => other === (el as unknown),
+        hasAttribute: (name) => el.attributes.has(name),
+        setAttribute: (name, value) => {
+            el.attributes.set(name, value);
+        },
+        removeAttribute: (name) => {
+            el.attributes.delete(name);
+        },
     };
     return el as unknown as HTMLElement;
 }
@@ -39,7 +53,8 @@ function writable(el: HTMLElement): FakeElement {
 
 interface FakeHost {
     clientWidth: number;
-    layoutSubtree: boolean;
+    content?: string;
+    layoutSubtree?: boolean;
     requestPaint?: () => void;
     paintRequests: number;
     children: HTMLElement[];
@@ -49,15 +64,19 @@ interface FakeHost {
     appendChild(el: HTMLElement): HTMLElement;
     removeChild(el: HTMLElement): void;
     insertBefore(el: HTMLElement, ref: Node | null): void;
+    attributes: Map<string, string>;
+    getAttribute(name: string): string | null;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
     dispatchPaint(changedElements?: readonly unknown[]): void;
 }
 
 /** Fake rendering canvas. `clientWidth` makes `isDomCanvas` return true.
- *  `requestPaint` synchronously dispatches a `paint` event for deterministic tests. */
-function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
+ *  `requestPaint` synchronously dispatches a `paint` event for deterministic tests.
+ *  `legacy` models a Chrome < 155 canvas (`layoutSubtree`) instead of `content`. */
+function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): FakeHost {
     const host: FakeHost = {
         clientWidth: 800,
-        layoutSubtree: false,
         paintRequests: 0,
         children: [],
         listeners: {},
@@ -75,11 +94,13 @@ function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
         },
         appendChild(el) {
             writable(el).parentNode = this as unknown as Node;
+            writable(el).parentElement = this as unknown as Element;
             this.children.push(el);
             return el;
         },
         removeChild(el) {
             writable(el).parentNode = null;
+            writable(el).parentElement = null;
             const i = this.children.indexOf(el);
             if (i >= 0) {
                 this.children.splice(i, 1);
@@ -87,12 +108,33 @@ function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
         },
         insertBefore(el) {
             writable(el).parentNode = this as unknown as Node;
+            writable(el).parentElement = this as unknown as Element;
+        },
+        attributes: new Map(),
+        getAttribute(name) {
+            return this.attributes.get(name) ?? null;
+        },
+        setAttribute(name, value) {
+            this.attributes.set(name, value);
+        },
+        removeAttribute(name) {
+            this.attributes.delete(name);
         },
         dispatchPaint(changedElements) {
             const ev = { type: "paint", changedElements } as unknown as Event;
             (this.listeners.paint ?? []).slice().forEach((cb) => cb(ev));
         },
     };
+    if (opts.legacy) {
+        host.layoutSubtree = false;
+    } else {
+        // Chrome 155+ reflects the `content` attribute; a missing attribute reads "fallback".
+        Object.defineProperty(host, "content", {
+            enumerable: true,
+            get: () => host.attributes.get("content") ?? "fallback",
+            set: (value: string) => host.attributes.set("content", value),
+        });
+    }
     if (opts.withRequestPaint ?? true) {
         host.requestPaint = (): void => {
             host.paintRequests++;
@@ -103,7 +145,7 @@ function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
 }
 
 interface Captured {
-    copyElementCalls: Array<{ source: unknown; texture: GPUTexture; width?: number; height?: number }>;
+    copyElementCalls: Array<{ api: "draw" | "legacy"; source: unknown; texture: GPUTexture; width?: number; height?: number }>;
     copyExternalCalls: number;
     blitBindGroups: number;
     blitPasses: number;
@@ -112,8 +154,10 @@ interface Captured {
     destroyed: boolean;
 }
 
-function makeEngine(host: FakeHost, cap: Captured, opts: { native?: boolean } = {}): EngineContext {
-    const native = opts.native ?? true;
+/** `native`: `"draw"` (Chrome 155+ `drawElementImageToTexture`), `"legacy"`
+ *  (Chrome 150–154 `copyElementImageToTexture`), or `false` (unsupported). */
+function makeEngine(host: FakeHost, cap: Captured, opts: { native?: "draw" | "legacy" | false } = {}): EngineContext {
+    const native = opts.native ?? "draw";
     const queue: Record<string, unknown> = {
         copyExternalImageToTexture: () => {
             cap.copyExternalCalls++;
@@ -122,9 +166,13 @@ function makeEngine(host: FakeHost, cap: Captured, opts: { native?: boolean } = 
             cap.submits++;
         },
     };
-    if (native) {
+    if (native === "draw") {
+        queue.drawElementImageToTexture = (source: { source: unknown }, dest: { texture: GPUTexture; size: { width: number; height: number } }) => {
+            cap.copyElementCalls.push({ api: "draw", source: source.source, texture: dest.texture, width: dest.size.width, height: dest.size.height });
+        };
+    } else if (native === "legacy") {
         queue.copyElementImageToTexture = (source: { source: unknown }, dest: { destination: { texture: GPUTexture }; width?: number; height?: number }) => {
-            cap.copyElementCalls.push({ source: source.source, texture: dest.destination.texture, width: dest.width, height: dest.height });
+            cap.copyElementCalls.push({ api: "legacy", source: source.source, texture: dest.destination.texture, width: dest.width, height: dest.height });
         };
     }
     const device = {
@@ -177,8 +225,9 @@ afterEach(() => {
 });
 
 describe("isHtmlInCanvasSupported", () => {
-    it("reflects presence of copyElementImageToTexture on the device queue", () => {
-        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: true }))).toBe(true);
+    it("reflects presence of drawElementImageToTexture or the legacy copyElementImageToTexture", () => {
+        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: "draw" }))).toBe(true);
+        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: "legacy" }))).toBe(true);
         expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: false }))).toBe(false);
     });
 });
@@ -194,13 +243,16 @@ describe("createHtmlTexture (native path)", () => {
 
         expect(tex.width).toBe(200);
         expect(tex.height).toBe(100);
-        // Element re-parented under the host with layout opted in and inert set.
-        expect(host.layoutSubtree).toBe(true);
+        // Element re-parented under the host with drawable content opted in and inert set.
+        expect(host.content).toBe("drawable");
+        expect(host.layoutSubtree).toBeUndefined();
         expect(host.children).toContain(el);
+        expect(el.hasAttribute("drawable")).toBe(true);
         expect(el.inert).toBe(true);
-        // requestPaint fired once, and the paint uploaded via copyElementImageToTexture.
+        // requestPaint fired once, and the paint uploaded via drawElementImageToTexture.
         expect(host.paintRequests).toBe(1);
         expect(cap.copyElementCalls).toHaveLength(1);
+        expect(cap.copyElementCalls[0]!.api).toBe("draw");
         expect(cap.copyElementCalls[0]!.source).toBe(el);
         expect(cap.copyElementCalls[0]!.width).toBe(200);
         expect(cap.copyElementCalls[0]!.height).toBe(100);
@@ -231,9 +283,9 @@ describe("createHtmlTexture (native path)", () => {
         const host = makeHost({ withRequestPaint: false });
         const cap = newCap();
         const engine = makeEngine(host, cap);
-        const queue = engine._device.queue as unknown as { copyElementImageToTexture: () => void };
+        const queue = engine._device.queue as unknown as { drawElementImageToTexture: () => void };
         const failure = new Error("native upload failed");
-        queue.copyElementImageToTexture = (): void => {
+        queue.drawElementImageToTexture = (): void => {
             throw failure;
         };
         const tex = createHtmlTexture(engine, makeElement(), { invertY: false });
@@ -247,13 +299,33 @@ describe("createHtmlTexture (native path)", () => {
         await Promise.resolve();
         expect(settled).toBe(false);
 
-        queue.copyElementImageToTexture = (): void => {
+        queue.drawElementImageToTexture = (): void => {
             cap.copyExternalCalls++;
         };
         host.dispatchPaint();
         await ready;
         expect(settled).toBe(true);
         expect(cap.copyExternalCalls).toBe(1);
+    });
+
+    it("uses the legacy copyElementImageToTexture and layoutSubtree on Chrome 150–154", () => {
+        const host = makeHost({ legacy: true });
+        const cap = newCap();
+        const engine = makeEngine(host, cap, { native: "legacy" });
+        const el = makeElement(200, 100);
+
+        const tex = createHtmlTexture(engine, el, {});
+
+        expect(host.layoutSubtree).toBe(true);
+        expect(host.content).toBeUndefined();
+        expect(cap.copyElementCalls).toHaveLength(1);
+        expect(cap.copyElementCalls[0]!.api).toBe("legacy");
+        expect(cap.copyElementCalls[0]!.texture).toBe(tex._flipSrc);
+        expect(cap.copyElementCalls[0]!.width).toBe(200);
+        expect(cap.copyElementCalls[0]!.height).toBe(100);
+
+        disposeHtmlTexture(tex);
+        expect(host.layoutSubtree).toBe(false);
     });
 
     it("copies straight into the texture (no flip blit) when invertY:false", () => {
@@ -356,6 +428,7 @@ describe("disposeHtmlTexture", () => {
         expect(cap.destroyed).toBe(true); // GPU texture freed (creation ref → 0)
         expect(host.children).not.toContain(el); // element removed from host
         expect(el.inert).toBe(false); // inert restored
+        expect(el.hasAttribute("drawable")).toBe(false); // drawable restored
         expect(host.listeners.paint ?? []).toHaveLength(0); // listener detached
 
         // Further paints / updates are inert after dispose.
@@ -395,6 +468,58 @@ describe("disposeHtmlTexture", () => {
         expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
     });
 
+    it("restores an element a polyfill relocated into a sibling host element", () => {
+        // @underglass/html-in-canvas-polyfill moves canvas children into a sibling
+        // `div[data-hic-host]` but keeps reporting the canvas as their parentElement.
+        const relocate = (el: HTMLElement, relocatedHost: { removeChild(child: unknown): void }): void => {
+            writable(el).parentNode = relocatedHost as unknown as Node;
+        };
+
+        const host = makeHost();
+        const engine = makeEngine(host, newCap());
+        const el = makeElement();
+        const origParent = { insertBefore: vi.fn(), removeChild: vi.fn() };
+        writable(el).parentNode = origParent as unknown as Node;
+        const tex = createHtmlTexture(engine, el, {});
+        relocate(el, { removeChild: vi.fn() });
+        disposeHtmlTexture(tex);
+        expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
+
+        const detached = makeElement();
+        const relocatedHost = { removeChild: vi.fn() };
+        const tex2 = createHtmlTexture(engine, detached, {});
+        relocate(detached, relocatedHost);
+        disposeHtmlTexture(tex2);
+        expect(relocatedHost.removeChild).toHaveBeenCalledWith(detached);
+    });
+
+    it("detaches a form whose named control shadows Element.remove", () => {
+        const host = makeHost();
+        const removeChild = vi.spyOn(host, "removeChild");
+        const engine = makeEngine(host, newCap());
+        // `<form><button name="remove"></button></form>` exposes the button as `form.remove`.
+        const form = makeElement();
+        (form as unknown as { remove: unknown }).remove = { name: "remove" };
+        const tex = createHtmlTexture(engine, form, {});
+        expect(form.inert).toBe(true);
+
+        expect(() => disposeHtmlTexture(tex)).not.toThrow();
+        expect(removeChild).toHaveBeenCalledWith(form);
+        expect(form.parentNode).toBeNull();
+        expect(form.inert).toBe(false);
+        expect(form.hasAttribute("drawable")).toBe(false);
+    });
+
+    it("keeps a drawable attribute the element already had", () => {
+        const host = makeHost();
+        const engine = makeEngine(host, newCap());
+        const el = makeElement();
+        el.setAttribute("drawable", "");
+
+        disposeHtmlTexture(createHtmlTexture(engine, el, {}));
+        expect(el.hasAttribute("drawable")).toBe(true);
+    });
+
     it("is idempotent", () => {
         const host = makeHost();
         const cap = newCap();
@@ -404,20 +529,85 @@ describe("disposeHtmlTexture", () => {
         expect(() => disposeHtmlTexture(tex)).not.toThrow();
     });
 
-    it("restores host.layoutSubtree once the last hosted texture on it is disposed", () => {
+    it("restores host.content once the last hosted texture on it is disposed", () => {
         const host = makeHost();
         const engine = makeEngine(host, newCap());
-        expect(host.layoutSubtree).toBe(false);
+        expect(host.content).toBe("fallback");
 
         const a = createHtmlTexture(engine, makeElement(), {});
         const b = createHtmlTexture(engine, makeElement(), {});
-        expect(host.layoutSubtree).toBe(true);
+        expect(host.content).toBe("drawable");
 
         disposeHtmlTexture(a);
-        expect(host.layoutSubtree).toBe(true); // still one live texture on the host
+        expect(host.content).toBe("drawable"); // still one live texture on the host
 
         disposeHtmlTexture(b);
-        expect(host.layoutSubtree).toBe(false); // restored to the pre-feature value
+        expect(host.content).toBe("fallback"); // restored to the pre-feature value
+        expect(host.attributes.has("content")).toBe(false); // no attribute left behind
+    });
+
+    it("restores a content attribute the canvas already had", () => {
+        const host = makeHost();
+        host.setAttribute("content", "fallback");
+        const engine = makeEngine(host, newCap());
+
+        disposeHtmlTexture(createHtmlTexture(engine, makeElement(), {}));
+        expect(host.getAttribute("content")).toBe("fallback");
+    });
+
+    it("keeps a shared element hosted until the last texture using it is disposed", () => {
+        const host = makeHost();
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const el = makeElement();
+        const origParent = {
+            insertBefore: vi.fn(),
+            removeChild: vi.fn(),
+        };
+        writable(el).parentNode = origParent as unknown as Node;
+
+        const a = createHtmlTexture(engine, el, {});
+        const b = createHtmlTexture(engine, el, {});
+        disposeHtmlTexture(a);
+
+        // The second texture still captures the element.
+        expect(el.parentNode).toBe(host as unknown as Node);
+        expect(el.hasAttribute("drawable")).toBe(true);
+        expect(el.inert).toBe(true);
+        expect(origParent.insertBefore).not.toHaveBeenCalled();
+        const count = cap.copyElementCalls.length;
+        host.dispatchPaint([el]);
+        expect(cap.copyElementCalls.length).toBeGreaterThan(count);
+
+        disposeHtmlTexture(b);
+        expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
+        expect(el.hasAttribute("drawable")).toBe(false);
+        expect(el.inert).toBe(false);
+    });
+
+    it("rejects sharing an element with a texture on another canvas", () => {
+        const hostA = makeHost();
+        const hostB = makeHost();
+        const capB = newCap();
+        const engineA = makeEngine(hostA, newCap());
+        const engineB = makeEngine(hostB, capB);
+        const el = makeElement();
+
+        const a = createHtmlTexture(engineA, el, {});
+        expect(() => createHtmlTexture(engineB, el, {})).toThrow(/another canvas/);
+
+        // Nothing was allocated or opted in on canvas B.
+        expect(capB.createDesc).toBeUndefined();
+        expect(hostB.content).toBe("fallback");
+        expect(hostB.attributes.has("content")).toBe(false);
+        expect(hostB.listeners.paint ?? []).toHaveLength(0);
+        expect(el.parentNode).toBe(hostA as unknown as Node);
+
+        // Once canvas A releases the element, canvas B can host it.
+        disposeHtmlTexture(a);
+        const b = createHtmlTexture(engineB, el, {});
+        expect(el.parentNode).toBe(hostB as unknown as Node);
+        disposeHtmlTexture(b);
     });
 });
 
@@ -490,7 +680,8 @@ describe("SVG fallback path", () => {
         expect(cap.copyExternalCalls).toBe(0);
         // With no update path the element must not be hosted or the DOM mutated.
         expect(host.children).not.toContain(el);
-        expect(host.layoutSubtree).toBe(false);
+        expect(host.content).toBe("fallback");
+        expect(el.hasAttribute("drawable")).toBe(false);
         expect(writable(el).inert).toBe(false);
     });
 

@@ -5,7 +5,7 @@ import { createParticleBlend } from "../../../packages/babylon-lite/src/particle
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { buildNodeParticleSetWithBlendModes, enableNodeParticleBlendModes } from "../../../packages/babylon-lite/src/particle/node/npe-blend-modes";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { systemBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/system-block";
+import { npeBlock as systemBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/system-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import type { NodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
@@ -47,6 +47,7 @@ describe("NPE particle blend modes", () => {
             isConnected() {
                 return false;
             },
+            texture: () => null,
         } as unknown as NpeBuildContext;
         systemBlock.build(block, ctx);
         system.texture = {

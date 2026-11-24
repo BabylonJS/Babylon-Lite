@@ -8,9 +8,9 @@
  *  • Panel B "Click Reactor" — +/- buttons drive a counter that recolours and
  *    spins a torus-knot (HTML → 3D).
  *
- * Interaction works on both the native path (Chrome with
- * chrome://flags/#canvas-draw-element) and the SVG `<foreignObject>` fallback
- * used by normal Chrome: a pointer tap is GPU-picked, mapped to the panel's
+ * Interaction works on both the native path (Chrome's HTML-in-Canvas origin
+ * trial or chrome://flags/#canvas-draw-element) and the SVG `<foreignObject>`
+ * fallback used elsewhere: a pointer tap is GPU-picked, mapped to the panel's
  * local UV, converted to element pixels, dispatched to the panel, and the
  * texture is re-rasterised via `requestHtmlTextureUpdate`.
  */

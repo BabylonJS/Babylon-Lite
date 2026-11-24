@@ -2,7 +2,7 @@ import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, collectPluginTextures, enabledPlugins, writePluginUbo } from "./plugin-bridge-shared.js";
-import { _allocatePbrPluginIndex, _getPbrPluginFragment, _registerPbrPluginFragment, _setActivePbrPluginExt } from "./pbr-plugin-registry.js";
+import { _allocatePbrPluginIndex, _getActivePbrPluginExt, _getPbrPluginFragment, _registerPbrPluginFragment, _setActivePbrPluginExt } from "./pbr-plugin-registry.js";
 import { buildPbrVertexPluginFragment, pbrVertexPluginSignature } from "./pbr-plugin-vertex-data.js";
 
 let signatureToIndex: Map<string, number> | null = null;
@@ -61,5 +61,5 @@ const pbrVertexPluginExt: PbrExt = {
 /** @internal Register the PBR bridge that supports plugin-defined vertex resources. */
 export function registerPbrVertexPlugins(register: (extension: PbrExt) => void): void {
     _setActivePbrPluginExt(pbrVertexPluginExt);
-    register(pbrVertexPluginExt);
+    register(_getActivePbrPluginExt(pbrVertexPluginExt));
 }

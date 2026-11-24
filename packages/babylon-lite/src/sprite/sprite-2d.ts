@@ -2,7 +2,7 @@
  * `Sprite2DLayer` — pixel-coordinate sprite layer. Pure-data interface +
  * standalone Index API for add / update / remove / setFrame. The layer is
  * owned by a `SpriteRenderer` (pure-2D / HUD `depth: "none"` path) or by a
- * scene renderable added through `addDepthHostedSpriteLayer`
+ * scene renderable added through `addDepthHostedSpriteLayerToScene`
  * (`depth: "test" | "test-write"`).
  *
  * The Index API stays the storage foundation. The optional Handle API lives in
@@ -64,7 +64,7 @@ export interface Sprite2DLayerOptions {
     /**
      * Default NDC depth (`0` = near, `1` = far) for sprites added to this layer when their
      * `Sprite2DProps.z` is omitted. Only meaningful for `depth: "test" | "test-write"` layers
-     * (depth-hosted sprites added to a `SceneContext` via `addDepthHostedSpriteLayer`).
+     * (depth-hosted sprites added to a `SceneContext` via `addDepthHostedSpriteLayerToScene`).
      *
      * Depth-hosted layers store one Z per sprite (slot [13] of their 14-float instance buffer),
      * so a single layer can mix sprites at different depths — e.g. one in front of a box, one

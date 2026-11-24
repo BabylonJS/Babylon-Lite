@@ -21,6 +21,8 @@ vi.mock("babylon-lite", async (importActual) => {
         loadImageToArrayLayer: vi.fn(async () => undefined),
         createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => makeArray(4, 4, urls.length)),
         createTexture2DArrayFromKtx2: vi.fn(async () => makeArray(16, 16, 4)),
+        getTextureReadbackInfo: vi.fn(() => ({ kind: "2d-array", width: 4, height: 4, depthOrArrayLayers: 3, mipLevelCount: 1 })),
+        readTexturePixelsRGBA8: vi.fn(async () => ({ pixels: new Uint8Array(64), width: 4, height: 4 })),
     };
 });
 
@@ -32,6 +34,7 @@ import {
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
     createTexture2DArrayFromKtx2,
+    readTexturePixelsRGBA8,
 } from "babylon-lite";
 import {
     RawTexture2DArray,
@@ -51,6 +54,7 @@ const uploadMock = vi.mocked(uploadImageToArrayLayer);
 const loadMock = vi.mocked(loadImageToArrayLayer);
 const fromUrlsMock = vi.mocked(createTexture2DArrayFromUrls);
 const fromKtx2Mock = vi.mocked(createTexture2DArrayFromKtx2);
+const readPixelsMock = vi.mocked(readTexturePixelsRGBA8);
 
 const liteEngine = {};
 
@@ -211,6 +215,8 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         expect(tex.depth).toBe(3);
         expect(tex.format).toBe(5);
         expect(tex.getScene()).toBeDefined();
+        await expect(tex.readPixels(2)).resolves.toEqual(new Uint8Array(64));
+        expect(readPixelsMock).toHaveBeenCalledWith(liteEngine, tex._liteArray, { mipLevel: 0, layer: 2 });
     });
 
     it("threads invertY / premultiplyAlpha into the Lite call", async () => {

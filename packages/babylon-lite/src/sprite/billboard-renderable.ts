@@ -73,9 +73,10 @@ interface BillboardRenderableInternal extends Renderable {
 
 export function buildBillboardRenderable(engine: EngineContext, system: BillboardSpriteSystem): { renderable: Renderable; dispose: () => void } {
     const indexBuffer = createMappedBuffer(engine, BILLBOARD_INDEX_DATA, BU.INDEX);
-    const uniformBuffer = createEmptyUniformBuffer(engine, BILLBOARD_SYSTEM_UBO_BYTES, `${system._orientation}-billboard-system-ubo`);
-    const instanceBuffer = createBillboardInstanceBuffer(engine._device, system, `${system._orientation}-billboard-instances`);
-    const fx = _getBillboardFxHook()?.createLayerFx(engine, `${system._orientation}-billboard-fx-ubo`, system) ?? null;
+    const orientation = system.orientation;
+    const uniformBuffer = createEmptyUniformBuffer(engine, BILLBOARD_SYSTEM_UBO_BYTES, `${orientation}-billboard-system-ubo`);
+    const instanceBuffer = createBillboardInstanceBuffer(engine._device, system, `${orientation}-billboard-instances`);
+    const fx = _getBillboardFxHook()?.createLayerFx(engine, `${orientation}-billboard-fx-ubo`, system) ?? null;
     const isTransparent = system._depthMode === "transparent";
     const renderable: BillboardRenderableInternal = {
         order: system.order,
@@ -171,7 +172,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         renderable._system,
         renderable._instanceBuffer,
         renderable._instanceBufferCapacity,
-        `${renderable._system._orientation}-billboard-instances`
+        `${renderable._system.orientation}-billboard-instances`
     );
     if (grown.reallocated) {
         renderable._instanceBuffer = grown.buffer;

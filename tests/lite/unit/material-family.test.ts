@@ -103,9 +103,58 @@ describe("getMaterialTextures", () => {
                 refraction: { texture: textures[20] },
             },
             _transmissive: true,
+            bentNormalTexture: textures[21],
         };
 
-        expect(getMaterialTextures(material)).toEqual(textures.slice(0, 21));
+        expect(getMaterialTextures(material)).toEqual(textures.slice(0, 22));
+    });
+
+    describe.each(["pbr", "standard"] as const)("%s parallax height textures", (family) => {
+        it.each([undefined, 0.12, 0])("enumerates a separate height map with heightScale %s, including through views", (heightScale) => {
+            const base = textures[0]!;
+            const normal = textures[1]!;
+            const height = textures[22]!;
+            const material = {
+                ...fakeMaterial(family),
+                ...(family === "pbr" ? { baseColorTexture: base, normalTexture: normal } : { diffuseTexture: base, _bumpTexture: normal }),
+                _parallaxOcclusion: { heightTexture: height, heightScale },
+            };
+            const expected = heightScale === 0 ? [base, normal] : [base, normal, height];
+
+            expect(getMaterialTextures(material)).toEqual(expected);
+            expect(getMaterialTextures(createMaterialView(material, { features: 0 }))).toEqual(expected);
+        });
+
+        it("preserves duplicate texture slots when the normal map also supplies height", () => {
+            const normal = textures[1]!;
+            const material = {
+                ...fakeMaterial(family),
+                ...(family === "pbr" ? { normalTexture: normal } : { _bumpTexture: normal }),
+                _parallaxOcclusion: { heightTexture: normal },
+            };
+
+            expect(getMaterialTextures(material)).toEqual([normal, normal]);
+        });
+    });
+
+    it.each([undefined, 0])("enumerates the only texture of a factor-only PBR material with heightScale %s", (heightScale) => {
+        const height = textures[22]!;
+        const material = {
+            ...fakeMaterial("pbr"),
+            _parallaxOcclusion: { heightTexture: height, heightScale },
+        };
+
+        expect(getMaterialTextures(material)).toEqual(heightScale === 0 ? [] : [height]);
+    });
+
+    it.each([false, true])("omits inactive Standard height maps without a UV-mapped surface texture (reflection: %s)", (reflection) => {
+        const material = {
+            ...fakeMaterial("standard"),
+            _reflectionTexture: reflection ? textures[0] : undefined,
+            _parallaxOcclusion: { heightTexture: textures[22]! },
+        };
+
+        expect(getMaterialTextures(material)).toEqual(reflection ? [textures[0]] : []);
     });
 
     it("uses Shader declaration order and Node own-property insertion order", () => {
@@ -143,6 +192,8 @@ describe("getMaterialTextures", () => {
         expect(source).toMatch(/\bgetStandardEmissiveTexture\s*\(/);
         expect(source).toMatch(/\bgetPbrClearCoat\s*\(/);
         expect(source).toMatch(/\bgetShaderTexture\s*\(/);
+        expect(source).toMatch(/\b_getParallaxHeightTexture\s*\(/);
+        expect(source).toMatch(/\b_getStandardParallaxHeightTexture\s*\(/);
         expect(source).not.toMatch(/_getStdTextureCollectors|_getPbrTextureCollectors|_getStdExts|_getPbrExts|_textureSlots/);
     });
 });

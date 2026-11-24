@@ -74,7 +74,7 @@ function emitPackageJson(outDir: string): Plugin {
                 exports,
                 sideEffects: false,
                 peerDependencies: {
-                    "@babylonjs/lite": "*",
+                    "@babylonjs/lite": ">=1.41.0",
                 },
                 peerDependenciesMeta: {
                     vite: { optional: true },

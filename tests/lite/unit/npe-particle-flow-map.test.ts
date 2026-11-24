@@ -1,19 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { createNullEngine } from "../../../packages/babylon-lite/src/engine/null-engine";
+import { _appendTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
+import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { animateParticleSystem, createParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { registerNodeParticleSet } from "../../../packages/babylon-lite/src/particle/particle-scene";
-import { cpuTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block";
-import { updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
-import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
-import type { NodeParticleSet, NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { npeBlock as particleTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/texture-source-block";
+import { npeBlock as updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
+import { buildNodeParticleSet, type NodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/particle/node/npe-texture-content";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
-import type { NpeGetter, NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
+import type { NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { createSceneContext, disposeScene, getFrameGraph } from "../../../packages/babylon-lite/src/scene/scene-core";
 
 function flowMap(data: number[], width = 1, height = 1): NpeTextureContent {
     return { width, height, data: new Uint8ClampedArray(data) };
@@ -33,6 +36,19 @@ function createFlowScene(
     } as unknown as SceneContext;
 }
 
+/** Mirror scene disposal: mark it disposed, run its disposers, then fail the test on any later camera read. */
+function disposeFlowScene(scene: SceneContext): void {
+    scene._z = true;
+    for (const dispose of scene._disposables.splice(0)) {
+        dispose();
+    }
+    Object.defineProperty(scene, "camera", {
+        get: () => {
+            throw new Error("flow map read a disposed scene");
+        },
+    });
+}
+
 async function attachFlowMap(
     system: ReturnType<typeof createParticleSystem>,
     map: NpeTextureContent,
@@ -43,9 +59,8 @@ async function attachFlowMap(
     const promises: Promise<void>[] = [];
     const ctx = {
         state: { system, buffer: system.buffer, scene },
-        input(_block: ParsedParticleBlock, name: string): NpeGetter {
-            return name === "flowMap" ? ((() => source) as unknown as NpeGetter) : strengthGetter;
-        },
+        input: () => strengthGetter,
+        texture: () => source,
         addBuildPromise(promise: Promise<void>) {
             promises.push(promise);
         },
@@ -53,6 +68,8 @@ async function attachFlowMap(
     const block = { id: 1, className: "UpdateFlowMapBlock", name: "flow", inputs: [], serialized: {} } as ParsedParticleBlock;
     updateFlowMapBlock.build(block, ctx);
     await Promise.all(promises);
+    // animateParticleSystem prepares every frame before it runs the update steps.
+    system._prepareFrame?.();
 }
 
 afterEach(() => {
@@ -198,6 +215,169 @@ describe("NPE UpdateFlowMapBlock", () => {
         expect(scene._deferredBuilders).toHaveLength(1);
     });
 
+    it("hooks frame preparation into the system only once the flow map decodes", async () => {
+        const scene = createFlowScene();
+        const failed = createParticleSystem(1);
+        await attachFlowMap(failed, flowMap([255, 128, 128, 255]), () => 1, scene, { url: "flow.png", invertY: false, _content: Promise.reject(new Error("decode failed")) });
+        expect(failed._prepareFrame).toBeUndefined();
+
+        // The decoded map hooks the system itself, so discarding the set discards its frame work.
+        const discarded = createParticleSystem(1);
+        await attachFlowMap(discarded, flowMap([255, 128, 128, 255]), () => 1, scene);
+        expect(discarded._prepareFrame).toBeTypeOf("function");
+        expect(scene._beforeRender).toHaveLength(0);
+    });
+
+    it("leaves no frame work on the scene when a later block rejects the build", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => new Promise(() => undefined))
+        );
+        const scene = createFlowScene();
+        const graph = parseNodeParticleSource({
+            blocks: [
+                {
+                    customType: "BABYLON.SystemBlock",
+                    id: 4,
+                    capacity: 1,
+                    inputs: [
+                        { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
+                        { name: "emitRate", targetBlockId: 3, targetConnectionName: "missing" },
+                    ],
+                },
+                {
+                    customType: "BABYLON.UpdateFlowMapBlock",
+                    id: 3,
+                    inputs: [
+                        { name: "particle", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "flowMap", targetBlockId: 2, targetConnectionName: "texture" },
+                    ],
+                },
+                { customType: "BABYLON.CreateParticleBlock", id: 1, inputs: [] },
+                { customType: "BABYLON.ParticleTextureSourceBlock", id: 2, url: "flow.png", inputs: [] },
+            ],
+        });
+
+        await expect(buildNodeParticleSet({ _device: {} } as never, scene, graph)).rejects.toThrow("emitRate");
+        expect(scene._beforeRender).toHaveLength(0);
+    });
+
+    it("re-projects through a moving camera on every simulated frame", async () => {
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        // The left texel pushes +x and the right texel pushes -x.
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, createFlowScene(camera));
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const firstDelta = system.buffer.dirX[0]! - start;
+        camera.alpha = -Math.PI / 2;
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const secondDelta = system.buffer.dirX[0]! - middle;
+
+        expect(firstDelta).not.toBe(0);
+        expect(Math.sign(secondDelta)).toBe(-Math.sign(firstDelta));
+    });
+
+    it("keeps the last projection without reading the scene once it is disposed", async () => {
+        const scene = createFlowScene();
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, scene);
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const liveDelta = system.buffer.dirX[0]! - start;
+        disposeFlowScene(scene);
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+
+        expect(liveDelta).not.toBe(0);
+        expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
+    });
+
+    it("keeps the last projection when real scene disposal stops at a throwing task teardown", async () => {
+        const engine = createNullEngine();
+        (engine as { canvas: unknown }).canvas = { width: 100, height: 100 };
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        scene.camera = camera;
+        const teardownFailure = new Error("task teardown failed");
+        _appendTask(getFrameGraph(scene), {
+            name: "failing-teardown",
+            engine,
+            _passes: [],
+            record() {},
+            dispose() {
+                throw teardownFailure;
+            },
+        } as Task);
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        system.buffer.posX[0] = 1;
+        // The left texel pushes +x and the right texel pushes -x.
+        await attachFlowMap(system, flowMap([255, 128, 128, 255, 0, 128, 128, 255], 2, 1), () => 1, scene);
+        startParticleSystem(system);
+
+        const start = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+        const liveDelta = system.buffer.dirX[0]! - start;
+        expect(() => disposeScene(scene)).toThrow(teardownFailure);
+        // Teardown stopped before the camera was cleared, so re-projecting from the scene would reverse the force.
+        camera.alpha = -Math.PI / 2;
+        const middle = system.buffer.dirX[0]!;
+        animateParticleSystem(system, 1);
+
+        expect(liveDelta).not.toBe(0);
+        expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
+    });
+
+    it("adds no scene registration on a second build and detaches a build still decoding", async () => {
+        const scene = createFlowScene();
+        const map = flowMap([255, 128, 128, 255]);
+        await attachFlowMap(createParticleSystem(1), map, () => 1, scene);
+        const registrations = scene._disposables.length;
+        let resolveContent!: (content: NpeTextureContent) => void;
+        const pending = createParticleSystem(1);
+        const attached = attachFlowMap(pending, map, () => 1, scene, { url: "flow.png", invertY: false, _content: new Promise((resolve) => (resolveContent = resolve)) });
+        expect(scene._disposables).toHaveLength(registrations);
+
+        disposeFlowScene(scene);
+        resolveContent(map);
+        await attached;
+        pending._scaledStep = 1;
+        pending.updateSteps[0]!(0);
+
+        expect(pending.buffer.dirX[0]).toBe(0);
+    });
+
+    it("starts detached without registering on a scene disposed before its first flow-map build", async () => {
+        const scene = createFlowScene();
+        disposeFlowScene(scene);
+        const system = createParticleSystem(1);
+        system.emitRate = 0;
+        system.buffer.alive = 1;
+        system.buffer.lifeTime[0] = 10;
+        await attachFlowMap(system, flowMap([255, 128, 128, 255]), () => 1, scene);
+        startParticleSystem(system);
+        animateParticleSystem(system, 1);
+
+        expect(scene._disposables).toHaveLength(0);
+        expect(system.buffer.dirX[0]).toBe(0);
+    });
+
     it("builds registry and texture wiring through a parsed graph", async () => {
         const data = new Uint8ClampedArray([255, 128, 128, 255]);
         const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));
@@ -246,19 +426,16 @@ describe("NPE UpdateFlowMapBlock", () => {
             ],
         });
         const originalFlowInput = graph.blocks.get(3)!.inputs.find((input) => input.name === "flowMap")!;
-        const set = await buildNodeParticleSetWithFlowMaps({ _device: {} } as never, scene, graph);
+        const set = await buildNodeParticleSet({ _device: {} } as never, scene, graph);
         const system = set.systems[0]!;
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(originalFlowInput.targetBlockId).toBe(2);
         expect(graph.blocks.get(3)!.inputs).toContain(originalFlowInput);
-        const animationStep = vi.fn();
-        scene._beforeRender.push(animationStep);
-        await Promise.all(scene._deferredBuilders.splice(0).map((builder) => builder()));
-        expect(scene._beforeRender[1]).toBe(animationStep);
+        expect(scene._beforeRender).toHaveLength(0);
         camera._vpCache.fill(0);
         scene.surface.canvas.width = 200;
         scene.surface.canvas.height = 100;
-        scene._beforeRender[0]!(16);
+        system._prepareFrame!();
         system._scaledStep = 0.5;
 
         system.updateSteps[0]!(0);
@@ -302,9 +479,10 @@ describe("NPE UpdateFlowMapBlock", () => {
                 { customType: "BABYLON.ParticleInputBlock", id: 4, type: 2, value: 2, inputs: [] },
             ],
         });
-        const set = await buildNodeParticleSetWithFlowMaps({ _device: {} } as never, scene, graph);
+        const set = await buildNodeParticleSet({ _device: {} } as never, scene, graph);
         const system = set.systems[0]!;
         system.buffer.angle[0] = 7;
+        system._prepareFrame!();
         system._scaledStep = 1;
 
         system.updateSteps[0]!(0);
@@ -353,37 +531,24 @@ describe("NPE UpdateFlowMapBlock", () => {
             inputs: [],
             serialized: { url: "fallback.png", textureDataUrl: "data:image/png;base64,AA==", invertY: true },
         } as ParsedParticleBlock;
-        let output: NpeGetter | undefined;
+        let output: NpeTextureValue | undefined;
         const ctx = {
             state: { textureBaseUrl: "https://example.test/textures/" },
-            setOutput(_blockId: number, _name: string, getter: NpeGetter) {
-                output = getter;
+            setTexture(_blockId: number, _name: string, value: NpeTextureValue) {
+                output = value;
             },
         } as unknown as NpeBuildContext;
 
-        cpuTextureSourceBlock.build(block, ctx);
+        particleTextureSourceBlock.build(block, ctx);
 
-        expect(output?.(0) as unknown as NpeTextureValue).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
+        expect(output).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
     });
 
-    it("rejects unsupported texture URL schemes", () => {
-        const block = {
-            id: 2,
-            className: "ParticleTextureSourceBlock",
-            name: "flow texture",
-            inputs: [],
-            serialized: { url: "javascript:alert(1)", invertY: false },
-        } as ParsedParticleBlock;
-        let output: NpeGetter | undefined;
-        const ctx = {
-            state: {},
-            setOutput(_blockId: number, _name: string, getter: NpeGetter) {
-                output = getter;
-            },
-        } as unknown as NpeBuildContext;
+    it("does not fetch CPU texture content for unsupported URL schemes", async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
 
-        cpuTextureSourceBlock.build(block, ctx);
-
-        expect((output?.(0) as unknown as NpeTextureValue).url).toBe("");
+        await expect(loadNpeTextureContent({ url: "javascript:alert(1)", invertY: false })).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });

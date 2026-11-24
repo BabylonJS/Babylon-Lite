@@ -1,6 +1,7 @@
 /**
- * Shared WGSL raymarch library for the screen-space contact-shadow and global-illumination
- * producers (see `docs/lite/architecture/52-screen-space-effects.md`).
+ * Shared WGSL depth-reconstruction library for the screen-space ambient-occlusion,
+ * contact-shadow, and global-illumination producers (see
+ * `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * `screenSpaceRaymarchWGSL()` is a pure string factory: it allocates nothing at module
  * scope and has no side effects, so importing this module costs nothing unless a caller
@@ -91,7 +92,7 @@ fn ssNormalFromDepth(uv:vec2f,dims:vec2f,invViewProj:mat4x4f,depthTex:texture_de
   else{pV=ssWorldFromDepth(ssTexelUv(cD,dims),dD,invViewProj)-pC;}
   let n=cross(${_rightHanded ? "pV,pH" : "pH,pV"});
   let n2=dot(n,n);
-  if(n2<=1e-12){return vec3f(0.0,1.0,0.0);}
+  if(n2<=1e-12*dot(pH,pH)*dot(pV,pV)){return vec3f(0.0,1.0,0.0);}
   return n*inverseSqrt(n2);
 }
 

@@ -32,7 +32,8 @@ import { DISABLE_LIGHTING, HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE
 import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
-import { createStandardGeometrySkeletonVelocity } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-skeleton-velocity";
+import { createGeometryDeformationVelocity } from "../../../packages/babylon-lite/src/material/geometry-deformation-velocity";
+import { getGeometryDeformationVelocity } from "../../../packages/babylon-lite/src/material/geometry-deformation-hooks";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { setStandardBumpTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-bump";
@@ -40,7 +41,7 @@ import { setStandardSpecularTexture } from "../../../packages/babylon-lite/src/m
 import { _computeStandardMaterialFeatures } from "../../../packages/babylon-lite/src/material/standard/standard-material-features";
 import { _getStdExtsSorted } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { enableStandardSkeleton, enableStandardUvOffset } from "../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features";
-import { _getStandardGeometrySkeletonVelocityFactory, preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import { preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 
@@ -414,7 +415,8 @@ describe("Standard template + fragments integration", () => {
         expect([...data]).toEqual([2, -3, 0, 3]);
     });
 
-    it("composes Standard skeletal deformation into geometry position, normal, and velocity state", () => {
+    it("composes Standard skeletal deformation into geometry position, normal, and velocity state", async () => {
+        await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
         const features = HAS_SKELETON | HAS_SKELETON_8;
         const skeleton = stdSkeletonExt._frag(features, 0)!;
         const result = composeStandardGeometryShader(
@@ -425,7 +427,7 @@ describe("Standard template + fragments integration", () => {
         );
         expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
         expect(result._vertexWGSL).toContain("previousBoneSampler");
-        expect(result._vertexWGSL).toContain("mesh.previousWorld * previousInfluence");
+        expect(result._vertexWGSL).toContain("mesh.previousWorld * vec4<f32>(previousDeformedPosition");
         expect(result._meshUboSpec._offsets.has("previousWorld")).toBe(true);
         expect(result._meshUboSpec._offsets.has("velocityEnabled")).toBe(true);
         expect(result._vertexBufferLayouts.some((layout) => (layout.attributes as readonly GPUVertexAttribute[]).some((attribute) => attribute.format === "uint32x4"))).toBe(true);
@@ -466,39 +468,36 @@ describe("Standard template + fragments integration", () => {
         ]);
     });
 
-    it("double-buffers previous bones for Standard geometry velocity", () => {
-        const textures = [{ destroy: vi.fn() }, { destroy: vi.fn() }] as unknown as [GPUTexture, GPUTexture];
-        const writes: GPUTexture[] = [];
-        let textureIndex = 0;
+    it("keeps a private previous-bone snapshot without advancing current skeleton state", () => {
+        const texture = { destroy: vi.fn(), createView: () => ({}) } as unknown as GPUTexture;
+        const writes: Float32Array[] = [];
         const engine = {
             _device: {
-                createTexture: () => textures[textureIndex++]!,
-                queue: { writeTexture: ({ texture }: GPUImageCopyTexture) => writes.push(texture) },
+                createTexture: () => texture,
+                queue: { writeTexture: (_destination: GPUImageCopyTexture, data: Float32Array) => writes.push(data.slice()) },
             },
         } as unknown as EngineContext;
-        const bindGroups = [{}, {}] as GPUBindGroup[];
-        const state = createStandardGeometrySkeletonVelocity(
-            engine,
-            { boneCount: 2, boneMatrices: new Float32Array(32) } as never,
-            (texture) => bindGroups[textures.indexOf(texture)]!
-        );
-
-        expect(state._bindGroup).toBe(bindGroups[0]);
-        expect(writes).toEqual([textures[0], textures[1]]);
-        expect(state._update()).toBe(bindGroups[0]);
-        expect(writes.at(-1)).toBe(textures[1]);
-        expect(state._update()).toBe(bindGroups[1]);
-        expect(writes.at(-1)).toBe(textures[0]);
+        const skeleton = { boneCount: 2, boneMatrices: new Float32Array(32) };
+        const state = createGeometryDeformationVelocity(engine, { skeleton } as never);
+        state._update(true);
+        skeleton.boneMatrices[12] = 0.4;
+        state._update(false);
+        expect(writes.at(-1)![12]).toBe(0);
+        state._update(false);
+        expect(writes.at(-1)![12]).toBeCloseTo(0.4);
+        expect(skeleton.boneMatrices[12]).toBeCloseTo(0.4);
         state._dispose();
-        expect(textures[0].destroy).toHaveBeenCalledOnce();
-        expect(textures[1].destroy).toHaveBeenCalledOnce();
+        state._dispose();
+        expect(texture.destroy).toHaveBeenCalledOnce();
     });
 
-    it("preloads skeletal geometry velocity only after the Standard skeleton opt-in", async () => {
-        expect(_getStandardGeometrySkeletonVelocityFactory()).toBeNull();
+    it("preloads shared deformation history only for geometry velocity", async () => {
+        const before = getGeometryDeformationVelocity();
+        await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, false);
+        expect(getGeometryDeformationVelocity()).toBe(before);
         enableStandardSkeleton();
         await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
-        expect(_getStandardGeometrySkeletonVelocityFactory()).toBe(createStandardGeometrySkeletonVelocity);
+        expect(getGeometryDeformationVelocity()?.createGeometryDeformationVelocity).toBe(createGeometryDeformationVelocity);
     });
 
     it("unlit Standard geometry normals resolve: the unlit fragment declares normalW like the lit one", () => {

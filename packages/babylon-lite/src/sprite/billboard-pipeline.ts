@@ -174,7 +174,7 @@ export function getOrCreateBillboardPipeline(
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = depthEntry.writeEnabled && sampleCount > 1 && !!alphaToCoverageResolver?.(system);
     const customKey = _getBillboardFxHook()?.pipelineKeyPart(system) ?? "";
-    const key = `${format}:${sampleCount}:${system._orientation}:${system.blendMode._key}:${depthEntry.index}:${depthStencilFormat}:${depthCompare}:${alphaToCoverage ? "a" : "n"}:${customKey}`;
+    const key = `${format}:${sampleCount}:${system.orientation}:${system.blendMode._key}:${depthEntry.index}:${depthStencilFormat}:${depthCompare}:${alphaToCoverage ? "a" : "n"}:${customKey}`;
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
@@ -357,9 +357,9 @@ export function buildBillboardSystemUbo(system: BillboardSpriteSystem, ubo: Floa
         ubo[2] = 1;
         ubo[3] = opacity;
     }
-    ubo[4] = system._axis[0];
-    ubo[5] = system._axis[1];
-    ubo[6] = system._axis[2];
+    ubo[4] = system.axis[0];
+    ubo[5] = system.axis[1];
+    ubo[6] = system.axis[2];
     ubo[7] = system.alphaCutoff;
 }
 
@@ -413,7 +413,7 @@ function getBillboardPipelineDeviceCache(engine: EngineContext, cache: Billboard
 }
 
 function getShaderModule(engine: EngineContext, cache: BillboardPipelineDeviceCache, system: BillboardSpriteSystem, alphaToCoverage: boolean): GPUShaderModule {
-    const orientation = system._orientation;
+    const orientation = system.orientation;
     const depthMode = system._depthMode;
     const customModule = _getBillboardFxHook()?.shaderModule(engine, system);
     if (customModule) {
@@ -455,7 +455,7 @@ function buildBillboardPipeline(
     }
     const billboardBindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
     return device.createRenderPipeline({
-        label: `${system._orientation}-billboard-sprite-pipeline`,
+        label: `${system.orientation}-billboard-sprite-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBindGroupLayout, billboardBindGroupLayout] }),
         vertex: {
             module: shaderModule,

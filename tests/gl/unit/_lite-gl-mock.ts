@@ -33,11 +33,14 @@ export interface MockGL {
      *  flipped via `setParallelComplete(true)`. */
     setParallelComplete(ok: boolean): void;
     setParallelAvailable(ok: boolean): void;
-    /** Set the value returned for `gl.SAMPLES`. */
+    /** Set the value returned for `gl.SAMPLES` while the canvas is the draw framebuffer; framebuffers report 0. */
     setSampleCount(samples: number): void;
     /** Toggle availability of a `getExtension(name)` result (e.g. the
      *  color-buffer-float extensions that drive render-target caps). */
     setExtensionAvailable(name: string, ok: boolean): void;
+    /** Configure `EXT_disjoint_timer_query_webgl2` query results (the
+     *  extension itself is toggled with `setExtensionAvailable`). */
+    setTimerQuery(opts: { available?: boolean; result?: number; disjoint?: boolean }): void;
 }
 
 interface Internal {
@@ -47,7 +50,10 @@ interface Internal {
     linkSuccess: boolean;
     programAllocationSuccess: boolean;
     sampleCount: number;
+    drawFramebuffer: object | null;
+    enabled: Set<number>;
     extensions: Record<string, boolean>;
+    timerQuery: { available: boolean; result: number; disjoint: boolean };
 }
 
 export function createMockGL(): MockGL {
@@ -60,6 +66,8 @@ export function createMockGL(): MockGL {
         linkSuccess: true,
         programAllocationSuccess: true,
         sampleCount: 0,
+        drawFramebuffer: null,
+        enabled: new Set(),
         // Default: all color-buffer-float extensions present so render-target
         // float caps report true. Toggle with `setExtensionAvailable`.
         extensions: {
@@ -67,9 +75,11 @@ export function createMockGL(): MockGL {
             EXT_color_buffer_half_float: true,
             OES_texture_float_linear: true,
         },
+        timerQuery: { available: true, result: 0, disjoint: false },
     };
 
     const PARALLEL_EXT = { COMPLETION_STATUS_KHR: 0x91b1 };
+    const TIMER_EXT = { TIME_ELAPSED_EXT: 0x88bf, GPU_DISJOINT_EXT: 0x8fbb };
 
     const rec = (name: string, ...args: unknown[]): void => {
         log.push({ name, args });
@@ -82,6 +92,7 @@ export function createMockGL(): MockGL {
     const ENUMS: Record<string, number> = {
         ARRAY_BUFFER: 0x8892,
         ELEMENT_ARRAY_BUFFER: 0x8893,
+        PIXEL_PACK_BUFFER: 0x88eb,
         STATIC_DRAW: 0x88e4,
         TRIANGLES: 0x0004,
         UNSIGNED_SHORT: 0x1403,
@@ -115,6 +126,8 @@ export function createMockGL(): MockGL {
         TEXTURE_WRAP_R: 0x8072,
         LINEAR: 0x2601,
         LINEAR_MIPMAP_LINEAR: 0x2703,
+        LINEAR_MIPMAP_NEAREST: 0x2701,
+        NEAREST_MIPMAP_LINEAR: 0x2702,
         NEAREST: 0x2600,
         CLAMP_TO_EDGE: 0x812f,
         UNPACK_FLIP_Y_WEBGL: 0x9240,
@@ -142,6 +155,8 @@ export function createMockGL(): MockGL {
         UNSIGNED_INT: 0x1405,
         // ──── framebuffer / renderbuffer (render targets) ────────────────
         FRAMEBUFFER: 0x8d40,
+        READ_FRAMEBUFFER: 0x8ca8,
+        DRAW_FRAMEBUFFER: 0x8ca9,
         RENDERBUFFER: 0x8d41,
         COLOR_ATTACHMENT0: 0x8ce0,
         DEPTH_ATTACHMENT: 0x8d00,
@@ -170,6 +185,7 @@ export function createMockGL(): MockGL {
         FRONT_AND_BACK: 0x0408,
         // ──── pixel store + blend equations ──────────────────────────────
         UNPACK_ALIGNMENT: 0x0cf5,
+        PACK_ALIGNMENT: 0x0d05,
         UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
         MIN: 0x8007,
         MAX: 0x8008,
@@ -177,6 +193,8 @@ export function createMockGL(): MockGL {
         DST_COLOR: 0x0306,
         MIRRORED_REPEAT: 0x8370,
         REPEAT: 0x2901,
+        QUERY_RESULT: 0x8866,
+        QUERY_RESULT_AVAILABLE: 0x8867,
     };
 
     const gl = {
@@ -193,13 +211,19 @@ export function createMockGL(): MockGL {
                 return 16;
             }
             if (p === ENUMS.SAMPLES) {
-                return state.sampleCount;
+                return state.drawFramebuffer === null ? state.sampleCount : 0;
+            }
+            if (p === TIMER_EXT.GPU_DISJOINT_EXT) {
+                return state.timerQuery.disjoint ? 1 : 0;
             }
             return 0;
         },
         getExtension: (name: string): unknown => {
             if (name === "KHR_parallel_shader_compile" && state.parallelAvailable) {
                 return { ...PARALLEL_EXT };
+            }
+            if (name === "EXT_disjoint_timer_query_webgl2" && state.extensions[name] === true) {
+                return { ...TIMER_EXT };
             }
             if (state.extensions[name] === true) {
                 return { __ext: name };
@@ -364,9 +388,15 @@ export function createMockGL(): MockGL {
         // ──── blend state (setBlendMode) ───────────────────────────────
         enable: (cap: number): void => {
             rec("enable", cap);
+            state.enabled.add(cap);
         },
         disable: (cap: number): void => {
             rec("disable", cap);
+            state.enabled.delete(cap);
+        },
+        isEnabled: (cap: number): boolean => {
+            rec("isEnabled", cap);
+            return state.enabled.has(cap);
         },
         blendFuncSeparate: (srcRGB: number, dstRGB: number, srcAlpha: number, dstAlpha: number): void => {
             rec("blendFuncSeparate", srcRGB, dstRGB, srcAlpha, dstAlpha);
@@ -392,6 +422,12 @@ export function createMockGL(): MockGL {
         uniform1fv: (loc: object, value: unknown): void => {
             rec("uniform1fv", loc, value);
         },
+        uniform2fv: (loc: object, value: unknown): void => {
+            rec("uniform2fv", loc, value);
+        },
+        uniform3fv: (loc: object, value: unknown): void => {
+            rec("uniform3fv", loc, value);
+        },
         uniform4fv: (loc: object, value: unknown): void => {
             rec("uniform4fv", loc, value);
         },
@@ -408,6 +444,12 @@ export function createMockGL(): MockGL {
         },
         bindFramebuffer: (target: number, f: object | null): void => {
             rec("bindFramebuffer", target, f);
+            if (target !== ENUMS.READ_FRAMEBUFFER) {
+                state.drawFramebuffer = f;
+            }
+        },
+        blitFramebuffer: (...args: unknown[]): void => {
+            rec("blitFramebuffer", ...args);
         },
         framebufferTexture2D: (...args: unknown[]): void => {
             rec("framebufferTexture2D", ...args);
@@ -472,6 +514,27 @@ export function createMockGL(): MockGL {
         clear: (mask: number): void => {
             rec("clear", mask);
         },
+        // ──── queries ───────────────────────────────────────────────────
+        createQuery: (): object => {
+            rec("createQuery");
+            return handle("query");
+        },
+        deleteQuery: (q: object): void => {
+            rec("deleteQuery", q);
+        },
+        beginQuery: (target: number, q: object): void => {
+            rec("beginQuery", target, q);
+        },
+        endQuery: (target: number): void => {
+            rec("endQuery", target);
+        },
+        getQueryParameter: (q: object, p: number): unknown => {
+            rec("getQueryParameter", q, p);
+            if (p === ENUMS.QUERY_RESULT_AVAILABLE) {
+                return state.timerQuery.available;
+            }
+            return p === ENUMS.QUERY_RESULT ? state.timerQuery.result : null;
+        },
     } as unknown as WebGL2RenderingContext;
 
     return {
@@ -502,6 +565,9 @@ export function createMockGL(): MockGL {
         },
         setExtensionAvailable: (name, ok) => {
             state.extensions[name] = ok;
+        },
+        setTimerQuery: (opts) => {
+            Object.assign(state.timerQuery, opts);
         },
     };
 }

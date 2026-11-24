@@ -35,6 +35,299 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes typed animation curve snapshots and editing from the root", () => {
+        const probePath = resolve(BUILD_DIR, "animation-curve.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getAnimationGroupTracks, setAnimationTrackKeys, type AnimationGroup, type AnimationCurveTrack, type AnimationCurveKey } from "./index.js";
+declare const group: AnimationGroup;
+const tracks: readonly AnimationCurveTrack[] = getAnimationGroupTracks(group);
+const interpolation: string = tracks[0]!.interpolation;
+const key: AnimationCurveKey = { time: 0, value: [1], inTangent: [0], outTangent: [0] };
+setAnimationTrackKeys(group, 0, [key]);
+// @ts-expect-error Snapshots are readonly.
+tracks[0]!.keys[0]!.value[0] = 4;
+// @ts-expect-error Time is required.
+setAnimationTrackKeys(group, 0, [{ value: [1] }]);
+// @ts-expect-error Internal mixer state is not public.
+group._propertyMixer;
+// @ts-expect-error Interpolation strings intentionally remain open for future modes.
+const closed: "linear" | "step" | "cubicSpline" = tracks[0]!.interpolation;
+void [interpolation, closed];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes texture readback through root APIs without native handles", () => {
+        const probePath = resolve(BUILD_DIR, "texture-readback.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    readTexturePixelsRGBA8, getTextureReadbackInfo,
+    type EngineContext, type Texture2D, type Texture2DArray, type Texture3D, type CubeTexture,
+    type TextureReadbackInfo, type TextureReadbackOptions, type TextureReadbackResult,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const texture: Texture2D;
+declare const array: Texture2DArray;
+declare const volume: Texture3D;
+declare const cube: CubeTexture;
+declare const native: GPUTexture;
+const options: TextureReadbackOptions = { mipLevel: 1, flipY: true };
+const info: TextureReadbackInfo = getTextureReadbackInfo(cube);
+const pixels: Promise<TextureReadbackResult> = readTexturePixelsRGBA8(engine, texture, options);
+readTexturePixelsRGBA8(engine, array, { layer: 1 });
+readTexturePixelsRGBA8(engine, volume, { slice: 1 });
+readTexturePixelsRGBA8(engine, cube, { face: 5 });
+// @ts-expect-error Native handles cannot stand in for public wrappers.
+readTexturePixelsRGBA8(engine, native);
+// @ts-expect-error Cubes remain opaque.
+cube._texture;
+// @ts-expect-error Engine device stays internal.
+engine._device;
+// @ts-expect-error Internal staging copy is not public.
+import { readTexturePixels } from "./index.js";
+// @ts-expect-error Results do not expose GPU textures.
+info.texture;
+void [pixels, info];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes device preparation and typed engine ownership without native handles", () => {
+        const probePath = resolve(BUILD_DIR, "device-context.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createDevice, disposeDevice, createEngine, createEngineWithFeatures,
+    type DeviceContext, type DeviceOptions, type EngineContext, type EngineDeviceOptions,
+} from "./index.js";
+declare const canvas: HTMLCanvasElement;
+declare const device: DeviceContext;
+declare const engine: EngineContext;
+declare const nativeDevice: GPUDevice;
+const options: DeviceOptions = { requiredLimits: { maxBufferSize: 4096 } };
+const prepared: Promise<DeviceContext> = createDevice(options);
+const attached: Promise<EngineContext> = createEngine(canvas, { device, msaaSamples: 1 });
+const engineOptions: EngineDeviceOptions = { device, useHighPrecisionMatrix: true };
+const conflictingFeatures = { device, requiredFeatures: ["shader-f16"] as GPUFeatureName[] };
+createEngine(canvas, engineOptions);
+createEngine(canvas);
+createEngine(canvas, { requiredLimits: { maxBufferSize: 4096 } });
+createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
+const sameDevice: DeviceContext = engine.device;
+disposeDevice(device);
+// @ts-expect-error Native handles remain internal.
+device._device;
+// @ts-expect-error Engine ownership state remains internal.
+device._claimed;
+// @ts-expect-error Device identity is readonly.
+engine.device = device;
+// @ts-expect-error Explicit features use createEngineWithFeatures, not createDevice.
+createDevice({ requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Power preference is not configurable.
+createDevice({ powerPreference: "low-power" });
+// @ts-expect-error Configure limits before device creation, not when attaching an engine.
+createEngine(canvas, { device, requiredLimits: { maxBufferSize: 4096 } });
+// @ts-expect-error Configure features before device creation.
+createEngine(canvas, { device, requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Non-literal options cannot silently ignore requested features either.
+createEngine(canvas, conflictingFeatures);
+// @ts-expect-error Legacy explicit-feature factory creates its own device.
+createEngineWithFeatures(canvas, { device, requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Native handles and structural lookalikes are not Lite device contexts.
+createEngine(canvas, { device: nativeDevice });
+void [prepared, attached, sameDevice];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes typed parallax setters only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "parallax-occlusion-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createPbrMaterial, createStandardMaterial, setPbrParallaxOcclusion,
+    setStandardParallaxOcclusion, type ParallaxOcclusionProps, type Texture2D,
+} from "./index.js";
+declare const heightTexture: Texture2D;
+const props: ParallaxOcclusionProps = {
+    heightTexture, heightScale: 0.04, heightCenter: 0.5,
+    heightChannel: "a", minSteps: 8, maxSteps: 32, refinementSteps: 8,
+};
+const pbr = createPbrMaterial();
+const standard = createStandardMaterial();
+setPbrParallaxOcclusion(pbr, props);
+setStandardParallaxOcclusion(standard, props);
+setPbrParallaxOcclusion(pbr, null);
+setStandardParallaxOcclusion(standard, null);
+// @ts-expect-error Height channels are explicitly typed.
+setPbrParallaxOcclusion(pbr, { heightTexture, heightChannel: "rgb" });
+// @ts-expect-error Backing state must not bypass extension registration.
+pbr._parallaxOcclusion;
+// @ts-expect-error Backing state must not bypass extension registration.
+standard._parallaxOcclusion;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes both AO task families and keeps XeGTAO reconstruction controls distinct", () => {
+        const probePath = resolve(BUILD_DIR, "ssao-reconstruction.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createSsaoTask, resetSsaoTemporal, enableSsaoHalfResolution, enablePbrSsao,
+    createScreenSpaceAmbientOcclusionPostProcessTask, type ScreenSpaceAmbientOcclusionPostProcessTask,
+    type EngineContext, type SceneContext, type Camera, type RenderTarget, type SsaoTemporalSettings,
+} from "./index.js";
+// @ts-expect-error The reconstruction initializer is internal.
+import { initializeSsaoTemporal } from "./index.js";
+// @ts-expect-error Half estimation and reconstruction have one public enabler.
+import { enableSsaoHalfPipeline } from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const camera: Camera;
+declare const depth: RenderTarget;
+declare const velocity: RenderTarget;
+declare const source: RenderTarget;
+const postProcess: ScreenSpaceAmbientOcclusionPostProcessTask = createScreenSpaceAmbientOcclusionPostProcessTask({
+    sourceTexture: source, depthTexture: depth, camera, composition: "none",
+}, engine, scene);
+const postProcessOutput: RenderTarget = postProcess.occlusionTexture;
+void postProcessOutput;
+// @ts-expect-error XeGTAO enablers do not accept the separate screen-space post-process task.
+enableSsaoHalfResolution(postProcess);
+const ao = createSsaoTask({ depthTexture: depth, camera }, engine, scene);
+const settings: SsaoTemporalSettings = ao.temporal;
+settings.enabled = false;
+settings.historySamples = 8;
+resetSsaoTemporal(settings);
+const half = enableSsaoHalfResolution(ao);
+half.enabled = false;
+const active: boolean = half.active;
+// @ts-expect-error The effective mode is readonly.
+half.active = active;
+void enablePbrSsao(scene, ao);
+createSsaoTask({ depthTexture: depth, camera, temporal: false }, engine);
+createSsaoTask({ depthTexture: depth, camera, temporal: true }, engine);
+createSsaoTask({
+    depthTexture: depth, camera,
+    temporal: { enabled: false, velocityTexture: velocity, velocityHasPreviousDepth: true, historySamples: 16 },
+}, engine);
+// @ts-expect-error The settings reference itself is readonly.
+ao.temporal = settings;
+// @ts-expect-error Reconstruction configuration has a typed boolean state.
+createSsaoTask({ depthTexture: depth, camera, temporal: { enabled: "yes" } }, engine);
+// @ts-expect-error GPU preparation hooks are internal.
+settings._prepareGpu;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes mesh opacity only on Mesh and keeps feature storage internal", () => {
+        const probePath = resolve(BUILD_DIR, "mesh-opacity.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { setMeshOpacity, getMeshOpacity, type Mesh, type MeshLoDInstance } from "./index.js";
+declare const mesh: Mesh;
+declare const lod: MeshLoDInstance;
+const set: (mesh: Mesh, opacity: number) => void = setMeshOpacity;
+const get: (mesh: Mesh) => number = getMeshOpacity;
+const result: void = setMeshOpacity(mesh, 0.5);
+const value: number = getMeshOpacity(mesh);
+// @ts-expect-error MeshLoD participants are not Lite Mesh targets.
+setMeshOpacity(lod, 0.5);
+// @ts-expect-error Reset to 1 does not make MeshLoD a supported target.
+setMeshOpacity(lod, 1);
+// @ts-expect-error The getter also rejects MeshLoD participants.
+getMeshOpacity(lod);
+// @ts-expect-error The public value contract is numeric.
+setMeshOpacity(mesh, "0.5");
+// @ts-expect-error Feature-local storage is not public mesh state.
+mesh._opacity;
+// @ts-expect-error The colour/geometry skip flag is internal.
+mesh._skipColorDraw;
+void [set, get, result, value];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes physics discovery and allocation-free inspection without internal state", () => {
         const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
         try {
@@ -1361,11 +1654,51 @@ void [current, ready];
 
         expect(dts).toMatch(/getRenderingContextKind\(context: RenderingContext(?:_\d+)?\): string/);
         expect(dts).toMatch(/getRenderingContexts\(surface: SurfaceContext\): readonly RenderingContext(?:_\d+)?\[\]/);
+        expect(dts).toMatch(/moveRenderingContext\(surface: SurfaceContext, context: RenderingContext(?:_\d+)?, index: number\): boolean/);
         expect(dts).not.toMatch(/\btype RenderingContextKind\b/);
         expect(dts).not.toMatch(/declare interface RenderingContext(?:_\d+)? \{[^}]*\bkind:/s);
         expect(dts).not.toContain("_renderingContextKind");
         expect(dts).not.toMatch(/^\s*_renderingContexts:/m);
+        expect(dts).not.toMatch(/^\s*_overlayBase\??:/m);
+        expect(dts).not.toContain("_installOverlaySceneRegistration");
         expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
+    });
+
+    it("exposes the overlay-scene and utility-layer factories without an engine argument", () => {
+        const probePath = resolve(BUILD_DIR, "utility-layer-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { createOverlayScene, createUtilityLayer, type EngineContext, type SceneContext, type UtilityLayer } from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+const layer: UtilityLayer = createUtilityLayer(scene, { rt: engine.scRT });
+const overlay: SceneContext = createOverlayScene(scene, { rt: engine.scRT });
+createUtilityLayer(overlay, { rt: engine.scRT });
+if (scene.defaultRenderTask) {
+    createUtilityLayer(scene, scene.defaultRenderTask.config);
+}
+// @ts-expect-error Color destinations are explicit, not discovered.
+createOverlayScene(scene);
+// @ts-expect-error Utility layers also require an explicit destination.
+createUtilityLayer(scene);
+// @ts-expect-error Overlay scenes derive their surface from the base scene.
+createOverlayScene(engine);
+createUtilityLayer(scene, { rt: engine.scRT, addDefaultLight: false, lightIntensity: 0.5 });
+// @ts-expect-error The utility layer derives its engine from the main scene.
+createUtilityLayer(engine, scene);
+void layer;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("exposes readonly material texture introspection without internal slots", () => {
@@ -1711,10 +2044,11 @@ void complete;
 
     it("ships both bundled MIT license texts", () => {
         const notice = readFileSync(resolve(BUILD_DIR, "NOTICE.txt"), "utf8");
-        for (const [name, version] of [
-            ["navcat", "0.4.1"],
-            ["mathcat", "0.0.12"],
-        ]) {
+        const { dependencies } = JSON.parse(readFileSync(SOURCE_PACKAGE_JSON_PATH, "utf8")) as {
+            dependencies: Record<string, string>;
+        };
+        for (const name of ["navcat", "mathcat"]) {
+            const version = dependencies[name];
             const start = notice.indexOf(`${name} ${version}`);
             expect(start).toBeGreaterThanOrEqual(0);
             expect(notice.slice(start)).toContain("Copyright © 2025 Isaac Mason");

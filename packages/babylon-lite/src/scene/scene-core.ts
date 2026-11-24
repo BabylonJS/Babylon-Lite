@@ -19,6 +19,7 @@ import type { EnvironmentRecoverySource } from "../loader-env/environment-recove
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
+import type { RenderTask } from "../frame-graph/render-task-base.js";
 import { _createDirectRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/scene-lights-ubo.js";
@@ -30,9 +31,11 @@ import type { FgEventBus } from "../flow-graph/event-bus.js";
 import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
 import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
+import type { SceneRenderableCollection } from "./scene-renderable-collection.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
 import type { ParticleSystem } from "../particle/particle-system.js";
 import type { PhysicsWorld } from "../physics/havok.js";
+import type { RenderTarget } from "../engine/render-target.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -149,6 +152,8 @@ export function _setSceneDisposeHook(hook: (scene: SceneContext, cleanup: () => 
 
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
+    /** Factory-created default producer, absent when defaultRenderTask is false. */
+    readonly defaultRenderTask?: RenderTask;
     /** @internal */
     readonly _kind: "scene";
     /** Optional display name for tooling and diagnostics. */
@@ -165,6 +170,10 @@ export interface SceneContext extends RenderingContext {
     /** @internal Optional material-owned lighting contribution, installed by an explicit enabler. */
     _lighting?: SceneLightingExtension;
     imageProcessing: ImageProcessingConfig;
+    /** @internal Optional final linear scene output consumed by trailing image processing. */
+    _outputTexture?: RenderTarget;
+    /** @internal Optional feature-owned hook around changes to the scene output pipeline. */
+    _outputPipelineChange?: (ready: boolean) => void;
 
     /** All meshes added to the scene (standard + PBR). */
     meshes: Mesh[];
@@ -218,12 +227,17 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Scene whose swapchain output this overlay scene composites onto; set only by `createOverlayScene`. */
+    _overlayBase?: SceneContext;
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
     /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
     _physicsWorlds?: PhysicsWorld[];
     /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
     _sceneChanges?: SceneChangeState;
+    /** @internal Custom-renderable collections (text, depth-hosted sprite layers, billboard systems), keyed by
+     *  family. Each is allocated by its family's first add or subscription; independent of generic membership. */
+    _renderableCollections?: Map<string, SceneRenderableCollection>;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
@@ -424,7 +438,9 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             ? _createDirectRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
         const depth = msaa ? undefined : _createDirectRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
-        _appendTask(fg, _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
+        const task = _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx);
+        Object.assign(ctx, { defaultRenderTask: task });
+        _appendTask(fg, task);
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
@@ -690,11 +706,18 @@ export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneCon
     _prepareShaderPipelines = prepare;
 }
 
+let _overlaySceneRegistered: ((scene: SceneContext) => void) | undefined;
+/** @internal Install overlay-scene handling that runs after any scene is inserted into its surface. */
+export function _installOverlaySceneRegistration(registered: (scene: SceneContext) => void): void {
+    _overlaySceneRegistered = registered;
+}
+
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to its bound surface's render list in overlay order. The scene is
- * always attached to `scene.surface` (which equals the engine itself in the
- * single-canvas case).
+ * and adds the scene to its bound surface's render list. A scene clears its target unless
+ * it was created with `createOverlayScene`, in which case it composites over its base scene
+ * and is kept immediately after it. The scene is always attached to `scene.surface`
+ * (which equals the engine itself in the single-canvas case).
  */
 export async function registerScene(scene: SceneContext): Promise<void> {
     const ctx = scene;
@@ -711,11 +734,7 @@ export async function registerScene(scene: SceneContext): Promise<void> {
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 /**
@@ -739,11 +758,7 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
@@ -762,5 +777,5 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
  *  The scene is always removed from `scene.surface`. */
 export function unregisterScene(scene: SceneContext): void {
-    unregisterRenderingContext(scene.surface, scene as SceneContext);
+    unregisterRenderingContext(scene.surface, scene);
 }

@@ -2,7 +2,7 @@ import type { Vec3 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `UpdateDirectionBlock` — copy the evaluated velocity into the base direction columns. */
-export const updateDirectionBlock: NpeBlockEvaluator = {
+export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         if (!ctx.isConnected(block, "direction")) {
             return;

@@ -21,12 +21,13 @@ import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
-import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
+import type { AbstractMesh, Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
 import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
 import type { TransformNode } from "../meshes/meshes.js";
 import type { Vector3 } from "../math/vector.js";
+import type { Vector4 } from "../math/vector.js";
 import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
 import type { Matrix } from "../math/matrix.js";
@@ -43,6 +44,10 @@ const GAUSSIAN_POINT_SPLATTING_UNSUPPORTED =
     "Lite exposes Gaussian Point Splatting through a scene-integrated high-level handle. Babylon.js's standalone renderer and blit-material classes expose manual accumulation/depth buffers and pass-level GPU control, which cannot be adapted without exposing raw GPU resources forbidden by Lite's public API.";
 const SHADER_MATERIAL_UNSUPPORTED =
     "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
+const SUBMESH_INDIRECT_DRAW_UNSUPPORTED =
+    "Lite can bind one indexed-indirect source to an entire mesh, but Babylon.js binds application-owned draw arguments per submesh and render-pass id. Supporting that requires changing Lite's existing material renderable and pass-recording hot paths, so it cannot be added as an independent tree-shakeable adapter.";
+const BAKED_VERTEX_ANIMATION_UNSUPPORTED =
+    "Lite's loaded skeleton handles do not expose synchronous per-frame transform-matrix sampling, and its mesh/material pipelines have no baked-animation texture binding contract. Supporting Babylon.js VAT requires loader-owned pose sampling plus renderer hot-path and resource-lifecycle design.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -73,6 +78,198 @@ export function ValidateFlowGraph(_flowGraph: unknown): IFlowGraphValidationResu
 
 export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlocks: unknown[]): IFlowGraphValidationResult {
     return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export type KTX2EncoderUsage = "color" | "data" | "normal";
+
+export interface IBakedVertexAnimationManager {
+    texture: unknown | null;
+    isEnabled: boolean;
+    animationParameters: Vector4;
+    time: number;
+    bind(effect: unknown, useInstances: boolean): void;
+    setAnimationParameters(startFrame: number, endFrame: number, offset: number, speedFramesPerSecond: number): void;
+    dispose(forceDisposeTextures?: boolean): void;
+    getClassName(): string;
+}
+
+export class BakedVertexAnimationManager implements IBakedVertexAnimationManager {
+    public texture: unknown | null = null;
+    public isEnabled = true;
+    public animationParameters!: Vector4;
+    public time = 0;
+
+    public constructor(_scene?: Scene | null) {
+        unsupported("BakedVertexAnimationManager", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bind(_effect: unknown, _useInstances = false): void {
+        unsupported("BakedVertexAnimationManager.bind", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public clone(): BakedVertexAnimationManager {
+        return unsupported("BakedVertexAnimationManager.clone", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public setAnimationParameters(_startFrame: number, _endFrame: number, _offset = 0, _speedFramesPerSecond = 30): void {
+        unsupported("BakedVertexAnimationManager.setAnimationParameters", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public dispose(_forceDisposeTextures?: boolean): void {}
+
+    public getClassName(): string {
+        return "BakedVertexAnimationManager";
+    }
+
+    public copyTo(_vatMap: BakedVertexAnimationManager): void {
+        unsupported("BakedVertexAnimationManager.copyTo", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serialize(): unknown {
+        return unsupported("BakedVertexAnimationManager.serialize", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public parse(_source: unknown, _scene: Scene, _rootUrl: string): void {
+        unsupported("BakedVertexAnimationManager.parse", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+}
+
+export class VertexAnimationBaker {
+    public constructor(_scene: Scene, _meshOrSkeleton: Mesh | unknown) {
+        unsupported("VertexAnimationBaker", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bakeVertexDataSync(_ranges: Array<{ from: number; to: number }>, _halfFloat: boolean): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.bakeVertexDataSync", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public bakeVertexData(_ranges: Array<{ from: number; to: number }>): Promise<Float32Array> {
+        return unsupported("VertexAnimationBaker.bakeVertexData", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public textureFromBakedVertexData(_vertexData: Float32Array | Uint16Array): unknown {
+        return unsupported("VertexAnimationBaker.textureFromBakedVertexData", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serializeBakedVertexDataToObject(_vertexData: Float32Array | Uint16Array): Record<string, unknown> {
+        return unsupported("VertexAnimationBaker.serializeBakedVertexDataToObject", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public loadBakedVertexDataFromObject(_data: Record<string, unknown>): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.loadBakedVertexDataFromObject", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public serializeBakedVertexDataToJSON(_vertexData: Float32Array | Uint16Array): string {
+        return unsupported("VertexAnimationBaker.serializeBakedVertexDataToJSON", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+
+    public loadBakedVertexDataFromJSON(_json: string): Float32Array | Uint16Array {
+        return unsupported("VertexAnimationBaker.loadBakedVertexDataFromJSON", BAKED_VERTEX_ANIMATION_UNSUPPORTED);
+    }
+}
+export interface IKTX2EncoderOptions {
+    usage: KTX2EncoderUsage;
+    generateMipmaps?: boolean;
+    flipY?: boolean;
+    etc1sQualityLevel?: number;
+    etc1sCompressionLevel?: number;
+    uastcQualityLevel?: number;
+    zstandard?: boolean;
+}
+
+export class DefaultKTX2EncoderOptions {
+    private _dirty = true;
+    private _etc1sQualityLevel: number | undefined;
+    private _etc1sCompressionLevel: number | undefined;
+    private _uastcQualityLevel: number | undefined;
+    private _zstandard: boolean | undefined;
+    public get isDirty(): boolean {
+        return this._dirty;
+    }
+    public get etc1sQualityLevel(): number | undefined {
+        return this._etc1sQualityLevel;
+    }
+    public set etc1sQualityLevel(value: number | undefined) {
+        this._etc1sQualityLevel = value;
+        this._dirty = true;
+    }
+    public get etc1sCompressionLevel(): number | undefined {
+        return this._etc1sCompressionLevel;
+    }
+    public set etc1sCompressionLevel(value: number | undefined) {
+        this._etc1sCompressionLevel = value;
+        this._dirty = true;
+    }
+    public get uastcQualityLevel(): number | undefined {
+        return this._uastcQualityLevel;
+    }
+    public set uastcQualityLevel(value: number | undefined) {
+        this._uastcQualityLevel = value;
+        this._dirty = true;
+    }
+    public get zstandard(): boolean | undefined {
+        return this._zstandard;
+    }
+    public set zstandard(value: boolean | undefined) {
+        this._zstandard = value;
+        this._dirty = true;
+    }
+}
+
+let defaultKtx2EncoderOptions: DefaultKTX2EncoderOptions | null = null;
+export class KhronosTextureContainer2Encoder {
+    public static get URLConfig(): { jsEncoderModule: string; jsBasisEncoder: string; wasmBasisEncoder: string } {
+        return unsupported(
+            "KhronosTextureContainer2Encoder.URLConfig",
+            "The URLs configure the out-of-scope @babylonjs/ktx2encoder worker/WASM package, which Lite does not ship or own."
+        );
+    }
+    public static DefaultNumWorkers = 1;
+    public static get DefaultEncoderOptions(): DefaultKTX2EncoderOptions {
+        return (defaultKtx2EncoderOptions ??= new DefaultKTX2EncoderOptions());
+    }
+    public constructor() {
+        unsupported(
+            "KhronosTextureContainer2Encoder",
+            "KTX2 encoding depends on the out-of-scope @babylonjs/ktx2encoder worker/WASM package and its worker-pool ownership lifecycle."
+        );
+    }
+}
+
+export function MapSRGBToLinear(format: number): number | null {
+    if (format >= 37840 && format <= 37853) {
+        return format - 32;
+    }
+    switch (format) {
+        case 35916:
+            return 33776;
+        case 35918:
+            return 33778;
+        case 35919:
+            return 33779;
+        case 37493:
+            return 37492;
+        case 37497:
+            return 37496;
+        case 37495:
+            return 37494;
+        case 36493:
+            return 36492;
+        default:
+            return null;
+    }
+}
+
+export type WebGPURenderPassCommandStreamDisableReason = "protocol-mismatch" | "atomic-recording-unsupported" | "recorder-missing" | "recording-rejected" | "recording-threw";
+export const WebGPURenderPassCommandStreamProtocolVersion = 1;
+export const WebGPURenderPassCommandStreamMaxDrawsPerBatch = 1024;
+export class WebGPURenderPassCommandStream {
+    public constructor() {
+        unsupported(
+            "WebGPURenderPassCommandStream",
+            "This API records Babylon Native render-pass command batches through host-specific resource IDs; Lite exposes no native-host recorder contract."
+        );
+    }
 }
 
 export interface FlowGraphPlayAnimationBlock {
@@ -287,6 +484,27 @@ export class RootMotionController {
 export class MultiMaterial {
     public constructor() {
         unsupported("MultiMaterial", "Babylon Lite uses one material per renderable. Split the mesh geometry by material into separate meshes instead.");
+    }
+}
+
+/** Babylon.js `SubMesh`; pass-specific indirect drawing requires Lite renderer integration. */
+export class SubMesh {
+    public constructor(
+        _materialIndex: number,
+        _verticesStart: number,
+        _verticesCount: number,
+        _indexStart: number,
+        _indexCount: number,
+        _mesh: AbstractMesh,
+        _renderingMesh?: Mesh,
+        _createBoundingBox?: boolean,
+        _addToMesh?: boolean
+    ) {
+        unsupported("SubMesh", SUBMESH_INDIRECT_DRAW_UNSUPPORTED);
+    }
+
+    public setIndirectDrawBuffer(_buffer: unknown | null, _byteOffset: number, _renderPassId: number): void {
+        unsupported("SubMesh.setIndirectDrawBuffer", SUBMESH_INDIRECT_DRAW_UNSUPPORTED);
     }
 }
 
@@ -819,12 +1037,6 @@ export class HighlightLayer {
     }
 }
 
-export class GlowLayer {
-    public constructor() {
-        unsupported("GlowLayer", "Effect layers are not implemented in Babylon Lite. For a bloom-style glow, use the native bloom post-process task.");
-    }
-}
-
 // ─── Mesh-attached renderers / projectors ────────────────────────────
 // ─── GreasedLine (thick-line ribbon subsystem) ───────────────────────
 // Greased lines render polylines as camera-facing ribbons/tubes driven by a
@@ -1139,19 +1351,45 @@ export function GetElementPixelFromUv(): never {
     return unsupported("GetElementPixelFromUv", "HTML overlay raycast interaction is not supported by Babylon Lite.");
 }
 
-/** Babylon.js `IsHtmlInCanvasSupportedNatively` — the HTML-in-canvas feature is unsupported by the compat layer. */
+/**
+ * Babylon.js `IsHtmlInCanvasSupportedNatively`.
+ *
+ * The legacy polyfill uses a positional upload signature that Lite's existing
+ * HTML texture module cannot consume without adding feature branches to a
+ * module already included by HTML-texture users.
+ */
 export function IsHtmlInCanvasSupportedNatively(): never {
-    return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
+    return unsupported(
+        "IsHtmlInCanvasSupportedNatively",
+        "Supporting the legacy HTML-in-Canvas polyfill requires changing Lite's existing HTML texture upload path, which would add code to current HTML-texture bundles."
+    );
 }
 
-/** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+/** Babylon.js internal polyfill-state query. Compat never installs the unsupported polyfill. */
+export function _IsHtmlInCanvasPolyfillInstalled(): boolean {
+    return false;
+}
+
+/**
+ * Babylon.js `InstallHtmlInCanvasPolyfill`.
+ *
+ * The installed polyfill would redirect Lite to an incompatible positional
+ * upload API, so exposing the installer without changing Lite's hot path would
+ * break otherwise-working HTML textures.
+ */
 export function InstallHtmlInCanvasPolyfill(): never {
-    return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+    return unsupported(
+        "InstallHtmlInCanvasPolyfill",
+        "The legacy polyfill's positional upload API requires changes inside Lite's existing HTML texture module, so it cannot be added as a zero-impact compat-only capability."
+    );
 }
 
-/** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+/** Babylon.js `UninstallHtmlInCanvasPolyfill`; paired with the structurally blocked installer. */
 export function UninstallHtmlInCanvasPolyfill(): never {
-    return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+    return unsupported(
+        "UninstallHtmlInCanvasPolyfill",
+        "The matching installer is unavailable because the legacy polyfill requires changes inside Lite's existing HTML texture upload path."
+    );
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────

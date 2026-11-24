@@ -28,6 +28,14 @@
         "mobile": false
     },
     {
+        "slug": "ambient-occlusion",
+        "name": "Ambient Occlusion",
+        "thumbnailUrl": "https://raw.githubusercontent.com/BabylonJS/Assets/6d2691d223b46b0218c51b159ee5a5ccbe0123bc/textures/lite/demo-ambient-occlusion.jpg",
+        "description": "XeGTAO ambient occlusion with full- or half-resolution estimation, full-resolution temporal reconstruction, and PBR diffuse environment lighting integration. Compare contact occlusion, animated skin/morph meshes, normal inputs, AO-only output, and independent direct/emissive contributions.",
+        "tags": ["effect", "lighting", "pbr", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "npe-sprite2d",
         "name": "NPE on Sprite2D",
         "description": "An authored Node Particle Editor graph rendered through Lite's scene-less pure-2D SpriteRenderer. The NPE simulation stays world-space while the native bridge maps its live particle columns to one allocation-free Sprite2D layer.",

@@ -1,5 +1,5 @@
 import type { EngineContext, EngineOptions, RenderCanvas } from "../engine/engine.js";
-import { _getSupportedDeviceFeatures, _installDeviceFeaturesResolver, createEngine } from "../engine/engine.js";
+import { _installDeviceFeaturesResolver, createEngine } from "../engine/engine.js";
 
 /** Engine options that explicitly require additional WebGPU device features. */
 export interface EngineFeatureOptions extends EngineOptions {
@@ -13,8 +13,7 @@ function installRequiredFeatureResolver(): void {
         return;
     }
     _installed = true;
-    _installDeviceFeaturesResolver((adapter, options) => {
-        const features = _getSupportedDeviceFeatures(adapter);
+    _installDeviceFeaturesResolver((adapter, features, options) => {
         for (const feature of (options as EngineFeatureOptions | undefined)?.requiredFeatures ?? []) {
             if (!adapter.features.has(feature)) {
                 throw new Error(`WebGPU adapter does not support required feature "${feature}".`);

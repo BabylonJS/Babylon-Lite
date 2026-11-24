@@ -4,8 +4,11 @@ import type { Vec3 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /** `ConeShapeBlock` — cone sampling with directed or radial emission. */
-export const coneShapeBlock: NpeBlockEvaluator = {
-    build(block, ctx) {
+export const npeBlock: NpeBlockEvaluator = {
+    async build(block, ctx) {
+        if (ctx.state.isLocal) {
+            return (await import("./cone-shape-local.js")).coneShapeLocal.build(block, ctx);
+        }
         const state = ctx.state;
         const system = state.system!;
         const buffer = state.buffer!;

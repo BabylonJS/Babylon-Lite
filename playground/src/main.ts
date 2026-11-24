@@ -535,7 +535,7 @@ versionEl.addEventListener("change", () => {
     // an inline `#code=` payload or a legacy `#ID[#REV]` snippet link survives the
     // switch rather than relying on autosave alone.
     writeAutosave();
-    const rest = stripBase(location.pathname);
+    const rest = stripBase(location.pathname).replace(/^\/+/, "");
     const suffix = rest === "index.html" ? "" : rest;
     location.href = `${targetBase}${suffix}${location.search}${location.hash}`;
 });

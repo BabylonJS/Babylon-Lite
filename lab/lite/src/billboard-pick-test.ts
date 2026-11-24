@@ -3,7 +3,7 @@
  *  `window.__bbPickTest` for the `billboard-pick.spec.ts` Playwright assertions. */
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     createArcRotateCamera,
     createBox,
@@ -72,7 +72,7 @@ async function run(): Promise<void> {
         const posB: [number, number, number] = [1.5, 0, 0]; // occluded by a box
         results.idxA = addBillboardSpriteIndex(billboards, { position: posA, sizeWorld: [1.2, 1.2], frame: 8 });
         addBillboardSpriteIndex(billboards, { position: posB, sizeWorld: [1.2, 1.2], frame: 13 });
-        addFacingBillboardSystem(scene, billboards);
+        addBillboardSystemToScene(scene, billboards);
 
         // Occluder box on the camera→B ray, one third of the way toward the camera, so it covers B.
         const camPos = getCameraPosition(scene.camera);

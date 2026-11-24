@@ -26,7 +26,9 @@ export function createTextTexture(engine: GLEngineContext, pixels: Float32Array 
     checkSize(engine, width, height);
     const gl = engine.gl;
     const integer = pixels instanceof Uint32Array;
-    return createRawTexture(engine, pixels, width, height, integer ? gl.RG_INTEGER : gl.RGBA, integer ? gl.UNSIGNED_INT : gl.FLOAT, {
+    return createRawTexture(engine, pixels, width, height, {
+        format: integer ? gl.RG_INTEGER : gl.RGBA,
+        type: integer ? gl.UNSIGNED_INT : gl.FLOAT,
         internalFormat: integer ? gl.RG32UI : gl.RGBA32F,
         minFilter: gl.NEAREST,
         magFilter: gl.NEAREST,
@@ -36,7 +38,7 @@ export function createTextTexture(engine: GLEngineContext, pixels: Float32Array 
 /** @internal Preserve the texture object and its context-restore upload source. */
 export function uploadTextTexture(engine: GLEngineContext, texture: GLTexture, pixels: Float32Array | Uint32Array, width: number, height: number): void {
     checkSize(engine, width, height);
-    updateRawTexture(engine, texture, pixels, { width, height });
+    updateRawTexture(texture, pixels, { width, height });
 }
 
 /** @internal Atlas resources are shared by every block using the same curve set. */
@@ -74,7 +76,7 @@ export function ensureSharedAtlasGpu(engine: GLEngineContext, atlas: SharedAtlas
             atlas._gpu = gpu;
         } catch (error) {
             for (const texture of textures) {
-                disposeTexture(engine, texture);
+                disposeTexture(texture);
             }
             throw error;
         }

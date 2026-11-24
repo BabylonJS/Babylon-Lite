@@ -41,7 +41,7 @@ function makeDevice(features: GPUFeatureName[] = []): FakeDevice {
 }
 
 function makeEngine(device = makeDevice()): EngineContext {
-    return { _device: device, surfaces: [], _animFrameId: 0, _renderFn: null, _retirements: null } as unknown as EngineContext;
+    return { _device: device, device: {}, surfaces: [], _animFrameId: 0, _renderFn: null, _retirements: null } as unknown as EngineContext;
 }
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
