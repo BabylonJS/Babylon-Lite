@@ -35,6 +35,8 @@ The module handles four concerns:
 
 The module is a leaf. It reads existing scene, engine and loader state, and changes no code outside `packages/babylon-lite/src/export-gltf/` except the one root re-export of `exportSceneAsGlb` in `index.ts` and a type-only `/** @internal */ _flatNormal` declaration on `Mesh` (`mesh/mesh.ts`), which documents a field the glTF loader already writes. Capabilities that would need a change anywhere else are **out of scope** and listed below, with what the exporter does instead. The design decisions behind them are deferred. The module's own tests, lab page and documentation are part of the module and do not count as outside changes.
 
+The root export is tree-shaken out of scenes that do not use it. A paired production-library build on upstream master `99466d5d` plus this module, with and without the exporter entries and root export, measured identical runtime JavaScript byte counts in scenes 1–7. The exporter therefore added zero runtime bytes in those scenes; no bundle-size ceiling was changed.
+
 **Out of scope: needs a change outside `export-gltf/`**
 
 | Capability                                                                                                                                      | Why it needs an outside change                                                                                                                                                                                 | What the exporter does instead                                                                                                                                                         |
