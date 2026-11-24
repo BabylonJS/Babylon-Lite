@@ -1,6 +1,6 @@
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(359);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene359-npe-values-math");
@@ -8,10 +8,7 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
 test.skip(!!sceneConfig.skipParity, "Scene 359 skipped via skipParity in scene-config.json");
 
-test("Scene 359 — NPE values and math match Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 359 });
-
+test("Scene 359 — NPE values and math match the committed Babylon.js golden", async ({ page }, testInfo) => {
     await page.goto("/scene359.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);

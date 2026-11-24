@@ -31,7 +31,7 @@ export interface ParticleSpriteHandle {
     readonly cellHeight: number;
     readonly startCellID: number;
     readonly endCellID: number;
-    readonly cellIndex: Uint16Array;
+    readonly cellIndex: Int32Array;
     readonly update: (i: number) => void;
 }
 
@@ -82,6 +82,11 @@ export interface ParticleSystem {
     _prepareFrame?: () => void;
     /** @internal Sprite-sheet feature handle, present only for sprite systems. */
     _spriteSheet?: ParticleSpriteHandle;
+    /**
+     * @internal Birth reset run before any creation getter, like Babylon.js `Particle._reset`. Installed only by
+     * features whose per-particle state Babylon.js resets there, because a spawned slot keeps the previous particle's columns.
+     */
+    _resetParticle?: ParticleStep;
     /** @internal Optional feature writer installed only when a graph reads ColorDead. */
     _writeColorDead?: (i: number, color: Color4) => void;
     /** @internal Mesh-normal emitters leave Babylon.js's initial direction at its zero default. */

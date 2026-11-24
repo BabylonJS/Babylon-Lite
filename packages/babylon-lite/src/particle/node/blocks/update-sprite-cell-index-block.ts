@@ -2,28 +2,20 @@ import { column } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `UpdateSpriteCellIndexBlock` — each update, floor the `cellIndex` input into the sprite cell-index column (a no-op
- * when unconnected). Babylon.js resets a recycled particle's cell to the sprite sheet's start cell, which is 0 without
- * a sheet; with no `SetupSpriteSheetBlock` built yet, this block owns that reset and runs it before every creation
- * slot, since spawned slots keep stale column data. A sheet built later seeds its own start cell at birth.
+ * `UpdateSpriteCellIndexBlock` — each update, floor the `cellIndex` input into the signed sprite cell-index column (a
+ * no-op when unconnected). Signed storage keeps negative graph intermediates like Babylon.js's number; the atlas
+ * validates the final cell when it renders. The birth reset belongs to the column's readers: the sprite sheet and the
+ * `SpriteCellIndex` source each seed a spawned slot before any creation getter, so a write-only column needs none.
  */
 export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         if (!ctx.isConnected(block, "cellIndex")) {
             return;
         }
-        const system = ctx.state.system!;
-        const cellIndex = column(ctx.state.buffer!, "sprite.cellIndex", Uint16Array);
+        const cellIndex = column(ctx.state.buffer!, "sprite.cellIndex", Int32Array);
         const value = ctx.input(block, "cellIndex");
-        system.updateSteps.push((i) => {
+        ctx.state.system!.updateSteps.push((i) => {
             cellIndex[i] = Math.floor(value(i) as number);
         });
-        if (!system._spriteSheet) {
-            const previous = system.createLifeTime;
-            system.createLifeTime = (i) => {
-                cellIndex[i] = 0;
-                previous?.(i);
-            };
-        }
     },
 };

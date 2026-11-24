@@ -1,5 +1,5 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
-import { copyComponent, createComponentScratch, mapComponents } from "./particle-component-map.js";
+import { createComponentScratch, mapComponents } from "./particle-component-map.js";
 
 /**
  * `ParticleClampBlock` — clamp every component of `value` to `[min, max]` (defaults 0 and 1). Like Babylon.js,
@@ -17,17 +17,11 @@ export const npeBlock: NpeBlockEvaluator = {
         let lower = 0;
         let upper = 1;
         const clamp = (component: number): number => Math.max(lower, Math.min(component, upper));
+        const readBounds = (i: number): void => {
+            lower = min(i) as number;
+            upper = max(i) as number;
+        };
 
-        ctx.setOutput(
-            block.id,
-            "output",
-            (i) => {
-                const source = mapComponents(value(i), copyComponent, scratch);
-                lower = min(i) as number;
-                upper = max(i) as number;
-                return mapComponents(source, clamp, scratch);
-            },
-            ctx.isInt(block, "value")
-        );
+        ctx.setOutput(block.id, "output", (i) => mapComponents(value(i), clamp, scratch, readBounds, i), ctx.isInt(block, "value"));
     },
 };

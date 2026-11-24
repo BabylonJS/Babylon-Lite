@@ -4,8 +4,9 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /**
  * `SetupSpriteSheetBlock` — configures the sprite-sheet feature. Allocates the sprite columns via
  * {@link useSpriteSheet} (only now, on this buffer), records the render cell dimensions + the per-particle
- * cell-index column + update step on the system's sprite handle, and attaches the birth hook that seeds a
- * new particle's cell state. Random start cells lazy-load their own column variant. A non-sprite system never
+ * cell-index column + update step on the system's sprite handle, and installs the birth reset that seeds a
+ * spawned particle's cell state before any creation getter, like Babylon.js `Particle._reset`. Random start cells
+ * lazy-load their own column variant and still sample their offset in the update. A non-sprite system never
  * reaches this block, so it allocates no sprite columns and imports none of the sprite module.
  */
 export const npeBlock: NpeBlockEvaluator = {
@@ -28,10 +29,10 @@ export const npeBlock: NpeBlockEvaluator = {
             cellIndex: sheet.cellIndex,
             update: sheet.update,
         };
-        const previousColorDead = system.createColorDead;
-        system.createColorDead = previousColorDead
+        const previousReset = system._resetParticle;
+        system._resetParticle = previousReset
             ? (i) => {
-                  previousColorDead(i);
+                  previousReset(i);
                   sheet.birth(i);
               }
             : sheet.birth;

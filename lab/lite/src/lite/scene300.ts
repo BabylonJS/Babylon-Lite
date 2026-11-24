@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     buffer.colorG[0] = 1;
     buffer.colorB[0] = 1;
     buffer.colorA[0] = 1;
-    const cellIndex = new Uint16Array(buffer.capacity);
+    const cellIndex = new Int32Array(buffer.capacity);
     cellIndex[0] = 1;
     system._spriteSheet = { cellWidth: ORIENTATION_SIZE_PX, cellHeight: ORIENTATION_SIZE_PX, startCellID: 0, endCellID: 0, cellIndex, update: () => undefined };
     const renderer = createSpriteRenderer(engine, {

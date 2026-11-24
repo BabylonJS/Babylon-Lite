@@ -386,7 +386,7 @@ Only these columns are allocated in addition to the base and standard columns:
 - `LocalPositionUpdated` source `0x18`: `localPosition.x`, `.y`, and `.z` as `Float32Array`, `localPosition.id` as `Uint32Array`, and `localPosition.valid` as `Uint8Array`.
 - Scalar OncePerParticle random cache for block `B`: `random.B.id` as `Uint32Array`, `random.B.valid` as `Uint8Array`, and `random.B.value0` as `Float64Array`.
 - Vector or color OncePerParticle cache for block `B`: the same id and valid arrays plus `random.B.value0...N` as `Float64Array`. The component count is two for Vector2 and other non-Vector3/non-Color4 tags, three for Vector3, and four for Color4. The block id is part of the column key; the current particle id stored in the id column invalidates a recycled slot. Cache memory is bounded by particle capacity.
-- Sprite animation: `sprite.cellIndex` as `Uint16Array`.
+- Sprite animation: `sprite.cellIndex` as `Int32Array`.
 - Random-start sprite animation: `sprite.randomOffset` as `Float32Array` in addition to `sprite.cellIndex`.
 
 ## 5. ParticleSystem and simulation
@@ -399,7 +399,7 @@ interface ParticleSpriteHandle {
     readonly cellHeight: number;
     readonly startCellID: number;
     readonly endCellID: number;
-    readonly cellIndex: Uint16Array;
+    readonly cellIndex: Int32Array;
     readonly update: (i: number) => void;
 }
 
@@ -431,6 +431,7 @@ interface ParticleSystem {
     _emitRateGetter?: () => number;
     _prepareFrame?: () => void;
     _spriteSheet?: ParticleSpriteHandle;
+    _resetParticle?: ParticleStep;
     _writeColorDead?: (i: number, color: Color4) => void;
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
@@ -537,14 +538,16 @@ Successful births run non-null slots in this fixed order:
 7. `createColor`
 8. `createColorDead`
 
-This order is independent of graph traversal and is part of the random-consumption contract. Sprite birth initialization is attached to `createColorDead` and runs after its captured color-dead step.
+This order is independent of graph traversal and is part of the random-consumption contract.
+
+`_resetParticle` is the birth reset, matching Babylon.js `Particle._reset` before its creation queue. `CreateParticleBlock.createLifeTime` calls it first when it is installed, so it runs before every creation getter. Spawned slots keep stale column data, so a feature whose per-particle column a creation getter can observe composes its reset here, keeping any earlier reset first. The sprite sheet seeds its start cell, and the `SpriteCellIndex` source seeds the sheet start, or `0` without a sheet. Builds without such a feature leave it absent. It consumes no random draw.
 
 ### 5.7 Determinism requirements
 
 - Shape emitters use `randomRange(min, max)`. It returns `min` without calling `Math.random()` when `min === max`; otherwise it returns `Math.random() * (max - min) + min`.
 - `ParticleRandomBlock` always consumes a draw per output component, including equal bounds.
 - The fixed creation order, ordered `updateSteps`, update-before-create order, emission carry threshold, target-stop timing, and death-step clamp must remain exact.
-- Position, direction, standard render fields, and most feature values are stored at Float32 precision. Age, lifetime, and OncePerParticle cached values use Float64 storage. Sprite cells use Uint16 storage and ids use Uint32 storage.
+- Position, direction, standard render fields, and most feature values are stored at Float32 precision. Age, lifetime, and OncePerParticle cached values use Float64 storage. Sprite cells use signed Int32 storage and ids use Uint32 storage.
 - Vector and color getters may return shared scratch values. A consumer must copy all needed components from one getter before calling another getter that can share or overwrite that scratch.
 
 ## 6. Serialized graph and parser
@@ -784,7 +787,7 @@ interface NpeTextureValue {
 | `0x0007` | Scale                | scratch `Vec2` from standard scale columns                                                                                                |
 | `0x0008` | AgeGradient          | `age[i] / lifeTime[i]`, without a zero guard                                                                                              |
 | `0x0009` | Angle                | `number` from the standard angle column                                                                                                   |
-| `0x0010` | SpriteCellIndex      | `Int` `number` from the shared `sprite.cellIndex` column, allocating it when no sprite feature has                                        |
+| `0x0010` | SpriteCellIndex      | `Int` `number` from the shared `sprite.cellIndex` column, allocating it when no sprite feature has; composes a birth reset (below)        |
 | `0x0011` | SpriteCellStart      | `Int` `number`; the sprite sheet's `startCellID`, read lazily so a sheet built later applies, otherwise `0`                               |
 | `0x0012` | SpriteCellEnd        | `Int` `number`; the sprite sheet's `endCellID`, read lazily so a sheet built later applies, otherwise `0`                                 |
 | `0x0013` | InitialColor         | scratch `Color4`; requests four initial-color columns and wraps `createColorDead` to copy current color before invoking the captured step |
@@ -795,6 +798,8 @@ interface NpeTextureValue {
 | `0x0018` | LocalPositionUpdated | scratch world `Vec3` and a write to base position, as specified below                                                                     |
 | `0x0019` | Size                 | `number` from the standard size column                                                                                                    |
 | `0x0020` | DirectionScale       | `number` equal to `system._scaledStep`                                                                                                    |
+
+SpriteCellIndex composes a reset onto `_resetParticle` (section 5.6) that writes the sprite sheet's `startCellID`, or `0` without a sheet, read at birth. A sheet built after the source therefore still applies, and a creation getter never observes a recycled slot's stale cell.
 
 InitialColor captures the current `createColorDead` function when its getter is built. Its installed function copies standard RGBA into `initialColor.*` and then calls the captured function when non-null. ColorDead installs a writer that copies the supplied RGBA to `colorDead.*`; `CreateParticleBlock.createColorDead` invokes it before deriving standard color steps.
 
@@ -908,7 +913,7 @@ Input defaults are:
 
 The slots are:
 
-- `createLifeTime`: writes `lifeTime[i]` and evaluates `emitPower` into `_emitPower`.
+- `createLifeTime`: runs `_resetParticle` when installed (section 5.6), then writes `lifeTime[i]` and evaluates `emitPower` into `_emitPower`.
 - `createEmitPower`: when `_emitPower === 0`, writes all direction components to zero. Otherwise it multiplies each direction component by `_emitPower`. An installed InitialDirection wrapper captures direction before this step runs.
 - `createSize`: writes a numeric size, using `1` for a non-number. An object scale writes `.x` and `.y`; a scalar scale is copied to both components.
 - `createAngle`: writes the numeric angle through typed-array coercion.
@@ -1170,11 +1175,11 @@ ratio = loop
 cellIndex = (startCellID + ratio * distance) | 0
 ```
 
-`clamp01(value)` returns 0 below zero, 1 above one, and the input otherwise. Assignment to Uint16 applies Uint16 conversion.
+`clamp01(value)` returns 0 below zero, 1 above one, and the input otherwise. Assignment to Int32 applies Int32 conversion.
 
 The random-start path lazy-loads `particle/sprite-columns-random.ts` and also allocates `sprite.randomOffset`. Birth writes offset `-1` and the start cell. On an update with a negative offset, it writes `Math.random() * lifeTime`. With zero `changeSpeed`, progress is the offset; otherwise progress is `(age + offset) * changeSpeed`. Ratio and cell math then match the ordinary path.
 
-Both paths set `_spriteSheet` with cell dimensions, the configured start and end cells, the cell array, and the update function. They capture the current `createColorDead` and assign a wrapper so sprite birth runs after that function when non-null; when it is null, sprite birth becomes the slot. They install no output getter.
+Both paths set `_spriteSheet` with cell dimensions, the configured start and end cells, the cell array, and the update function. They compose sprite birth onto `_resetParticle` after any earlier reset, so it runs before every creation getter (section 5.6). Birth consumes no random draw; the random offset is still sampled on the first update. They install no output getter.
 
 ### 9.22 BasicSpriteUpdateBlock
 
@@ -1593,7 +1598,7 @@ The current descriptive sections are synchronized at 42 normalized-builder class
 
 ### 9.32 ParticleClampBlock
 
-An unconnected `value` installs no output. `min` defaults to `0` and `max` to `1`. Each component becomes `Math.max(min, Math.min(component, max))`, for scalar, Vector2, Vector3, and Color4 values. The getter copies the `value` components into block-owned scratch before evaluating the bounds, so a bound that rewrites the same shared scratch cannot change the operand. It installs `output`, typed like `value`.
+An unconnected `value` installs no output. `min` defaults to `0` and `max` to `1`. Each component becomes `Math.max(min, Math.min(component, max))`, for scalar, Vector2, Vector3, and Color4 values. The getter makes one shape dispatch: it reads the `value` components into locals, then evaluates the bounds, then writes the result once into block-owned scratch. A bound that rewrites the same shared scratch therefore cannot change the operand, and a scalar needs no copy. It installs `output`, typed like `value`.
 
 ### 9.33 ParticleStepBlock
 
@@ -1633,9 +1638,9 @@ Operations are `0 Dot` (default) and `1 Distance` on two Vector3 operands. Both 
 
 ### 9.39 UpdateSpriteCellIndexBlock
 
-An unconnected `cellIndex` input makes the block a no-op: it allocates no column and adds no step. Otherwise it allocates or shares the `sprite.cellIndex` column and appends one `updateSteps` function that stores `Math.floor(cellIndex)`. Assignment to Uint16 then applies Uint16 conversion, so values below `0` or above `65535` wrap instead of keeping Babylon.js's unbounded number.
+An unconnected `cellIndex` input makes the block a no-op: it allocates no column and adds no step. Otherwise it allocates or shares the `sprite.cellIndex` column and appends one `updateSteps` function that stores `Math.floor(cellIndex)`. The column is signed Int32, so a negative intermediate written by one update block keeps its value for a later block that reads `SpriteCellIndex`, as Babylon.js's number does. The atlas validates the final cell when it renders and throws for an out-of-range frame.
 
-Babylon.js `Particle._reset` sets a recycled particle's cell to the sprite sheet's start cell, which is `0` without a sheet. When no `SetupSpriteSheetBlock` has been built yet, this block wraps `createLifeTime` so birth writes cell `0` before the previous function runs, because spawned slots keep stale column data. A sheet built later seeds its configured start cell through its own birth hook (section 9.21). The block installs no output getter.
+Babylon.js `Particle._reset` sets a recycled particle's cell to the sprite sheet's start cell, which is `0` without a sheet. The column's readers own that reset: the sprite sheet (section 9.21) and the `SpriteCellIndex` source (section 8.2) compose it onto `_resetParticle`. A column that only this block writes, with neither reader, is never observed. The block installs no output getter.
 
 ## 10. Rendering and live registration
 
@@ -1896,14 +1901,14 @@ Additional behavior is observable:
 - Invalid JSON, malformed snippet payloads, invalid typed-array lengths, and wrong runtime value shapes use native JavaScript errors or typed-array coercion.
 - Capacity exhaustion drops all creation requests from the first failed spawn through the rest of that animation call. Emission carry and simulated time are not restored.
 - Numeric fields are not checked for finiteness, sign, integer range, or compatible graph value type.
-- A zero lifetime produces division by zero in color-step creation. Zero lifetime in sprite update produces JavaScript remainder/division results and Uint16 coercion.
+- A zero lifetime produces division by zero in color-step creation. Zero lifetime in sprite update produces JavaScript remainder/division results and Int32 coercion.
 - `_nextId` is an unbounded JavaScript number while the stored particle and cache ids are Uint32 values, so stored ids wrap at Uint32 assignment.
 
 ## 12. Current limitations
 
 - The parser represents arbitrary serialized class names. Builders support the 37 ordinary classes directly and five Phase 3 classes at the required normalized boundary, for 42 supported classes after normalization. Other reachable NPE classes fail with the manifest error in section 11.
 - `Int` typing truncates only scalar `ParticleMathBlock` results. Babylon.js also applies `| 0` to an `Int` left with a vector or color right, which collapses the result to `0`; Lite keeps the untruncated vector.
-- Sprite cells are stored as Uint16, so an `UpdateSpriteCellIndexBlock` value below `0` or above `65535` wraps instead of keeping Babylon.js's unbounded number.
+- Sprite cells are stored as Int32, so an `UpdateSpriteCellIndexBlock` value outside the signed 32-bit range wraps instead of keeping Babylon.js's unbounded number.
 - Simulation is CPU-only.
 - Rendering is selected explicitly by the caller: camera-facing billboards or pure-2D Sprite2D. Serialized `billBoardMode` and `isBillboardBased` do not select either runtime path.
 - The Sprite2D bridge maps only NPE world XY. It ignores `posZ` and does not support XZ/YZ projection.
@@ -1945,7 +1950,7 @@ The current unit categories are:
 - Moving emitters: translating and rotating provider snapshots, newly returned matrices and in-place mutation, static-option precedence and immutability, world births, all six world/local shape paths, `LocalPositionUpdated`, contextual Emitter, every implicit Cylinder inverse in one system, every builder, Parse-option preservation, unstarted and stopped-but-started calls, independent multi-system sampling, wrapped-options reuse isolation, and provider exception/invalid-result atomicity across matrix, translation, inverse, and particle state.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Value and math blocks: per-component Clamp, Step, and SmoothStep with defaults and no output for an unconnected value; NLerp normalization, zero length, required operands, and alias-safe evaluation order; Trigonometry operations, unknown operations, and unconnected input; VectorMath Dot and Distance; NumberMath Modulo and Pow; shared-scratch aliasing for the multi-input blocks; and `Int` typing from sources through every forwarding block, including scalar-only Math truncation.
-- Sprite cells: UpdateSpriteCellIndex birth reset and floor without a sheet, sheet start cells with a sheet built before or after the block, the unconnected no-op, lazy SpriteCellStart/SpriteCellEnd reads, and `Int` typing of the three sprite-cell sources.
+- Sprite cells: a recycled slot's birth reset observed by a creation-time `SpriteCellIndex` read without a sheet and with a sheet built before or after the update block, signed intermediates between chained UpdateSpriteCellIndex blocks, the unconnected no-op, lazy SpriteCellStart/SpriteCellEnd reads, and `Int` typing of the three sprite-cell sources.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, `textureDataUrl` precedence, cached decoding, unsupported-scheme rejection, and lazy texture/evaluator isolation.
 - Noise textures: exact three-sample red-channel addressing, six deterministic Float64 random coordinates, coordinate reuse and slot recycling, Vector3 defaults/strength, lifetime-clamped step scaling, extraction failure, parsed graph wiring including one embedded texture source shared by the system upload and CPU noise decoding, Babylon multi-step state fixtures, and lazy block isolation.
@@ -1998,11 +2003,11 @@ The eleven frozen billboard oracle Lite scenes seed after build, synchronize one
 
 Each camera uses near plane `0.1` and far plane `100`. The eleven always-frozen scenes set both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start. Scene 302 sets `ready` in both modes and sets `animationFrozen` only for a finite nonnegative `seekTime`.
 
-Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, 284, 305, and 359 invoke the shared golden-capture helper before opening the Lite page; specifications 276 and 302 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all twelve scenes.
+Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, 284, and 305 invoke the shared golden-capture helper before opening the Lite page; specifications 276, 302, and 359 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all twelve scenes.
 
 Scene 305 follows the runtime-capture group, not Scene 302's manual committed-only convention. It is a frozen, non-interactive fixture: its Lite camera intentionally has no controls import or attachment because the Babylon.js oracle also leaves its camera unattached. This does not establish a camera policy for other NPE scenes. Its shared graph retains Teleport fan-out and adds Elbow, Debug, and a Particle LocalVariable on the creation-only random-size path. The wrapped value, random consumption, and 200-step state are unchanged; a focused nonvisual test compares that full state to Scene 262 exactly. No Loop block is used. The existing golden and thumbnail are not modified locally; CI owns visual parity.
 
-Scene 359 (`scene359-npe-values-math`) is the values/math oracle. It is a frozen, non-interactive, runtime-capture fixture like Scene 305. Both engines parse the same data-only graph from `scene359-values-math-npe.ts`: a Point-shape sprite-sheet fountain (`player.png`, 64 by 64 cells, cells 0 through 9) whose four update blocks are driven entirely by value/math blocks:
+Scene 359 (`scene359-npe-values-math`) is the values/math oracle. It is a frozen, non-interactive fixture whose specification compares against the committed golden and never captures one at runtime. Both engines parse the same data-only graph from `scene359-values-math-npe.ts`: a Point-shape sprite-sheet fountain (`player.png`, 64 by 64 cells, cells 0 through 9) whose four update blocks are driven entirely by value/math blocks:
 
 - Position adds `ScaledDirection` plus a Trigonometry Sin wobble of age, multiplied by `DirectionScale` (`0x20`).
 - Color is an NLerp between warm and cool Color4 constants. Its gradient is a SmoothStep of `AgeGradient` raised to a NumberMath Pow.

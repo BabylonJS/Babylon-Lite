@@ -37,7 +37,9 @@ export const npeBlock: NpeBlockEvaluator = {
         const stepB = buffer.colorStepB;
         const stepA = buffer.colorStepA;
 
+        // Lifetime is the first creation slot, so the birth reset runs before every creation getter.
         system.createLifeTime = (i) => {
+            system._resetParticle?.(i);
             lifeTime[i] = lifeTimeGetter(i) as number;
             system._emitPower = emitPowerGetter(i) as number;
         };

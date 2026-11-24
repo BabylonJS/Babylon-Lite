@@ -8,7 +8,7 @@ function clamp01(value: number): number {
 /** Attach the random-start sprite variant. Loaded only when the graph enables random start cells. */
 export function useRandomSpriteSheet(buffer: ParticleBuffer, config: SpriteSheetConfig): SpriteSheet {
     const randomOffset = column(buffer, "sprite.randomOffset", Float32Array);
-    const cellIndex = column(buffer, "sprite.cellIndex", Uint16Array);
+    const cellIndex = column(buffer, "sprite.cellIndex", Int32Array);
     const age = buffer.age;
     const lifeTime = buffer.lifeTime;
     const start = config.startCellID;

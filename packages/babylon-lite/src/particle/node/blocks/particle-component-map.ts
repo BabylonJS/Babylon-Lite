@@ -14,34 +14,44 @@ export function createComponentScratch(): NpeComponentScratch {
 }
 
 /**
- * Apply `map` to every component of `value`, writing vectors and colours into `scratch`. `value` may already be
- * that scratch: a block copies its operand first (`map` = identity) so reading later inputs cannot overwrite it,
- * then transforms the copy in place.
+ * Apply `map` to every component of `value` with one shape dispatch, writing vectors and colours into `scratch`.
+ * The components are read into locals before `readOperands(i)` evaluates the block's later inputs, which may share or
+ * overwrite `value`'s scratch; the result is then written once. Scalars need no copy.
  */
-export function mapComponents(value: NpeValue, map: (component: number) => number, scratch: NpeComponentScratch): NpeValue {
+export function mapComponents(value: NpeValue, map: (component: number) => number, scratch: NpeComponentScratch, readOperands?: (i: number) => void, i = 0): NpeValue {
     if (typeof value === "number") {
+        readOperands?.(i);
         return map(value);
     }
     if ("r" in value) {
+        const r = value.r;
+        const g = value.g;
+        const b = value.b;
+        const a = value.a;
+        readOperands?.(i);
         const color = scratch.c4;
-        color.r = map(value.r);
-        color.g = map(value.g);
-        color.b = map(value.b);
-        color.a = map(value.a);
+        color.r = map(r);
+        color.g = map(g);
+        color.b = map(b);
+        color.a = map(a);
         return color;
     }
     if ("z" in value) {
+        const x = value.x;
+        const y = value.y;
+        const z = value.z;
+        readOperands?.(i);
         const vector = scratch.v3;
-        vector.x = map(value.x);
-        vector.y = map(value.y);
-        vector.z = map(value.z);
+        vector.x = map(x);
+        vector.y = map(y);
+        vector.z = map(z);
         return vector;
     }
+    const x = value.x;
+    const y = value.y;
+    readOperands?.(i);
     const vector = scratch.v2;
-    vector.x = map(value.x);
-    vector.y = map(value.y);
+    vector.x = map(x);
+    vector.y = map(y);
     return vector;
 }
-
-/** Identity component map used to copy an operand into block-owned scratch. */
-export const copyComponent = (component: number): number => component;

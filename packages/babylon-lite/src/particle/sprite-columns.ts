@@ -19,9 +19,9 @@ export interface SpriteSheetConfig {
 
 /** Handle returned by {@link useSpriteSheet}: the render column plus the per-particle birth/update steps. */
 export interface SpriteSheet {
-    /** Render frame per particle (read by the billboard). */
-    readonly cellIndex: Uint16Array;
-    /** Seed a freshly spawned particle's sprite state (runs at creation). */
+    /** Render frame per particle (read by the billboard). Signed, so graph-written intermediates keep their value. */
+    readonly cellIndex: Int32Array;
+    /** Reset a spawned particle's sprite state (runs before the creation slots, like Babylon.js `Particle._reset`). */
     readonly birth: (i: number) => void;
     /** Advance a particle's cell for the current frame (runs in the update loop). */
     readonly update: (i: number) => void;
@@ -36,7 +36,7 @@ function clamp01(value: number): number {
  * birth/update steps closing over them. Columns are keyed `sprite.*`, shared if attached more than once.
  */
 export function useSpriteSheet(buffer: ParticleBuffer, config: SpriteSheetConfig): SpriteSheet {
-    const cellIndex = column(buffer, "sprite.cellIndex", Uint16Array);
+    const cellIndex = column(buffer, "sprite.cellIndex", Int32Array);
     const age = buffer.age;
     const lifeTime = buffer.lifeTime;
     const start = config.startCellID;
