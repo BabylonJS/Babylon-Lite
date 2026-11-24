@@ -187,12 +187,14 @@ Shadow generators share math and UBO packing helpers only. Caster ownership live
 Standard and PBR prepare receiver code at their existing asynchronous material-build boundaries, then retain a scene-local synchronous fragment factory for pipeline composition and later per-mesh rebuilds:
 
 1. The immutable scene shadow slots are classified before composition.
-2. If any slot is CSM, CSM keeps precedence: only CSM slots are forwarded to the registered CSM receiver factory. The fallback loader is not called, preserving the existing unsupported mixed CSM+ESM/PCF behavior.
-3. Otherwise the dynamically imported `shadow-fragment-builder.ts` uses `shadow-algorithms.ts` to load only the algorithms present in the slots:
+2. If every slot is CSM, only the registered CSM receiver factory is used and the fallback loader is not called, so CSM-only scenes load no fallback code.
+3. If CSM is mixed with ESM/PCF slots, the dynamically imported `shadow-fragment-mixed.ts` prepares the fallback for the ESM/PCF slots and composes it with the CSM receiver. Both receivers already suffix every name with `_<lightIndex>` and write `shadowFactors[lightIndex]`, so their code is concatenated as is; the bindings are reordered into light-slot order, the order `createMaterialShadowBindings()` binds the generators in. Scenes without a mix never import this module.
+4. Otherwise the dynamically imported `shadow-fragment-builder.ts` uses `shadow-algorithms.ts` to load only the algorithms present in the slots:
     - ESM-only: builder + `shadow-fragment-esm.ts`
     - PCF-only: builder + `shadow-fragment-pcf.ts`
     - mixed ESM+PCF: builder + both algorithm modules
-4. Standard stores the prepared factory in its immutable `StandardShadowContext`; PBR passes its prepared closure into `createPbrComposer`. Synchronous material swaps, geometry views, and pipeline-cache misses therefore never import code.
+5. Standard stores the prepared factory in its immutable `StandardShadowContext`; PBR passes its prepared closure into `createPbrComposer`. Synchronous material swaps, geometry views, and pipeline-cache misses therefore never import code.
+6. Both families fold `shadowVariantKey()` (the ordered slot indices and algorithms, e.g. `0e,1c,2p`) into their device-wide bindings cache key for shadow receivers, so scenes with different group-2 layouts on one device never share a layout.
 
 `shadow-fragment-builder.ts` prepares one-pass Standard/PBR assembly through the shared `shadow-algorithms.ts` loader. Each algorithm module supplies one readonly descriptor containing its immutable texture/sampler binding types plus only two methods: its sampling expression and its WGSL helper body. The builder owns all common binding/emission scaffolding, avoiding mutable append adapters and duplicated descriptor construction. The immutable binding-type objects are reused across slots. For each slot the builder appends varyings, algorithm-specific texture/sampler bindings, the shared shadow-info UBO binding, vertex calculations, sampling calls, and helpers. The immutable `shadowInfo_NUniforms` declaration string is created once per slot and reused in both vertex and fragment helper lists. Returned binding/varying order and emitted WGSL remain byte-identical to the previous three-pass generator.
 
@@ -864,7 +866,9 @@ Returns: casters.length  (depth draws only — no blur passes)
 14. **Receiver output stability** — Empty, ESM-only, PCF-only, mixed, and non-contiguous Standard/PBR slot lists reproduce byte-exact fragment objects, including binding order and PBR `AD` → `AS` remapping.
 15. **Receiver feature isolation** — Built Standard/PBR wrappers have no static fallback-core or algorithm import; ESM and PCF helper modules contain only their own WGSL codegen.
 16. **Prepared algorithm guard** — An ESM-only prepared factory rejects PCF slots and a PCF-only factory rejects ESM slots rather than silently emitting an invalid receiver.
-17. **CSM precedence** — A list containing CSM forwards only CSM light indices to the registered receiver factory and does not prepare fallback algorithms.
+17. **CSM slot forwarding** — A list containing CSM forwards only CSM light indices to the registered receiver factory.
+18. **Mixed CSM + ESM/PCF receivers** — Standard and PBR receivers built with the real CSM receivers declare every shadow light's group-2 resources in light-slot order, matching the bind group, and sample each light with its own algorithm.
+19. **Shadow layout cache key** — A PCF-only and a CSM+PCF PBR scene built on one device get separate group-2 layouts (3 and 6 entries).
 
 ---
 
@@ -885,10 +889,11 @@ Returns: casters.length  (depth draws only — no blur passes)
 | `src/shader/fragments/shadow-fragment-builder.ts`        | Algorithm-neutral one-pass Standard/PBR receiver fragment assembly                                                                                                         |
 | `src/shader/fragments/shadow-fragment-esm.ts`            | ESM-only receiver bindings, sampling call, and WGSL helpers                                                                                                                |
 | `src/shader/fragments/shadow-fragment-pcf.ts`            | PCF-only receiver bindings, sampling call, and WGSL helpers                                                                                                                |
+| `src/shader/fragments/shadow-fragment-mixed.ts`          | Mixed CSM + ESM/PCF receiver composition in light-slot binding order                                                                                                       |
 | `src/material/node/node-shadow-emitter.ts`               | Prepared Node group-1 declarations, varyings, bindings, and shadow-factor dispatch                                                                                         |
 | `src/material/node/node-shadow.ts`                       | Combined synchronous Node compatibility entry                                                                                                                              |
-| `src/material/standard/fragments/std-shadow-fragment.ts` | Standard receiver preparation, CSM precedence, scene-local caching, and fragment ID                                                                                        |
-| `src/material/pbr/fragments/pbr-shadow-fragment.ts`      | PBR receiver preparation, CSM precedence, fragment ID, and `AD` → `AS` remapping                                                                                           |
+| `src/material/standard/fragments/std-shadow-fragment.ts` | Standard receiver preparation, CSM/mixed dispatch, scene-local caching, and fragment ID                                                                                    |
+| `src/material/pbr/fragments/pbr-shadow-fragment.ts`      | PBR receiver preparation, CSM/mixed dispatch, fragment ID, and `AD` → `AS` remapping                                                                                       |
 | `shaders/shadow-blur.vertex.wgsl`                        | Blur vertex shader: fullscreen triangle generation + UV computation                                                                                                        |
 
 The spot matrix helper lives in `shadow/pcf-spotlight-shadow-generator.ts`.
