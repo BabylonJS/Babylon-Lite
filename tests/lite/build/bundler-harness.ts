@@ -90,20 +90,20 @@ export const BENIGN_WARNING_RE = /asset size limit|entrypoint size limit|perform
 
 let _libBuilt = false;
 
-/** Newest mtime (ms) among the package's TypeScript sources — used to decide whether the existing
- *  `build/lib` output is already up to date. */
+/** Newest mtime (ms) among the package's sources and source directories, used to decide whether the
+ *  existing `build/lib` output is already up to date. Directory mtimes change when
+ *  a file is added, deleted or renamed, so removing a module also invalidates `build/lib` and a
+ *  rebuild (which empties the output directory) drops its stale emit. */
 function newestSrcMtime(): number {
     let newest = 0;
     const walk = (dir: string): void => {
+        newest = Math.max(newest, statSync(dir).mtimeMs);
         for (const e of readdirSync(dir, { withFileTypes: true })) {
             const p = join(dir, e.name);
             if (e.isDirectory()) {
                 walk(p);
-            } else if (/\.ts$/.test(e.name)) {
-                const m = statSync(p).mtimeMs;
-                if (m > newest) {
-                    newest = m;
-                }
+            } else {
+                newest = Math.max(newest, statSync(p).mtimeMs);
             }
         }
     };
