@@ -116,7 +116,7 @@ export function setEffectTexture3D(effect: GLEffect, samplerName: string, tex: G
  * Upload a tightly packed RGBA8 volume to a native WebGL2 3D texture. Useful
  * for color-grading LUTs without flattening the cube into a 2D atlas. The
  * default linear, clamp-to-edge sampling interpolates all three axes in
- * hardware. Unless the engine opts out with `doNotHandleContextLost`, the source
+ * hardware. Unless the engine is host-owned (`createHostOwnedGLEngine`), the source
  * is retained and must remain unchanged for context-restore replay;
  * release the texture with `disposeTexture3D` when done.
  *

@@ -23,7 +23,7 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect(missing, `scenes missing a maxRawKB ceiling in scene-config-webgl.json: ${missing.join(", ")}`).toEqual([]);
     });
 
-    it("keeps 3D bindings out of byte-budgeted 2D-only texture bundles", async () => {
+    it("keeps 3D bindings out of byte-stable 2D-only texture bundles", async () => {
         const bundle = async (name: string) =>
             (
                 await build({
@@ -40,10 +40,9 @@ describe("babylon-lite-gl bundle size ceilings", () => {
                 })
             ).outputFiles[0]!;
 
-        // Pre-3D budgets, with the approved 13-byte raw-texture allowance for
-        // host-owned recovery. Measured with this same esbuild configuration.
+        // Pre-3D budgets measured with this same esbuild configuration.
         for (const [name, maxBytes] of [
-            ["createRawTexture", 1768],
+            ["createRawTexture", 1755],
             ["bindTexture", 317],
             ["setEffectTexture", 419],
         ] as const) {
@@ -54,10 +53,9 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect((await bundle("createTexture3DFromPixels")).text).toContain("texImage3D");
     });
 
-    // Scene 3 includes the approved 43-byte host-owned recovery allowance.
     for (const [sceneId, baselineBytes] of [
         [1, 11801],
-        [3, 16875],
+        [3, 16832],
         [6, 14850],
     ] as const) {
         it(`keeps 2D-only scene${sceneId} within its byte budget`, async () => {

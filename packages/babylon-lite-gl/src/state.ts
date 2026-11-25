@@ -80,10 +80,10 @@ export interface GLState {
     currentProgram: WebGLProgram | null;
     /** Active texture unit, or -1 when unknown. */
     activeTextureUnit: number;
-    /** Default-VAO pointer tuples, allocated once by bindAttributes. Enabled
-     *  attributes validate these slots; disabling/resetting invalidates them.
-     *  @internal */
-    _attributePointers?: [(WebGLBuffer | null)[], Float64Array];
+    /** Default-VAO pointer format/stride/offset/divisor quadruples
+     *  (`MAX_VERTEX_ATTRIBS * 4`), allocated once on first bindAttributesCached.
+     *  Buffer identity and enable state live together in enabledAttribs. @internal */
+    _attributePointers?: Float64Array;
     /** Per-unit TEXTURE_2D binding; undefined = unknown, null = confirmed unbound.
      *  Length === caps.maxTextureUnits. */
     boundTextures: (WebGLTexture | null | undefined)[];
@@ -179,12 +179,13 @@ export interface GLState {
     /** Cached `gl.pixelStorei(UNPACK_PREMULTIPLY_ALPHA_WEBGL)`, or `-1` unset. */
     unpackPremultiplyAlpha: number;
     /**
-     * Per-location vertex-attribute enable flags for the DEFAULT (null) VAO —
+     * Per-location vertex-attribute bindings for the DEFAULT (null) VAO —
      * the mesh / instancing path (mirrors Babylon's `_vertexAttribArraysEnabled`).
-     * Index is the attribute location. lite-gl's quad / sprite paths use their
-     * own VAOs and do not touch this. Cleared on context-lost.
+     * A buffer handle means enabled with that pointer; true means enabled with
+     * an invalidated pointer; null/undefined means disabled. Index is the
+     * attribute location. Cleared on context loss or cache wipe.
      */
-    enabledAttribs: boolean[];
+    enabledAttribs: (WebGLBuffer | true | null)[];
     /**
      * Attribute locations currently configured with a non-default vertex divisor
      * (instanced attributes), mirroring Babylon's `_currentInstanceLocations`.

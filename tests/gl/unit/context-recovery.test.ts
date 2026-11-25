@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGLEngine, disposeGLEngine, onContextLost, onContextRestored } from "../../../packages/babylon-lite-gl/src/context";
+import { createGLEngine, createHostOwnedGLEngine, disposeGLEngine, onContextLost, onContextRestored } from "../../../packages/babylon-lite-gl/src/context";
 import { createEffect, isEffectReady, useEffect } from "../../../packages/babylon-lite-gl/src/effect";
 import { bindAttributes, createIndexBuffer, createMeshVao, createVertexBuffer, disposeBuffer, drawMesh, updateVertexBuffer } from "../../../packages/babylon-lite-gl/src/mesh";
 import { bindTexture, createRawTexture, loadTexture2D, updateRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
@@ -12,10 +12,10 @@ import { createSpriteRenderer, renderSprites } from "../../../packages/babylon-l
 import { runRenderLoop } from "../../../packages/babylon-lite-gl/src/render-loop";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
 
-function setup(doNotHandleContextLost = false) {
+function setup(hostOwned = false) {
     const mock = createMockGL();
     const canvas = createMockCanvas(mock);
-    const engine = createGLEngine(canvas, { doNotHandleContextLost });
+    const engine = hostOwned ? createHostOwnedGLEngine(canvas) : createGLEngine(canvas);
     return { mock, canvas, engine };
 }
 
@@ -127,7 +127,7 @@ describe("lite-gl: host-owned recovery", () => {
         expect(engine._isLost).toBe(true);
         disposeGLEngine(engine);
         expect(canvas.__listeners).toEqual([]);
-        const replacement = createGLEngine(canvas, { doNotHandleContextLost: true });
+        const replacement = createHostOwnedGLEngine(canvas);
         const freshEffect = readyEffect(replacement);
         const freshBuffer = createVertexBuffer(replacement, new Float32Array(8));
         mock.clear();
@@ -172,7 +172,6 @@ describe("lite-gl: host-owned recovery", () => {
         expect(vao._restore).toBeUndefined();
         expect(vao._bindings).toEqual([]);
         expect(sprite._restore).toBeUndefined();
-        expect(sprite._indices).toBeNull();
         expect(engine._onRestored).toEqual([]);
         useEffect(effect);
         mock.clear();

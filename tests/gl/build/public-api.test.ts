@@ -211,7 +211,12 @@ describe("babylon-lite-gl build output", () => {
         expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("setEffectFloatArray3(effect: GLEffect, name: string, array: Float32Array | number[]): void");
         expect(readFileSync(resolve(DIST, "mesh.d.ts"), "utf-8")).toContain("disableAttributeByIndex(engine: GLEngineContext, location: number): void");
         expect(readFileSync(resolve(DIST, "mesh.d.ts"), "utf-8")).toContain("unbindAllAttributes(engine: GLEngineContext): void");
-        expect(readFileSync(resolve(DIST, "context.d.ts"), "utf-8")).toContain("doNotHandleContextLost?: boolean");
+        expect(readFileSync(resolve(DIST, "context.d.ts"), "utf-8")).toContain(
+            "createHostOwnedGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext"
+        );
+        expect(readFileSync(resolve(DIST, "mesh.d.ts"), "utf-8")).toContain(
+            "bindAttributesCached(vb: GLVertexBuffer, descriptors: readonly GLAttributeDescriptor[], effect: GLEffect, computeStride?: boolean): void"
+        );
         expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain("waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>");
         expect(readFileSync(resolve(DIST, "framebuffer-validation.d.ts"), "utf-8")).toContain("setFramebufferValidation(engine: GLEngineContext, enabled: boolean): void");
 
@@ -220,6 +225,7 @@ describe("babylon-lite-gl build output", () => {
         for (const name of [
             // engine / context / loop
             "createGLEngine",
+            "createHostOwnedGLEngine",
             "disposeGLEngine",
             "resizeGLEngine",
             "setGLEngineSize",
@@ -285,6 +291,7 @@ describe("babylon-lite-gl build output", () => {
             "createIndexBuffer",
             "disposeBuffer",
             "bindAttributes",
+            "bindAttributesCached",
             "disableAttributeByIndex",
             "unbindAllAttributes",
             "drawIndexed",

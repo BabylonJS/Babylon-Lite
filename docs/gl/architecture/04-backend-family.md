@@ -229,8 +229,8 @@ The 137 members, grouped as in the web barrel:
   `bindRenderTarget`, `restoreDefaultFramebuffer`, `presentRenderTarget`,
   `generateRenderTargetMipMaps`, `resizeRenderTarget`,
   `readRenderTargetPixels`, `disposeRenderTarget`.
-- **Meshes (14)** — `createVertexBuffer`, `updateVertexBuffer`,
-  `createIndexBuffer`, `disposeBuffer`, `bindIndexBuffer`, `bindAttributes`,
+- **Meshes (15)** — `createVertexBuffer`, `updateVertexBuffer`,
+  `createIndexBuffer`, `disposeBuffer`, `bindIndexBuffer`, `bindAttributes`, `bindAttributesCached`,
   `disableAttributeByIndex`, `unbindAllAttributes`, `unbindInstanceAttributes`, `drawIndexed`, `createMeshVao`, `bindMeshVao`,
   `drawMesh`, `disposeMeshVao`.
 - **State (12)** — `setBlendMode`, `setBlendState`, `disableBlend`,
@@ -267,7 +267,7 @@ Each backend lists them in a host-ops interface whose members are the
 
 | Interface         | Members                                                                                                                                                                                                                                                        |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WebGLHostOps`    | `createGLEngine`, `disposeGLEngine`, `getRenderingCanvas`, `createTextureFromHandle`, `createTextureFromSource`, `updateDynamicTexture`, `clearDynamicTextureSource`, `createHtmlElementTexture`, `updateHtmlElementTexture`, `readRenderTargetPixelsToBuffer` |
+| `WebGLHostOps`    | `createGLEngine`, `createHostOwnedGLEngine`, `disposeGLEngine`, `getRenderingCanvas`, `createTextureFromHandle`, `createTextureFromSource`, `updateDynamicTexture`, `clearDynamicTextureSource`, `createHtmlElementTexture`, `updateHtmlElementTexture`, `readRenderTargetPixelsToBuffer` |
 | `NativeGLHostOps` | `createNativeEngine`, `disposeNativeEngine`, `wrapNativeTexture`, `updateWrappedNativeTexture`                                                                                                                                                                 |
 
 `clearDynamicTextureSource` and `updateHtmlElementTexture` take only a

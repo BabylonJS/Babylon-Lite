@@ -407,6 +407,7 @@ export interface GLOps<F extends GLFamily> {
     readonly disposeBuffer: (buffer: F["vertexBuffer"] | F["indexBuffer"]) => void;
     readonly bindIndexBuffer: (ib: F["indexBuffer"]) => void;
     readonly bindAttributes: (vb: F["vertexBuffer"], descriptors: readonly F["attributeDescriptor"][], effect: F["effect"], computeStride?: boolean) => void;
+    readonly bindAttributesCached: (vb: F["vertexBuffer"], descriptors: readonly F["attributeDescriptor"][], effect: F["effect"], computeStride?: boolean) => void;
     readonly disableAttributeByIndex: (engine: F["engine"], location: number) => void;
     readonly unbindAllAttributes: (engine: F["engine"]) => void;
     readonly unbindInstanceAttributes: (engine: F["engine"]) => void;

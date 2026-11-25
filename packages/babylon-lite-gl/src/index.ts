@@ -21,6 +21,7 @@ export type { WebGLFamily, WebGLHostOps } from "./web-family.js";
 // ─── Engine / context ────────────────────────────────────────────────
 export {
     createGLEngine,
+    createHostOwnedGLEngine,
     disposeGLEngine,
     resizeGLEngine,
     setGLEngineSize,
@@ -151,6 +152,7 @@ export {
     disposeBuffer,
     bindIndexBuffer,
     bindAttributes,
+    bindAttributesCached,
     disableAttributeByIndex,
     unbindAllAttributes,
     unbindInstanceAttributes,

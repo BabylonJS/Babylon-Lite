@@ -172,12 +172,12 @@ export interface GLTexture {
 export function setUnpackState(engine: GLEngineContext, flipY: boolean, premultiplyAlpha: boolean, alignment = 4): void {
     const gl = engine.gl;
     const s = engine._state;
-    const fy = flipY ? 1 : 0;
+    const fy = +flipY;
     if (s.unpackFlipY !== fy) {
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, fy);
         s.unpackFlipY = fy;
     }
-    const pm = premultiplyAlpha ? 1 : 0;
+    const pm = +premultiplyAlpha;
     if (s.unpackPremultiplyAlpha !== pm) {
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, pm);
         s.unpackPremultiplyAlpha = pm;
@@ -190,10 +190,11 @@ export function setUnpackState(engine: GLEngineContext, flipY: boolean, premulti
 
 /** Apply sampling and wrap state to the texture currently bound for upload. @internal */
 export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void {
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+    const target = gl.TEXTURE_2D;
+    gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, minFilter);
+    gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, magFilter);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_S, wrapS);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_T, wrapT);
 }
 
 /** GL min/mag filters resolved from a {@link GLSamplingMode} preset. Spread
@@ -278,7 +279,7 @@ export interface GLRawTextureOptions extends GLTextureOptions {
  * layouts. The pixel data can be replaced later via {@link updateRawTexture};
  * the sampling and wrap can be changed via {@link updateTextureSamplingMode} /
  * {@link updateTextureWrapMode}. Upload data is retained by reference for
- * automatic recovery unless the engine sets `doNotHandleContextLost`.
+ * automatic recovery unless the engine is host-owned (`createHostOwnedGLEngine`).
  *
  * @param engine - The engine.
  * @param data - Initial pixels matching `format` / `type`, or `null` for an
@@ -544,8 +545,7 @@ export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLen
 
 /**
  * Wrap an existing raw `WebGLTexture` (e.g. one created by a host renderer or a
- * previous engine) as a {@link GLTexture} — the lite-gl equivalent of
- * ShapeBuilder's `createTextureGraphicsResourceFromExternalWebGLTexture`.
+ * previous engine) as a {@link GLTexture}.
  *
  * The wrapper does NOT own the underlying handle's upload — it is NOT registered
  * for context-restore replay (the external owner is responsible for that) and is
@@ -592,8 +592,8 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
 /** Asynchronous image upload.The returned texture is immediately usable (1×1
  *  transparent placeholder); `isReady` flips true once the image has been
  *  decoded and uploaded. The decoded `ImageBitmap` is retained on the texture
- *  for offline-safe `webglcontextrestored` replay by default; with
- *  `doNotHandleContextLost`, it is closed/released after the upload (also when
+ *  for offline-safe `webglcontextrestored` replay by default; on a host-owned
+ *  engine (`createHostOwnedGLEngine`), it is closed/released after the upload (also when
  *  decoding finishes during loss). `invertY` and
  *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
  *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
@@ -627,7 +627,8 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
             tex.width = bitmap.width;
             tex.height = bitmap.height;
         } else {
-            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, new Uint8Array(4));
+            // null leaves WebGL2's zero-initialized texel: transparent black.
+            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, null);
         }
     };
 
@@ -814,7 +815,7 @@ export function resolveLdrInternalFormat(gl: WebGL2RenderingContext, format: GLe
 
 /** Internal — pick a sized internalFormat for `texImage2D`. WebGL2 prefers
  *  sized formats for non-color-renderable / non-readback paths; for the
- *  NeonBrush use cases (sample-only) the unsized format works too, but sized
+ *  sample-only use cases the unsized format works too, but sized
  *  is more portable. Shared with the render-target module.
  *  @internal */
 export function pickSizedInternalFormat(gl: WebGL2RenderingContext, format: GLenum, type: GLenum): GLenum {

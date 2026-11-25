@@ -9,6 +9,7 @@ import {
     disposeBuffer,
     bindIndexBuffer,
     bindAttributes,
+    bindAttributesCached,
     disableAttributeByIndex,
     unbindAllAttributes,
     unbindInstanceAttributes,
@@ -291,7 +292,8 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         bindAttributes(vb, layout, effect);
         endFrame(engine);
         // A fresh engine does not assume the default VAO is bound, so the first bind selects it.
-        expect(mock.log).toEqual([{ name: "bindVertexArray", args: [null] }, { name: "enableVertexAttribArray", args: [3] }, pointer, divisor, divisor]);
+        // The uncached binder re-issues the pointer every call; only the enable is elided.
+        expect(mock.log).toEqual([{ name: "bindVertexArray", args: [null] }, { name: "enableVertexAttribArray", args: [3] }, pointer, divisor, pointer, divisor]);
         mock.clear();
         disableAttributeByIndex(engine, 3);
         disableAttributeByIndex(engine, 3);
@@ -307,6 +309,49 @@ describe("lite-gl mesh: cached attribute disabling", () => {
     });
 
     describe("lite-gl mesh: default-VAO pointer tuple cache", () => {
+        it("bindAttributes stays uncached: it never allocates the tuple cache and always re-issues pointers", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributes(vb, layout, effect);
+            mock.clear();
+            bindAttributes(vb, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+            expect(engine._state._attributePointers).toBeUndefined();
+        });
+
+        it("allocates one MAX_VERTEX_ATTRIBS-sized cache on the first effective cached bind", () => {
+            const { engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            bindAttributesCached(vb, [{ index: 0, size: 2 }], effect);
+            const cache = engine._state._attributePointers!;
+            expect(cache).toBeInstanceOf(Float64Array);
+            expect(cache.length).toBe((engine.gl.getParameter(engine.gl.MAX_VERTEX_ATTRIBS) as number) * 4);
+            bindAttributesCached(vb, [{ index: 7, size: 4, offset: 8 }], effect);
+            expect(engine._state._attributePointers).toBe(cache);
+        });
+
+        it("an intervening uncached bind invalidates the cached tuple for mixed callers", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const cached: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            bindAttributesCached(vb, cached, effect);
+            bindAttributes(vb, [{ index: 0, size: 3, offset: 4, divisor: 0 }], effect);
+            mock.clear();
+            bindAttributesCached(vb, cached, effect);
+            bindAttributesCached(vb, cached, effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+        });
+
         it.each(["lost", "disposed-engine", "disposed-buffer", "unready-effect"] as const)("%s skips calls and pointer-cache setup", (mode) => {
             const { mock, canvas, engine } = makeEngine();
             const effect = makeReadyEffect(engine);
@@ -321,12 +366,12 @@ describe("lite-gl mesh: cached attribute disabling", () => {
                 effect.isReady = false;
             }
             mock.clear();
-            bindAttributes(vb, [{ index: 0, size: 2 }], effect);
+            bindAttributesCached(vb, [{ index: 0, size: 2 }], effect);
             expect(mock.log).toEqual([]);
             expect(engine._state._attributePointers).toBeUndefined();
         });
 
-        it("elides identical pointers independently per location across frames but never elides divisors", () => {
+        it("elides identical pointers and divisors independently per location across frames", () => {
             const { mock, engine } = makeEngine();
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
@@ -334,20 +379,15 @@ describe("lite-gl mesh: cached attribute disabling", () => {
                 { index: 1, size: 2, divisor: 0 },
                 { index: 3, size: 2, offset: 8 },
             ];
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             const cache = engine._state._attributePointers;
             mock.clear();
             for (let frame = 0; frame < 2; frame++) {
                 beginFrame(engine);
-                bindAttributes(vb, layout, effect);
+                bindAttributesCached(vb, layout, effect);
                 endFrame(engine);
             }
-            expect(mock.log).toEqual([
-                { name: "vertexAttribDivisor", args: [1, 0] },
-                { name: "vertexAttribDivisor", args: [3, 1] },
-                { name: "vertexAttribDivisor", args: [1, 0] },
-                { name: "vertexAttribDivisor", args: [3, 1] },
-            ]);
+            expect(mock.log).toEqual([]);
             expect(engine._state._attributePointers).toBe(cache);
         });
 
@@ -356,33 +396,48 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
             const original: GLAttributeDescriptor = { index: 1, size: 2, divisor: 0 };
-            bindAttributes(vb, [original, { index: 2, size: 2 }], effect);
+            bindAttributesCached(vb, [original, { index: 2, size: 2 }], effect);
             mock.clear();
             const next = { ...original, ...change };
-            bindAttributes(vb, [next, { index: 2, size: 2 }], effect);
-            bindAttributes(vb, [next], effect);
-            expect(mock.log).toEqual([
-                { name: "vertexAttribPointer", args: [1, next.size, next.type ?? engine.gl.FLOAT, next.normalized ?? false, 0, next.offset ?? 0] },
-                { name: "vertexAttribDivisor", args: [1, 0] },
-                { name: "vertexAttribDivisor", args: [2, 1] },
-                { name: "vertexAttribDivisor", args: [1, 0] },
-            ]);
+            bindAttributesCached(vb, [next, { index: 2, size: 2 }], effect);
+            bindAttributesCached(vb, [next], effect);
+            expect(mock.log).toEqual([{ name: "vertexAttribPointer", args: [1, next.size, next.type ?? engine.gl.FLOAT, next.normalized ?? false, 0, next.offset ?? 0] }]);
         });
 
         it("replays stride changes while equivalent explicit/default tuple values are cache hits", () => {
             const { mock, engine } = makeEngine();
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
-            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0 }], effect);
+            bindAttributesCached(vb, [{ index: 0, size: 2, divisor: 0 }], effect);
             mock.clear();
-            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0, type: engine.gl.FLOAT, normalized: false, offset: 0 }], effect);
-            expect(mock.log).toEqual([{ name: "vertexAttribDivisor", args: [0, 0] }]);
+            bindAttributesCached(vb, [{ index: 0, size: 2, divisor: 0, type: engine.gl.FLOAT, normalized: false, offset: 0 }], effect);
+            expect(mock.log).toEqual([]);
             mock.clear();
-            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0 }], effect, true);
-            expect(mock.log).toEqual([
-                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 8, 0] },
-                { name: "vertexAttribDivisor", args: [0, 0] },
+            bindAttributesCached(vb, [{ index: 0, size: 2, divisor: 0 }], effect, true);
+            expect(mock.log).toEqual([{ name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 8, 0] }]);
+        });
+
+        it("replays alternating layouts and mutated descriptors without allocating another cache", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const descriptor: GLAttributeDescriptor = { index: 0, size: 2, divisor: 0 };
+            const layout = [descriptor];
+            bindAttributesCached(vb, layout, effect);
+            const cache = engine._state._attributePointers;
+            descriptor.size = 3;
+            descriptor.offset = 4;
+            mock.clear();
+            bindAttributesCached(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
+            descriptor.size = 2;
+            descriptor.offset = 0;
+            bindAttributesCached(vb, layout, effect);
+            expect(callsNamed(mock, "vertexAttribPointer").map((call) => call.args)).toEqual([
+                [0, 3, engine.gl.FLOAT, false, 0, 4],
+                [0, 2, engine.gl.FLOAT, false, 0, 0],
             ]);
+            expect(engine._state._attributePointers).toBe(cache);
         });
 
         it("tracks captured buffer identity, not ARRAY_BUFFER rebinds or same-handle uploads", () => {
@@ -390,25 +445,22 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const effect = makeReadyEffect(engine);
             const a = createVertexBuffer(engine, new Float32Array(16));
             const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
-            bindAttributes(a, layout, effect);
+            bindAttributesCached(a, layout, effect);
             const b = createVertexBuffer(engine, new Float32Array(16));
             updateVertexBuffer(a, new Float32Array(16));
             updateVertexBuffer(b, new Float32Array(16));
             mock.clear();
-            bindAttributes(a, layout, effect);
-            expect(mock.log).toEqual([
-                { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, a.handle] },
-                { name: "vertexAttribDivisor", args: [0, 0] },
-            ]);
+            bindAttributesCached(a, layout, effect);
+            expect(mock.log).toEqual([{ name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, a.handle] }]);
             mock.clear();
-            bindAttributes(b, layout, effect);
-            bindAttributes(a, layout, effect);
+            bindAttributesCached(b, layout, effect);
+            bindAttributesCached(a, layout, effect);
             expect(callsNamed(mock, "vertexAttribPointer")).toHaveLength(2);
             disposeBuffer(a);
-            expect(engine._state._attributePointers?.[0][0]).toBeNull();
+            expect(engine._state.enabledAttribs[0]).toBe(true);
             const replacement = createVertexBuffer(engine, new Float32Array(16));
             mock.clear();
-            bindAttributes(replacement, layout, effect);
+            bindAttributesCached(replacement, layout, effect);
             expect(callsNamed(mock, "vertexAttribPointer").map((call) => call.args)).toEqual([[0, 2, engine.gl.FLOAT, false, 0, 0]]);
         });
 
@@ -417,16 +469,14 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
             const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             const oldHandle = vb.handle;
             vb._restore!(engine);
             expect(vb.handle).not.toBe(oldHandle);
             mock.clear();
-            bindAttributes(vb, layout, effect);
-            expect(mock.log).toEqual([
-                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
-                { name: "vertexAttribDivisor", args: [0, 0] },
-            ]);
+            bindAttributesCached(vb, layout, effect);
+            // The divisor is per-location state, independent of the buffer handle.
+            expect(mock.log).toEqual([{ name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] }]);
         });
 
         it.each(["wipe", "reset", "single-disable", "all-disable"] as const)("%s invalidates an otherwise identical tuple", (mode) => {
@@ -434,7 +484,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
             const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             if (mode === "wipe") {
                 engine.gl.bindBuffer(engine.gl.ARRAY_BUFFER, engine.gl.createBuffer());
                 engine.gl.vertexAttribPointer(0, 3, engine.gl.FLOAT, false, 12, 0);
@@ -447,7 +497,7 @@ describe("lite-gl mesh: cached attribute disabling", () => {
                 unbindAllAttributes(engine);
             }
             mock.clear();
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             expect(mock.log).toEqual([
                 ...(["wipe", "reset"].includes(mode) ? [{ name: "bindVertexArray", args: [null] }] : []),
                 ...(["wipe", "reset"].includes(mode) ? [{ name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, vb.handle] }] : []),
@@ -464,20 +514,19 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const b = createVertexBuffer(engine, new Float32Array(16));
             const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
             const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
-            bindAttributes(a, layout, effect);
+            bindAttributesCached(a, layout, effect);
             const cache = engine._state._attributePointers;
             const vao = createMeshVao(engine, [{ buffer: b, attributes: [{ index: 0, size: 3 }] }], ib, effect);
             drawMesh(vao);
             drawEffect(engine);
             mock.clear();
-            bindAttributes(a, layout, effect);
+            bindAttributesCached(a, layout, effect);
             expect(mock.log).toEqual([
                 { name: "bindVertexArray", args: [null] },
                 { name: "bindBuffer", args: [engine.gl.ARRAY_BUFFER, a.handle] },
-                { name: "vertexAttribDivisor", args: [0, 0] },
             ]);
             expect(engine._state._attributePointers).toBe(cache);
-            expect(cache?.[0][0]).toBe(a.handle);
+            expect(engine._state.enabledAttribs[0]).toBe(a.handle);
             mock.clear();
             drawMesh(vao);
             expect(mock.count("vertexAttribPointer")).toBe(0);
@@ -488,22 +537,66 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             const effect = makeReadyEffect(engine);
             const vb = createVertexBuffer(engine, new Float32Array(16));
             const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2 }];
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             fireLost(canvas);
             mock.clear();
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             expect(mock.log).toEqual([]);
             fireRestored(canvas);
             isEffectReady(effect);
             mock.clear();
-            bindAttributes(vb, layout, effect);
-            bindAttributes(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
+            bindAttributesCached(vb, layout, effect);
             expect(mock.log).toEqual([
                 { name: "bindVertexArray", args: [null] },
                 { name: "enableVertexAttribArray", args: [0] },
                 { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
                 { name: "vertexAttribDivisor", args: [0, 1] },
-                { name: "vertexAttribDivisor", args: [0, 1] },
+            ]);
+            expect(engine._state.instanceLocations).toEqual([0]);
+        });
+
+        it("elides unchanged divisors, replays changed ones and stays in sync with unbindInstanceAttributes", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const perVertex: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 0 }];
+            const instanced: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 2 }];
+            bindAttributesCached(vb, perVertex, effect);
+            mock.clear();
+            bindAttributesCached(vb, instanced, effect);
+            bindAttributesCached(vb, instanced, effect);
+            expect(mock.log).toEqual([{ name: "vertexAttribDivisor", args: [0, 2] }]);
+            expect(engine._state.instanceLocations).toEqual([0]);
+            mock.clear();
+            unbindInstanceAttributes(engine);
+            bindAttributesCached(vb, perVertex, effect);
+            expect(mock.log).toEqual([{ name: "vertexAttribDivisor", args: [0, 0] }]);
+            expect(engine._state.instanceLocations).toEqual([]);
+            mock.clear();
+            bindAttributesCached(vb, instanced, effect);
+            unbindInstanceAttributes(engine);
+            bindAttributesCached(vb, instanced, effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribDivisor", args: [0, 2] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 2] },
+            ]);
+            expect(engine._state.instanceLocations).toEqual([0]);
+        });
+
+        it("re-issues the divisor after an uncached bind owned the location, even when values match", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const layout: GLAttributeDescriptor[] = [{ index: 0, size: 2, divisor: 3 }];
+            bindAttributesCached(vb, layout, effect);
+            bindAttributes(vb, [{ index: 0, size: 2, divisor: 0 }], effect);
+            mock.clear();
+            bindAttributesCached(vb, layout, effect);
+            expect(mock.log).toEqual([
+                { name: "vertexAttribPointer", args: [0, 2, engine.gl.FLOAT, false, 0, 0] },
+                { name: "vertexAttribDivisor", args: [0, 3] },
             ]);
         });
     });

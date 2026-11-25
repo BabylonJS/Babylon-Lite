@@ -131,7 +131,7 @@ export function setBlendMode(engine: GLEngineContext, mode: GLBlendMode): void {
  * `setAlphaBlendFunctionParameters` + `setAlphaEquationParameters`.
  *
  * Supports every WebGL2 blend equation, including `MIN`, `MAX`,
- * `FUNC_SUBTRACT` and `FUNC_REVERSE_SUBTRACT` (used by ShapeBuilder's darken /
+ * `FUNC_SUBTRACT` and `FUNC_REVERSE_SUBTRACT` (e.g. for darken /
  * cutout blend modes). Records the desired config (flushed by `applyGLStates`
  * before the next draw); at flush time the enable flag, the equation and the func
  * are each cached independently, so a redundant state is fully elided and only

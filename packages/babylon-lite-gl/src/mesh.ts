@@ -9,13 +9,13 @@
  * `createIndexBuffer` / `_releaseBuffer` / `bindIndexBuffer` /
  * `bindInstancesBuffer` / `unbindInstanceAttributes` / `drawElementsType`. The
  * attribute binder reproduces Babylon's instancing semantics EXACTLY, including
- * the `computeStride = false → stride 0` "sliding window" used by ShapeBuilder's
+ * the `computeStride = false → stride 0` "sliding window" used by distance-field
  * tape buffers (consecutive instances read overlapping vec4 windows) and the
  * `divisor === undefined → 1` default.
  *
  * The mesh path runs on the DEFAULT (null) VAO — every buffer/attribute op binds
  * `gl.bindVertexArray(null)` first, so it never corrupts the quad / sprite VAOs.
- * Unless `doNotHandleContextLost` is set, vertex/index buffers retain their CPU
+ * Unless the engine is host-owned (`createHostOwnedGLEngine`), vertex/index buffers retain their CPU
  * data and re-upload automatically on `webglcontextrestored`.
  */
 import type { GLEngineContext } from "./context.js";
@@ -256,12 +256,9 @@ export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
     if (s.boundElementBuffer === buffer.handle) {
         s.boundElementBuffer = null;
     }
-    const pointers = s._attributePointers?.[0];
-    if (pointers) {
-        for (let location = 0; location < pointers.length; location++) {
-            if (pointers[location] === buffer.handle) {
-                pointers[location] = null;
-            }
+    for (let location = 0; location < s.enabledAttribs.length; location++) {
+        if (s.enabledAttribs[location] === buffer.handle) {
+            s.enabledAttribs[location] = true;
         }
     }
 }
@@ -291,24 +288,24 @@ export function bindIndexBuffer(ib: GLIndexBuffer): void {
 /**
  * Configure vertex attributes from `vb`, reproducing Babylon's
  * `bindInstancesBuffer` exactly. For each descriptor: resolves the location
- * (explicit `index` or via the effect), enables the attribute array, issues
- * `vertexAttribPointer` only when its buffer/layout tuple changes, and sets
- * the vertex divisor (`undefined → 1`, not cached, matching ThinEngine). Each
- * instanced location (divisor ≠ 0) is tracked once so {@link unbindInstanceAttributes}
+ * (explicit `index` or via the effect), enables the attribute array (cached),
+ * issues `vertexAttribPointer`, and sets the vertex divisor (`undefined → 1`).
+ * Each instanced location (divisor ≠ 0) is tracked once so {@link unbindInstanceAttributes}
  * can reset its divisor afterwards; per-vertex locations already have divisor 0 and are
  * not tracked, so callers that never instance can rebind every frame without growth.
  *
  * `computeStride` controls the GL stride passed to `vertexAttribPointer`:
  * - `false` (default) → stride `0`: each attribute is independently tightly
  *   packed. Combined with overlapping `offset`s this yields the "sliding window"
- *   ShapeBuilder uses for distance-field tape buffers.
+ *   used by distance-field tape buffers.
  * - `true` → stride = Σ(`size`·4 bytes): interleaved per-vertex/per-instance.
  *
+ * Every call re-issues `vertexAttribPointer`. Callers that rebind an equivalent
+ * layout every draw (e.g. a 2D shape renderer) should use {@link bindAttributesCached},
+ * which elides unchanged pointers; the two can be mixed freely.
+ *
  * Runs on the default (null) VAO — never corrupts the quad / sprite VAOs.
- * The fixed-size pointer cache is allocated once on first use; subsequent binds
- * allocate nothing. Disable/reset invalidates tuples; fresh buffer handles replay
- * them. Named VAOs retain independent state. No-op on a lost/disposed context or
- * before the effect is ready.
+ * No-op on a lost/disposed context or before the effect is ready.
  *
  * @param vb - The buffer supplying the attribute data.
  * @param descriptors - The attribute layout.
@@ -324,12 +321,65 @@ export function bindAttributes(vb: GLVertexBuffer, descriptors: readonly GLAttri
     const s = engine._state;
     bindDefaultVao(engine);
     bindArrayBufferRaw(engine, vb.handle);
-    let pointers = s._attributePointers;
-    if (!pointers) {
-        const count = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
-        pointers = s._attributePointers = [new Array<WebGLBuffer | null>(count), new Float64Array(count * 5)];
+
+    let stride = 0;
+    if (computeStride) {
+        for (let i = 0; i < descriptors.length; i++) {
+            stride += (descriptors[i] as GLAttributeDescriptor).size * 4;
+        }
     }
-    const values = pointers[1];
+
+    for (let i = 0; i < descriptors.length; i++) {
+        const d = descriptors[i] as GLAttributeDescriptor;
+        const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(effect, d.name) : -1;
+        if (loc < 0) {
+            continue;
+        }
+        if (!s.enabledAttribs[loc]) {
+            gl.enableVertexAttribArray(loc);
+        }
+        // Enabled, but with a pointer bindAttributesCached must not trust.
+        s.enabledAttribs[loc] = true;
+        gl.vertexAttribPointer(loc, d.size, d.type ?? FLOAT, d.normalized ?? false, stride, d.offset ?? 0);
+        const divisor = d.divisor ?? 1;
+        gl.vertexAttribDivisor(loc, divisor);
+        if (divisor !== 0 && !s.instanceLocations.includes(loc)) {
+            s.instanceLocations.push(loc);
+        }
+    }
+}
+
+/**
+ * {@link bindAttributes} with a default-VAO attribute cache: `vertexAttribPointer`
+ * is issued only when a location's (buffer handle, size, type, normalized,
+ * stride, offset) tuple changes, and `vertexAttribDivisor` only when its divisor
+ * changes, so rebinding an equivalent layout every draw (e.g. per-shape binds in a
+ * 2D shape renderer) issues no attribute calls. Divisors are tracked through
+ * `instanceLocations`, so {@link unbindInstanceAttributes} needs no cache code.
+ * Semantics, parameters and no-op conditions are
+ * otherwise identical to {@link bindAttributes}.
+ *
+ * The cache (4 numbers per `MAX_VERTEX_ATTRIBS` location) is allocated once on
+ * the first effective call; later binds allocate nothing. Disabling an
+ * attribute, {@link bindAttributes}, cache wipes/resets and context loss
+ * invalidate the affected tuples, and a recreated buffer handle never matches
+ * a stale one. Named VAOs keep independent state.
+ *
+ * @param vb - The buffer supplying the attribute data.
+ * @param descriptors - The attribute layout.
+ * @param effect - The effect whose attribute locations resolve unnamed indices.
+ * @param computeStride - See {@link bindAttributes}. Default `false`.
+ */
+export function bindAttributesCached(vb: GLVertexBuffer, descriptors: readonly GLAttributeDescriptor[], effect: GLEffect, computeStride = false): void {
+    const engine = vb._engine;
+    if (engine._isLost || engine._disposed || vb._disposed || !effect.isReady) {
+        return;
+    }
+    const gl = engine.gl;
+    const s = engine._state;
+    bindDefaultVao(engine);
+    bindArrayBufferRaw(engine, vb.handle);
+    const values = (s._attributePointers ??= new Float64Array((gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number) * 4));
 
     let stride = 0;
     if (computeStride) {
@@ -347,34 +397,35 @@ export function bindAttributes(vb: GLVertexBuffer, descriptors: readonly GLAttri
         const enabled = s.enabledAttribs[loc];
         if (!enabled) {
             gl.enableVertexAttribArray(loc);
-            s.enabledAttribs[loc] = true;
         }
         const type = d.type ?? FLOAT;
         const normalized = d.normalized ?? false;
         const offset = d.offset ?? 0;
-        const slot = loc * 5;
-        if (
-            !enabled ||
-            pointers[0][loc] !== vb.handle ||
-            values[slot] !== d.size ||
-            values[slot + 1] !== type ||
-            values[slot + 2] !== +normalized ||
-            values[slot + 3] !== stride ||
-            values[slot + 4] !== offset
-        ) {
+        // A GLenum fits in 32 bits; packing the valid 1..4 size and normalize
+        // flag leaves one exact (53-bit) number instead of three cache slots.
+        const format = type * 16 + d.size * 2 + +normalized;
+        const slot = loc * 4;
+        if (enabled !== vb.handle || values[slot] !== format || values[slot + 1] !== stride || values[slot + 2] !== offset) {
             gl.vertexAttribPointer(loc, d.size, type, normalized, stride, offset);
-            pointers[0][loc] = vb.handle;
-            values[slot] = d.size;
-            values[slot + 1] = type;
-            values[slot + 2] = +normalized;
-            values[slot + 3] = stride;
-            values[slot + 4] = offset;
+            values[slot] = format;
+            values[slot + 1] = stride;
+            values[slot + 2] = offset;
         }
         const divisor = d.divisor ?? 1;
-        gl.vertexAttribDivisor(loc, divisor);
-        if (divisor !== 0 && !s.instanceLocations.includes(loc)) {
-            s.instanceLocations.push(loc);
+        // While this binder owns the location (a buffer handle, not `true`/null),
+        // every non-zero divisor it sets is listed in instanceLocations, and only
+        // unbindInstanceAttributes (which resets listed divisors to 0) or a cache
+        // reset (which also drops ownership) clears that list. An owned, unlisted
+        // location therefore has divisor 0; a listed one has the cached divisor.
+        const listed = s.instanceLocations.includes(loc);
+        if (!enabled || enabled === true || (listed ? values[slot + 3] : 0) !== divisor) {
+            gl.vertexAttribDivisor(loc, divisor);
+            values[slot + 3] = divisor;
+            if (divisor !== 0 && !listed) {
+                s.instanceLocations.push(loc);
+            }
         }
+        s.enabledAttribs[loc] = vb.handle;
     }
 }
 
@@ -394,7 +445,7 @@ export function disableAttributeByIndex(engine: GLEngineContext, location: numbe
     }
     bindDefaultVao(engine);
     engine.gl.disableVertexAttribArray(location);
-    engine._state.enabledAttribs[location] = false;
+    engine._state.enabledAttribs[location] = null;
 }
 
 /**
@@ -420,7 +471,7 @@ export function unbindAllAttributes(engine: GLEngineContext): void {
 
 /**
  * Reset the vertex divisor of every attribute touched by {@link bindAttributes}
- * back to 0 — the lite-gl equivalent of Babylon's `unbindInstanceAttributes`.
+ * or {@link bindAttributesCached} back to 0 — the lite-gl equivalent of Babylon's `unbindInstanceAttributes`.
  * Call after an instanced draw so a following non-instanced draw is not skewed.
  * No-op on a lost/disposed context.
  *
@@ -479,7 +530,7 @@ export function drawIndexed(ib: GLIndexBuffer, indexCount: number, indexStart = 
  * `drawElements[Instanced]` — zero per-draw `vertexAttribPointer`/`vertexAttribDivisor`,
  * and no `unbindInstanceAttributes` (the VAO isolates the divisors from the default
  * VAO). Use this for fixed-layout meshes; keep `bindAttributes` for dynamic layouts
- * (e.g. ShapeBuilder's per-draw sliding-window tape buffers). */
+ * (e.g. per-draw sliding-window tape buffers). */
 
 /** One vertex buffer + its attribute layout, for {@link createMeshVao}. */
 export interface GLMeshVertexBuffer {
@@ -495,8 +546,8 @@ export interface GLMeshVertexBuffer {
 /** A recorded Vertex Array Object capturing a static mesh's attribute layout +
  *  index binding. Bind + draw it with {@link drawMesh} each frame — the GPU
  *  replays the entire attribute setup from one `bindVertexArray`. Re-recorded
- *  automatically on `webglcontextrestored` unless the engine opts out with
- *  `doNotHandleContextLost`. */
+ *  automatically on `webglcontextrestored` unless the engine is host-owned
+ *  (`createHostOwnedGLEngine`). */
 export interface GLMeshVao {
     /** The live `WebGLVertexArrayObject`. Swapped on `webglcontextrestored`. */
     handle: WebGLVertexArrayObject;

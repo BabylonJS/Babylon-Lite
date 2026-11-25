@@ -1,9 +1,8 @@
 # Porting to `@babylonjs/lite-gl` — Guide & Rulebook
 
-How to port a `@babylonjs/core` consumer (the proven case is **NeonBrush**: 9
-effects, 148 parity cases) to the WebGL2 micro-engine `@babylonjs/lite-gl`, and
-the hard-won rules that make the port pixel-identical. The payoff is a
-**~10–16× smaller** per-page bundle (no `@babylonjs/core`).
+How to port a `@babylonjs/core` consumer to the WebGL2 micro-engine
+`@babylonjs/lite-gl`, and the hard-won rules that make the port pixel-identical.
+The payoff is a **~10–16× smaller** per-page bundle (no `@babylonjs/core`).
 
 This guide is the _practical companion_ to the canonical spec
 [`architecture/00-lite-gl.md`](./architecture/00-lite-gl.md) — it references that
@@ -25,13 +24,13 @@ lite-gl deliberately covers a narrow surface: **fullscreen post-process effects,
 
 **Port it now if** it only uses `ThinEngine` + `EffectRenderer`/`EffectWrapper`,
 `SpriteRenderer`, `RawTexture`/`HtmlElementTexture`, and `setAlphaMode` — that is
-the NeonBrush shape.
+the fullscreen-effect shape.
 
 **Not yet** if it needs render-to-texture / FBOs, float/half-float targets,
 synchronous readback, instancing, real meshes, stencil/depth state, MRT, or
-multi-equation blend. Those are the **ShapeBuilder** expansion (a much larger
-lite-gl build — parked; see the `sb-*` plan). Don't bolt them onto a NeonBrush-
-style port.
+multi-equation blend. Check §3 and §10 of the spec first: much of that surface
+has since shipped, but anything still missing belongs in lite-gl itself, not
+bolted onto a fullscreen-effect port.
 
 ---
 
@@ -57,16 +56,16 @@ bit us:
 - **No runtime preprocessing.** lite-gl injects the optional `defines` string
   verbatim once and does **no** `#include` resolution of its own — the GLSL
   compiler still runs its own preprocessor, so valid `#if` works. The real
-  pitfall is _presence-based_ defines: NeonBrush emits a value-less
-  `#define SOMEDEFINE` and tests it, so `#if SOMEDEFINE` sees an empty macro and
-  misbehaves — convert those to `#ifdef SOMEDEFINE`. _(Learned porting Magic.)_
+  pitfall is _presence-based_ defines: a consumer that emits a value-less
+  `#define SOMEDEFINE` and tests it with `#if SOMEDEFINE` sees an empty macro and
+  misbehaves — convert those to `#ifdef SOMEDEFINE`.
 - **One fragment output named `glFragColor`.** Every `gl_FragColor` → `glFragColor`
   with `out vec4 glFragColor;` injected after the precision lines. MRT
   (`gl_FragData[N]`) is unsupported.
 - **Preserve the `*EXT` function family in your minifier.** A GLSL minifier must
   not mangle `texture2DLodEXT` (and siblings) to a short identifier — they are
-  real built-ins, not user symbols. _(NeonBrush's `minify-glsl-smart.js` had to
-  be taught this; it was renaming `texture2DLodEXT` → `eb`.)_
+  real built-ins, not user symbols. _(A real-world minifier renamed
+  `texture2DLodEXT` → `eb` until it was taught this.)_
 - **`#version 300 es` MUST be line 1**, followed by `precision` declarations
   (add `precision highp int;` too, not just `float`).
 
@@ -95,7 +94,7 @@ bit us:
   `generateTextureMipMaps(tex)` once; the chain is then rebuilt after
   every later upload, including dynamic/HTML re-uploads and context restore.
   For a frequently re-uploaded HTML element prefer **BILINEAR** without mips
-  (no per-upload mip rebuild). _(Learned porting InputGlow.)_ For a fullscreen HTML-texture
+  (no per-upload mip rebuild). For a fullscreen HTML-texture
   sampled with the built-in quad, you may also need an **in-shader V-flip** of the
   UV to match Babylon's orientation.
 - **Uploads target the _active_ texture unit.** The bind cache elides re-binds for
@@ -121,27 +120,33 @@ bit us:
   the **Babylon parity reference** for a sprite scene, set
   **`disableDepthWrite = true`** on the Babylon `SpriteRenderer` so its depth
   pre-pass collapses to lite-gl's single draw — otherwise the two diverge.
-  _(Learned porting Magic's particles.)_
 - **Context loss/restore.** lite-gl replays its own resources on
   `webglcontextrestored`, but any GL object _you_ create outside the package must
   be rebuilt yourself: register `onContextRestored(engine, cb)` (and
   `onContextLost`) and rebuild there. Callbacks are deduped, fire in registration
-  order, and a throwing callback won't block the others.
+  order, and a throwing callback won't block the others. A host that already
+  rebuilds everything itself (ThinEngine `doNotHandleContextLost: true`) should
+  use `createHostOwnedGLEngine(canvas, opts)` instead: no replay sources are
+  retained, and after loss it must dispose and recreate the engine and resources.
+- **Per-draw attribute rebinds.** `bindAttributes` re-issues every
+  `vertexAttribPointer`, like a one-shot bind. Code that rebinds an equivalent
+  layout every draw should call `bindAttributesCached` (same signature) to elide
+  unchanged pointers, matching ThinEngine's `_vertexAttribPointer` cache, and
+  unchanged divisors.
 
 ---
 
 ## 5. Proving the port — parity validation (mandatory)
 
-A port isn't done until it's pixel-proven against Babylon. This is exactly how
-the NeonBrush migration validated all 148 cases.
+A port isn't done until it's pixel-proven against Babylon.
 
 1. **Render the same content twice** — once through your new lite-gl path, once
    through a stock Babylon `ThinEngine` + `EffectRenderer`/`SpriteRenderer`/
    `HtmlElementTexture` **reference** — then pixel-diff (`gl.readPixels` →
    `compareImages`). Gate on **MAD ≤ threshold** (soft `maxDiff ≤ 2` absorbs ANGLE
    ±1-LSB codegen noise).
-2. **Make it deterministic.** Freeze animation to one identical frame: NeonBrush
-   uses a **mock clock + seeded RNG**; the lite-gl lab uses the **`?seekTime=<sec>`**
+2. **Make it deterministic.** Freeze animation to one identical frame: use a
+   **mock clock + seeded RNG** in your own suite; the lite-gl lab uses the **`?seekTime=<sec>`**
    convention (render one frame at a fixed `uTime`, stamp
    `dataset.animationFrozen`, stop the loop). Both engines must capture the same
    frozen instant.

@@ -1,5 +1,5 @@
 import type { GLBlendMode, GLBlendState } from "./blend.js";
-import type { GLEngineContext, createGLEngine, disposeGLEngine, getRenderingCanvas } from "./context.js";
+import type { GLEngineContext, createGLEngine, createHostOwnedGLEngine, disposeGLEngine, getRenderingCanvas } from "./context.js";
 import type { GLDepthState, GLStencilOpState, GLStencilState } from "./depth-stencil.js";
 import type { clearDynamicTextureSource, updateDynamicTexture } from "./dynamic-texture.js";
 import type { GLEffect } from "./effect.js";
@@ -86,6 +86,7 @@ export interface WebGLFamily extends GLFamily {
 /** WebGL2 operations that create or destroy an engine or exchange data with browser or WebGL objects. */
 export interface WebGLHostOps {
     readonly createGLEngine: typeof createGLEngine;
+    readonly createHostOwnedGLEngine: typeof createHostOwnedGLEngine;
     readonly disposeGLEngine: typeof disposeGLEngine;
     readonly getRenderingCanvas: typeof getRenderingCanvas;
     readonly createTextureFromHandle: typeof createTextureFromHandle;

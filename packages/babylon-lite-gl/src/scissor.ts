@@ -4,7 +4,7 @@
  * issues for clip rects). Cached in `GLState`.
  *
  * Coordinates are raw WebGL (lower-left origin). A consumer using a top-left
- * coordinate convention (like ShapeBuilder) flips Y itself
+ * coordinate convention flips Y itself
  * (`viewportHeight - rect.bottom`) before calling, exactly as it did against
  * Babylon's `ThinEngine`.
  */

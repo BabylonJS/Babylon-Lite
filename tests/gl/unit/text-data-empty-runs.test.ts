@@ -4,7 +4,7 @@ import type { GLGlyphCurves } from "../../../packages/babylon-lite-gl/src/text/g
 import { createGlyphStorage } from "../../../packages/babylon-lite-gl/src/text/glyph-storage";
 import type { GLGlyphRun } from "../../../packages/babylon-lite-gl/src/text/text-data";
 import { createTextData, updateTextData } from "../../../packages/babylon-lite-gl/src/text/text-data";
-import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
+import { createGLEngine, createHostOwnedGLEngine } from "../../../packages/babylon-lite-gl/src/context";
 import { ensureTextDataGpu } from "../../../packages/babylon-lite-gl/src/text/_gpu/text-instances";
 import { createMockCanvas, createMockGL } from "./_lite-gl-mock";
 
@@ -33,9 +33,10 @@ function run(curveSet: string, glyphIds: number[]): GLGlyphRun {
 }
 
 describe("lite-gl text data: groups referenced by empty runs", () => {
-    it.each([false, true])("GPU capacity tracking does not depend on retained restoration data (opt-out=%s)", (doNotHandleContextLost) => {
+    it.each([false, true])("GPU capacity tracking does not depend on retained restoration data (host-owned=%s)", (hostOwned) => {
         const mock = createMockGL();
-        const engine = createGLEngine(createMockCanvas(mock), { doNotHandleContextLost });
+        const canvas = createMockCanvas(mock);
+        const engine = hostOwned ? createHostOwnedGLEngine(canvas) : createGLEngine(canvas);
         const data = createTextData(makeStorage(), [run("f", [1])]);
         const gpu = ensureTextDataGpu(engine, data);
         const buffer = gpu._instanceBuf;

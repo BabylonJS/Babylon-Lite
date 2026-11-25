@@ -40,7 +40,7 @@ export interface GLFrameHooks {
     _dispose: () => void;
 }
 
-/** WebGL2 context attributes and immutable resource-recovery policy. */
+/** Constructor options forwarded to `canvas.getContext('webgl2', …)`. */
 export interface GLEngineOptions {
     /** Default: true. */
     alpha?: boolean;
@@ -58,11 +58,6 @@ export interface GLEngineOptions {
     powerPreference?: WebGLPowerPreference;
     /** Default: false. */
     failIfMajorPerformanceCaveat?: boolean;
-    /** Disable automatic context restoration and replay-source retention.
-     * Default false. Loss still stops rendering and notifies onContextLost, but
-     * does not call preventDefault or install a restored listener (ThinEngine
-     * semantics). The host must dispose/recreate this engine and its resources. */
-    doNotHandleContextLost?: boolean;
 }
 
 /** Read-only WebGL2 capability limits, queried at creation and refreshed after
@@ -198,8 +193,9 @@ export interface GLEngineContext {
      * @internal
      */
     _isLost: boolean;
-    /** Immutable host-owned recovery policy; not cached GL state. @internal */
-    _noRestore: boolean;
+    /** Host-owned recovery policy, set only by `createHostOwnedGLEngine`;
+     *  not cached GL state. @internal */
+    _noRestore?: true;
     /**
      * True once the context has been disposed; subsequent calls become no-ops.
      * @internal
@@ -246,8 +242,8 @@ export interface GLEngineContext {
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
  *  Accepts an `HTMLCanvasElement` or an `OffscreenCanvas` (worker render paths —
  *  e.g. the Lottie player — which size the drawing buffer via `setGLEngineSize`).
- *  Throws if WebGL2 is unsupported. Automatic resource recovery is enabled unless
- *  `options.doNotHandleContextLost` is true; then the host recreates the engine. */
+ *  Throws if WebGL2 is unsupported. Resources recover automatically after
+ *  context loss; use `createHostOwnedGLEngine` when the host recreates instead. */
 export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext {
     const o = options ?? {};
     const attrs: WebGLContextAttributes = {
@@ -285,7 +281,6 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         _onLost: [],
         _onRestored: [],
         _isLost: false,
-        _noRestore: !!o.doNotHandleContextLost,
         _disposed: false,
         _lostHandler: (e: Event) => handleContextLost(engine, e),
         _restoredHandler: () => handleContextRestored(engine),
@@ -294,10 +289,35 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
     };
 
     canvas.addEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
-    if (!engine._noRestore) {
-        canvas.addEventListener("webglcontextrestored", engine._restoredHandler, false);
-    }
+    canvas.addEventListener("webglcontextrestored", engine._restoredHandler, false);
 
+    return engine;
+}
+
+/**
+ * Create an engine whose context-loss recovery is owned by the host, matching
+ * ThinEngine's `doNotHandleContextLost: true`. Same canvas/options contract as
+ * {@link createGLEngine}, except:
+ * - `webglcontextlost` still stops rendering, marks the engine lost and fires
+ *   `onContextLost` callbacks, but never calls `preventDefault()`, so the
+ *   browser does not restore the context; `onContextRestored` never fires;
+ * - resources created on this engine retain no CPU replay sources (buffer
+ *   data, texture pixels, shader sources, sprite indices), saving memory.
+ *
+ * After a loss the engine stays lost: dispose it and recreate the engine and
+ * every resource (on a fresh canvas or once the host has a new context).
+ *
+ * @param canvas - An `HTMLCanvasElement` or `OffscreenCanvas`.
+ * @param options - WebGL2 context attributes, as for {@link createGLEngine}.
+ * @returns The engine. Throws if WebGL2 is unsupported.
+ */
+export function createHostOwnedGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext {
+    const engine = createGLEngine(canvas, options);
+    engine._noRestore = true;
+    canvas.removeEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
+    canvas.removeEventListener("webglcontextrestored", engine._restoredHandler, false);
+    engine._lostHandler = () => handleContextLost(engine);
+    canvas.addEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
     return engine;
 }
 
@@ -561,8 +581,8 @@ export function offContextLost(engine: GLEngineContext, cb: () => void): void {
     }
 }
 
-/** Register an automatic `webglcontextrestored` callback. Never fires when
- *  `doNotHandleContextLost` is set. Duplicate registrations are ignored. */
+/** Register an automatic `webglcontextrestored` callback. Never fires on an
+ *  engine from `createHostOwnedGLEngine`. Duplicate registrations are ignored. */
 export function onContextRestored(engine: GLEngineContext, cb: () => void): void {
     if (engine._onRestored.indexOf(cb) === -1) {
         engine._onRestored.push(cb);
@@ -579,12 +599,10 @@ export function offContextRestored(engine: GLEngineContext, cb: () => void): voi
 
 /* ─────────────────────────  internal: loss / restore  ───────────────────── */
 
-function handleContextLost(engine: GLEngineContext, e: Event): void {
+function handleContextLost(engine: GLEngineContext, e?: Event): void {
     // Opt-in to restore. Without preventDefault() the browser will NOT fire
-    // webglcontextrestored later.
-    if (!engine._noRestore) {
-        e.preventDefault();
-    }
+    // webglcontextrestored later. Host-owned engines pass no event.
+    e?.preventDefault();
     if (engine._isLost || engine._disposed) {
         return;
     }

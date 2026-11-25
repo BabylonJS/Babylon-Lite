@@ -454,8 +454,8 @@ export function setEffectVector2(effect: GLEffect, name: string, v: { x: number;
 /** Cached `gl.uniform4f` from an r/g/b/a color WITHOUT premultiplication — the
  *  lite-gl equivalent of Babylon's `Effect.setDirectColor4`. Delegates to
  *  `setEffectFloat4` (lite-gl never premultiplies in the uniform setters, so
- *  this matches `setEffectColor4`; the distinct name eases the ShapeBuilder
- *  port). */
+ *  this matches `setEffectColor4`; the distinct name eases `ThinEngine`
+ *  ports). */
 export function setEffectDirectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void {
     setEffectFloat4(effect, name, c.r, c.g, c.b, c.a);
 }
@@ -482,7 +482,7 @@ export function setEffectInt(effect: GLEffect, name: string, x: number): void {
  *
  * Matrices and arrays usually change every frame; element-wise caching would
  * cost more than the upload it saves, so these always issue the GL call (the
- * location lookup + ready guards still apply). They cover the ShapeBuilder
+ * location lookup + ready guards still apply). They cover Babylon's `Effect`
  * surface (`setMatrix3x3`, `setFloatArray`, `setFloatArray4`) plus a general
  * 4×4 matrix setter for any future mesh consumer. */
 

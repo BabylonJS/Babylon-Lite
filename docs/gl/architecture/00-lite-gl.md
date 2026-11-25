@@ -27,7 +27,7 @@
 This package is an **explicit, scoped carve-out** of that pillar, justified by:
 
 1. It is a **separate package** (`packages/babylon-lite-gl/`). The `babylon-lite` package itself remains 100% WebGPU. The two packages never import each other.
-2. It exists for a **single external consumer** (Microsoft NeonBrush) which is locked to WebGL today and pulls ~120–150 KB of `@babylonjs/core` for a tiny surface. Replacing that with a ~10–12 KB function-only package is the same "slim, not dumb" reduction the Lite pillars exist to deliver — applied to a different backend.
+2. It exists for **WebGL-locked `ThinEngine` consumers**: applications that are locked to WebGL today and pull ~120–150 KB of `@babylonjs/core` for a tiny surface. Replacing that with a ~10–12 KB function-only package is the same "slim, not dumb" reduction the Lite pillars exist to deliver — applied to a different backend.
 3. Every other pillar still applies, verbatim: pure-state interfaces, free functions, tree-shakable, zero module-level side effects, no class hierarchies, no abstraction over WebGL1, branchless hot paths via cached state, lazy-init caches owned by the context.
 
 If the rule "no WebGL ever" is preferred, do not merge this doc — the scope dies cleanly with zero impact on the WebGPU core.
@@ -36,14 +36,14 @@ If the rule "no WebGL ever" is preferred, do not merge this doc — the scope di
 
 ## 1. Purpose
 
-Provide a minimal, function-only, tree-shakable WebGL2 runtime that re-implements the subset of Babylon.js `ThinEngine` + `Effect` + `EffectWrapper` + `EffectRenderer` + `ThinTexture` actually used by the NeonBrush family of fullscreen-quad effects (Cloth, Orb, Scan, InputGlow, Progressive / RockSteady / Magic loading screens, except the magic-particles sprite path).
+Provide a minimal, function-only, tree-shakable WebGL2 runtime that re-implements the subset of Babylon.js `ThinEngine` + `Effect` + `EffectWrapper` + `EffectRenderer` + `ThinTexture` actually used by fullscreen-quad effect suites (procedural backgrounds, glow overlays, animated loading screens), plus the optional modules documented below.
 
 Non-goals:
 
 - No WebGL1 path.
 - No scene graph, no materials, no meshes, no skinning, no PBR.
 - Render-to-texture is available from the barrel (§3.8): RGBA8 (or a bring-your-own `colorTexture`, e.g. a float/half-float HDR target), optional core depth, opt-in stencil (`generateRenderTargetStencil`) and mipmap (`generateRenderTargetMipMaps`) helpers and `readPixels` readback. No MRT (multiple render targets). Core effects render to the canvas by default.
-- No `SpriteRenderer` / `ThinSprite` in v1 (deferred; the magic loading screen keeps stock Babylon until v2).
+- No `SpriteRenderer` / `ThinSprite` in v1 (deferred to v2).
 - No runtime shader preprocessor (`attribute`→`in` etc.). Consumers ship GLSL ES 3.00.
 - No shader-store, no `#include`, no observables, no engine-level customization extension points.
 - No GPU resource pool. The browser owns lifetimes; we own caches.
@@ -76,7 +76,7 @@ The sections below exhaustively describe the core surface. Optional, separately 
 
 These rules keep `@babylonjs/lite-gl` legible to anyone who knows
 `@babylonjs/lite` (the WebGPU core), while staying unambiguous when both
-packages are imported together (as NeonBrush does).
+packages are imported together.
 
 1. **`GL` type prefix (mandatory).** Every exported _type_ is prefixed `GL`:
    `GLEngineContext`, `GLEngineOptions`, `GLEngineCaps`, `GLEffect`,
@@ -193,8 +193,6 @@ export interface GLEngineOptions {
     powerPreference?: WebGLPowerPreference;
     /** Default: false. */
     failIfMajorPerformanceCaveat?: boolean;
-    /** Default false. Host owns resource rebuilding after loss; no replay sources retained. */
-    doNotHandleContextLost?: boolean;
 }
 
 export interface GLEngineCaps {
@@ -208,7 +206,7 @@ export interface GLEngineCaps {
  *
  *  INVARIANT: consumers MUST NOT mutate GL state directly through `engine.gl`.
  *  Doing so silently corrupts the cache in `_state`. The package owns every
- *  GL call. (`engine.gl` is exposed only so adjacent NeonBrush code that already
+ *  GL call. (`engine.gl` is exposed only so adjacent consumer code that already
  *  has the pattern of poking `engine._gl.getExtension(...)` can do that, but
  *  must NOT call `bindTexture`/`useProgram`/`bindBuffer`/`viewport`/etc.) */
 export interface GLEngineContext {
@@ -245,6 +243,8 @@ export interface GLEngineContext {
 }
 
 export function createGLEngine(canvas: HTMLCanvasElement, options?: GLEngineOptions): GLEngineContext;
+/** Same as createGLEngine, but the host owns rebuilding after loss (§3.3.3). */
+export function createHostOwnedGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext;
 export function disposeGLEngine(engine: GLEngineContext): void;
 
 export function resizeGLEngine(engine: GLEngineContext): void;
@@ -357,8 +357,7 @@ export interface GLEffectOptions {
      *  and the user shader body. Example: `"#define LANDSCAPE 1\n#define USE_RAMP 1\n"`.
      *  Each unique `defines` string must be paired with the same vertex/fragment
      *  source via a separate `createEffect` call — the package does NOT cache
-     *  compiled variants. Used by `orbEffect` (LANDSCAPE), `clothEffectVNext`,
-     *  and `progressiveLoadingScreen` (BACKGROUNDCOLORRAMP). */
+     *  compiled variants (e.g. a `LANDSCAPE` or `BACKGROUNDCOLORRAMP` variant). */
     defines?: string;
 }
 
@@ -451,11 +450,14 @@ export function unbindAllAttributes(engine: GLEngineContext): void;
 
 These mesh-module functions operate on the default (null) VAO, like
 `bindAttributes`; they never modify a quad, sprite, text or recorded mesh VAO.
-`enabledAttribs[location]` is the existing per-engine cache of default-VAO
-enables. `bindAttributes` enables only false/unset slots.
-`disableAttributeByIndex` skips false/unset slots; otherwise it binds the
+`enabledAttribs[location]` is the per-engine cache of default-VAO
+enables and pointer buffer identities. A buffer handle means enabled with
+that pointer; `true` means enabled with an invalidated pointer; null/unset
+means disabled. `bindAttributes` and `bindAttributesCached` enable only
+null/unset slots.
+`disableAttributeByIndex` skips null/unset slots; otherwise it binds the
 default VAO through the existing binding cache, disables the array and sets
-the slot false. `unbindAllAttributes` visits enabled locations in ascending
+the slot null. `unbindAllAttributes` visits enabled locations in ascending
 order and disables them through the same helper. Both skip all work on a
 lost/disposed engine, elide repeated disables across frames, and allocate
 nothing per call. No additional `rs` slot or named state field is needed.
@@ -472,22 +474,32 @@ sub-entries.
 
 ### 3.3.2 Default-VAO vertex pointer cache
 
-`bindAttributes` caches `(buffer handle, size, type, normalized, stride, offset)`
-per location, like ThinEngine's `_vertexAttribPointer`. Its first valid use
-allocates a fixed-size buffer-reference array and a `Float64Array` with five
-numeric slots per `MAX_VERTEX_ATTRIBS` location; subsequent binds allocate
-nothing. These two arrays share a tuple container (`_attributePointers[0]` for
-handles, `[1]` for numerics), avoiding named numeric state fields and property
-names for the sub-arrays. Direct numeric comparisons avoid temporary tuples.
-Numeric slots `location * 5 + [0..4]` contain size, type, normalization (`0`/`1`),
-stride and offset, respectively. This optional state is absent in consumers
-that only use named VAOs. Keeping pointer storage separate from `rs` avoids
-coupling its lifetime/capacity to lazy two-sided-stencil storage.
-The existing enable flag is also the tuple-validity flag: disabled/unset
-locations always replay their pointer. Therefore disable/bulk-disable,
+`bindAttributes` always issues `vertexAttribPointer` and marks the slot `true`
+(enabled, pointer untrusted), so one-shot binders (e.g. scene16) carry no cache
+code. The opt-in `bindAttributesCached` — same signature and no-op rules —
+caches `(buffer handle, size, type, normalized, stride, offset)` per location,
+like ThinEngine's `_vertexAttribPointer`, for callers that rebind an equivalent
+layout every draw (for example, per-shape binds in a 2D shape renderer). It also caches each location's divisor, so an
+unchanged rebind issues no attribute calls (ThinEngine re-issues instanced
+divisors). Its first valid use allocates one
+`MAX_VERTEX_ATTRIBS * 4` `Float64Array`; subsequent binds allocate nothing.
+The two binders mix freely: an uncached bind invalidates the slot's tuple.
+`enabledAttribs` holds the buffer identity as well as the enable state.
+`_attributePointers` stores four numeric slots per location: exact
+`type * 16 + size * 2 + normalized` (for valid 1–4 component formats),
+stride, offset and divisor. The divisor slot is trusted only while
+`enabledAttribs` holds a buffer handle (any other writer drops that ownership)
+and the location is listed in `instanceLocations`; an owned, unlisted location
+has divisor 0, because only `unbindInstanceAttributes` (which resets listed
+divisors to 0) or a cache reset clears that list.
+This optional state is absent in consumers that only use
+named VAOs. Keeping pointer storage separate from `rs` avoids coupling its
+lifetime/capacity to lazy two-sided-stencil storage.
+Disabled/unset locations always replay their pointer. Therefore disable/bulk-disable,
 `resetGLStateCache`, wipe and context loss invalidate pointers without adding
-invalidation work to non-mesh consumers. Buffer deletion clears matching
-references; a replacement/restored buffer handle fails identity comparison.
+invalidation work to non-mesh consumers. Buffer deletion replaces matching
+handles with `true` (enabled, pointer invalid); a replacement/restored buffer
+handle fails identity comparison.
 Updating storage under the same handle does not invalidate its captured layout.
 
 Pointer state belongs to the default VAO, not the global `ARRAY_BUFFER` binding:
@@ -506,9 +518,11 @@ ThinEngine's `bindInstancesBuffer`; `unbindInstanceAttributes` is unchanged.
 
 ### 3.3.3 Host-owned context recovery
 
-`createGLEngine(canvas, { doNotHandleContextLost: true })` disables automatic
-resource replay; the immutable internal `_noRestore` policy defaults to false.
-This lifecycle option adds no feature dependency. Like ThinEngine
+`createHostOwnedGLEngine(canvas, options?)` — lite-gl's equivalent of
+ThinEngine's `doNotHandleContextLost: true` — disables automatic resource
+replay by setting the immutable internal `_noRestore` policy (absent on
+`createGLEngine` engines). A separate factory keeps the policy code out of
+bundles that never opt out. Like ThinEngine
 (`thinEngine.pure.ts:336–360`), the opted-out engine still listens for loss but
 does not call `preventDefault` and does not install a restored listener.
 Unlike ThinEngine's minimal opted-out listener, lite-gl still marks the engine
@@ -855,7 +869,7 @@ tests cover upload calls, state caching, validation and restore replay.
 
 #### 3.4.2 HTML element textures
 
-Dynamic-importable so only InputGlow pulls it in:
+Dynamic-importable so only effects that sample HTML elements pull it in:
 
 ```ts
 /** Same `GLTextureOptions` as every other texture creator. */
@@ -925,7 +939,7 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  currently-bound program, and the setters intentionally do NOT call
  *  `useEffect` themselves (keeping the hot path a single equality check).
  *
- *  No depth/stencil state changes: NeonBrush effects never enable them, and
+ *  No depth/stencil state changes: fullscreen-quad effects never enable them, and
  *  `createGLEngine` requested `depth: false, stencil: false`. If a future
  *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
 export function applyEffectWrapper(wrapper: GLEffectWrapper): boolean;
@@ -942,7 +956,7 @@ export function drawEffect(engine: GLEngineContext): void;
 
 A single cached setter that mirrors Babylon's `ThinEngine.setAlphaMode`. The
 preset values are deliberately equal to Babylon's `Constants.ALPHA_*`, so a
-NeonBrush port can forward raw Babylon integers with no translation table.
+`ThinEngine` port can forward raw Babylon integers with no translation table.
 
 ```ts
 export const GLBlendMode = { DISABLE: 0, ADD: 1, ALPHA: 2, PREMULTIPLIED: 7 } as const;
@@ -973,7 +987,7 @@ disabled/unset → enabled transition (gated by the same dirty check as
 deterministic regardless of prior context state.
 
 **Default behaviour is unchanged.** `drawEffect` does not touch blend state, so
-code that never calls `setBlendMode` renders exactly as before (cloth/scan
+code that never calls `setBlendMode` renders exactly as before (opaque
 fullscreen parity is preserved). The first `setBlendMode` after creation /
 context-loss is never elided because the cache starts at the `-1` sentinel.
 
@@ -1380,7 +1394,7 @@ sentinels and populate only the units they actually touch.
 | `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                          | Value equal to last                                                           |
 | `gl.uniform3fv` (vec3 arrays)              | None                                           | Never value-cached; lifecycle/readiness/missing-location guards only           |
 | `gl.enableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`               | Location already enabled; named VAOs keep their own recorded state            |
-| `gl.vertexAttribPointer` (default VAO)     | Optional per-location handle + five numeric slots | Enabled location has the same buffer, size, type, normalization, stride and offset |
+| `gl.vertexAttribPointer` (default VAO)     | Enabled handle + three numeric slots            | Enabled location has the same buffer, size, type, normalization, stride and offset |
 | `gl.disableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`              | Location already disabled/unset; divisors are left unchanged                  |
 | `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
 | `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
@@ -1390,7 +1404,7 @@ sentinels and populate only the units they actually touch.
 | `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
 | blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 
-For the typical NeonBrush per-frame pattern (one effect, ~5 uniforms, 1–2 textures), after the first frame every steady-state frame issues exactly:
+For a typical fullscreen-effect per-frame pattern (one effect, ~5 uniforms, 1–2 textures), after the first frame every steady-state frame issues exactly:
 
 ```
 gl.uniform*  (only for uniforms whose values actually changed)
@@ -1694,9 +1708,9 @@ if (isEffectReady(effect)) { cb(effect); return; }
 effect._onCompiled.push(cb);
 ```
 
-(NeonBrush calls `isEffectReady` every frame via `if (!isReady()) return;` in
-the render loop. That same poll drives finalization — there is no separate
-"tick" the host must call.)
+(`ThinEngine` consumers typically call `isEffectReady` every frame via
+`if (!isReady()) return;` in the render loop. That same poll drives
+finalization — there is no separate "tick" the host must call.)
 
 `_onCompiled[]` is fired and cleared during finalization. Listeners added
 _after_ readiness fire synchronously from `executeWhenCompiled` itself.
@@ -1734,8 +1748,8 @@ both, without duplicate abort/loss checks.
 
 ### 4.7 Context lost / restored protocol
 
-By default the package owns this end-to-end because NeonBrush relies on
-Babylon's silent rebuild behaviour. `doNotHandleContextLost: true` opts out:
+By default the package owns this end-to-end because `ThinEngine` consumers rely on
+Babylon's silent rebuild behaviour. `createHostOwnedGLEngine` opts out:
 only the lost listener is installed, step 1 below is skipped, and the host must
 dispose/recreate the engine/resources. See §3.3.3 for retention exceptions.
 
@@ -1843,8 +1857,8 @@ Tree-shaking guarantees:
   helpers (cache update, ensureQuad, finalize, loss-restore protocol).
 - `setEffectColor4`, `setEffectInt`, `executeWhenCompiled`,
   `setHardwareScalingLevel`, etc. tree-shake out when unused.
-- `html-texture` re-exports from the barrel — consumers that don't use it (e.g.
-  everything except NeonBrush's InputGlow) tree-shake it out.
+- `html-texture` re-exports from the barrel — consumers that don't sample HTML
+  elements tree-shake it out.
 - `sprites` likewise re-exports from the barrel — it pulls in `blend.ts` +
   `effect.ts` but stays out of every bundle that doesn't render sprites.
 - No file in `src/` performs work at import time. Top-level constants are limited
@@ -1859,7 +1873,7 @@ Tree-shaking guarantees:
   push into them. This is unavoidable: it's the cost of context restore. Total
   fixed cost ≈ 1–2 KB.
 
-**Acceptance:** NeonBrush downstream measures its own bundle after migration
+**Acceptance:** a migrating consumer measures its own bundle after migration
 and confirms the per-page delta. The 10–12 KB min+gzip estimate in §0 is a
 hypothesis; a real measurement is required before declaring v1 success.
 
@@ -1893,10 +1907,10 @@ out vec4 glFragColor;
 // user body here; every former `gl_FragColor = …;` is now `glFragColor = …;`
 ```
 
-### 6.2 Build-time conversion rules (recommended for NeonBrush)
+### 6.2 Build-time conversion rules (recommended for consumers)
 
-NeonBrush's existing `tools/buildShaders.mjs` is extended with the following
-verbatim rewrites applied IN ORDER to each `*.glsl` source. Conditional
+A consumer's shader build step applies the following
+verbatim rewrites IN ORDER to each `*.glsl` source. Conditional
 preprocessor blocks (`#ifdef LANDSCAPE`, etc.) are preserved unchanged.
 
 | #   | Rule (regex)                                                                                      | Replacement                                                                                    |
@@ -1910,7 +1924,7 @@ preprocessor blocks (`#ifdef LANDSCAPE`, etc.) are preserved unchanged.
 | 7   | (fragment) every `\bgl_FragData\s*\[\s*N\s*\]`                                                    | UNSUPPORTED — converter throws. (MRT is explicitly out of scope.)                              |
 | 8   | (both) prepend `#version 300 es\n` + appropriate `precision` declarations if not already present. |                                                                                                |
 
-After conversion, NeonBrush's build emits `*.glsl.ts` modules whose default
+After conversion, the consumer's build emits `*.glsl.ts` modules whose default
 export is the converted source string. The runtime concatenates
 `source = converted.slice(0, defines_insertion_point) + (options.defines ?? "") + converted.slice(defines_insertion_point)`.
 For simplicity, the converter MAY emit a marker comment `// __DEFINES__` and
@@ -1918,7 +1932,7 @@ the runtime splits on that — keeps the runtime regex-free.
 
 ### 6.3 What we don't support
 
-- `#include` directives (NeonBrush doesn't use them).
+- `#include` directives.
 - MRT (`gl_FragData[N]`, multiple `out` colors).
 - WebGL1 conditional paths (`#ifdef WEBGL2` blocks).
 - Implicit precision for `int` / `bool` — converter inserts `precision highp int;`
@@ -1966,7 +1980,7 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 
 ## 8. Babylon.js equivalence map
 
-| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                              |
+| Babylon.js (`ThinEngine` surface)                                | lite-gl                                                                                              |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                       |
 | `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                            |
@@ -2005,7 +2019,7 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`                                         |
 | `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(rt, w, h)` / `disposeRenderTarget(rt)`                                           |
 
-Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
+Not implemented: shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
 ---
 
@@ -2013,7 +2027,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 
 - **External (npm):** none. The package depends only on the browser's WebGL2 + DOM types (`@types/web` via `lib: ["DOM", "ESNext"]`).
 - **Workspace:** none. The package does not import from `babylon-lite`.
-- **Peer (downstream):** `@babylonjs/lite-gl` becomes a dependency of NeonBrush. NeonBrush's `@babylonjs/core` peer can be dropped once the magic loading screen is also ported (v2).
+- **Peer (downstream):** migrating consumers add `@babylonjs/lite-gl` as a dependency and can drop their `@babylonjs/core` peer once every `ThinEngine` path is ported.
 
 ---
 
@@ -2051,7 +2065,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
    `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
    still does not touch blend, so fullscreen-effect parity is unchanged.
 8. No texture compression, no KTX, no DDS, no Basis.
-9. No anisotropic filtering knobs (NeonBrush doesn't use them).
+9. No anisotropic filtering knobs.
 10. No MRT — `gl_FragData[N]` is a converter error (§6.3).
 11. Matrix uniform setters ARE shipped: `setEffectMatrix(effect, name, m)`
     (4×4) and `setEffectMatrix3x3` for fullscreen effects, alongside the sprite
@@ -2059,9 +2073,9 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 
 ---
 
-## 11. NeonBrush migration guide (mechanical)
+## 11. `ThinEngine` effect migration guide (mechanical)
 
-### 11.1 `engine/thinEngineFactory.ts`
+### 11.1 Engine factory
 
 ```ts
 // Before
@@ -2072,12 +2086,12 @@ export function createThinEngine(canvas, antialias = false) {
 
 // After
 import { createGLEngine, type GLEngineContext } from "@babylonjs/lite-gl";
-export function createNeonContext(canvas: HTMLCanvasElement, antialias = false): GLEngineContext {
+export function createEffectContext(canvas: HTMLCanvasElement, antialias = false): GLEngineContext {
     return createGLEngine(canvas, { antialias, premultipliedAlpha: true, alpha: true, depth: false, stencil: false, preserveDrawingBuffer: false });
 }
 ```
 
-### 11.2 `engine/baseEffect.ts` — class → pure state + free functions
+### 11.2 Base effect class → pure state + free functions
 
 ```ts
 import { createGLEngine, disposeGLEngine, resizeGLEngine, runRenderLoop, stopRenderLoop, getRenderingCanvas, type GLEngineContext } from "@babylonjs/lite-gl";
@@ -2124,11 +2138,11 @@ export function disposeBaseEffect(state: BaseEffectState, onDispose: () => void)
 }
 ```
 
-### 11.3 Per-effect rewrite (`ScanEffect` shown; others identical)
+### 11.3 Per-effect rewrite (one fullscreen effect shown; others identical)
 
 ```ts
 // Before
-this._effectWrapper = new EffectWrapper({ engine: this.engine, useShaderStore: false, vertexShader: scanVertex, fragmentShader: scanFragment, samplerNames: [...], uniformNames: [...] });
+this._effectWrapper = new EffectWrapper({ engine: this.engine, useShaderStore: false, vertexShader: effectVertex, fragmentShader: effectFragment, samplerNames: [...], uniformNames: [...] });
 // inside render():
 effectRenderer.setViewport();
 effectRenderer.applyEffectWrapper(this._effectWrapper);
@@ -2139,10 +2153,10 @@ effectRenderer.draw();
 // After (state + free functions). NOTE THE ORDER: applyEffectWrapper FIRST,
 // then setters — uniforms target the currently-bound program (§4.3.1).
 this._wrapper = createEffectWrapper(engine, {
-    name: "scanEffect",
-    vertexSource: scanVertexGLSL3,         // pre-converted GLSL ES 3.00, see §6
-    fragmentSource: scanFragmentGLSL3,
-    uniformNames: ["u_Progress", "u_Resolution", "u_backgroundSet"],
+    name: "myEffect",
+    vertexSource: effectVertexGLSL3,       // pre-converted GLSL ES 3.00, see §6
+    fragmentSource: effectFragmentGLSL3,
+    uniformNames: ["u_Progress", "u_Resolution"],
     samplerNames: ["overlaySampler", "backgroundSampler"],   // unit 0 + unit 1
     // optional: defines: "#define USE_RAMP 1\n",
 });
@@ -2158,11 +2172,11 @@ setEffectTexture(this._effect, "backgroundSampler", this._backgroundTex);
 drawEffect(engine);                                       // ensureQuad + gl.drawElements
 ```
 
-All ten effect files migrate the same way. No GL behaviour changes; uniform-cache behaviour either matches Babylon (per-uniform last-value check) or improves on it (sampler-uniform set once, not every frame).
+Every effect file migrates the same way. No GL behaviour changes; uniform-cache behaviour either matches Babylon (per-uniform last-value check) or improves on it (sampler-uniform set once, not every frame).
 
 ### 11.4 Babylon → GL constants mapping (for `createRawTexture` migration)
 
-NeonBrush's current calls use Babylon `Constants.*` integer values. The new API
+`ThinEngine` calls use Babylon `Constants.*` integer values. The new API
 takes WebGL2 constants directly. The build step or a small inline adapter maps:
 
 | Babylon Constants                | Value | WebGL2 constant                    |
@@ -2212,8 +2226,8 @@ ship coverage in all the layers it touches before merge:
   function: classify it in `GLOps` or a host-ops interface and update both
   uber-kits (`04-backend-family.md` §4, `packages/babylon-lite-gl/AGENTS.md`);
 - a **parity** scene that renders the feature through BOTH lite-gl AND a Babylon
-  `ThinEngine` reference, then pixel-diffs them (the exact method proven by the
-  NeonBrush migration — ref page vs lite page → `gl.readPixels` → `compareImages`);
+  `ThinEngine` reference, then pixel-diffs them (ref page vs lite page →
+  `gl.readPixels` → `compareImages`);
 - a **perf** scene measuring its per-frame cost against the committed baseline.
 
 Concretely, a new `lab/gl/` scene flips `skipParity` / `skipPerf` to `false` in
@@ -2277,7 +2291,7 @@ absolute difference, `MAD ≤ maxMad`** (per scene in `scene-config-webgl.json`)
 This shows lite-gl is faithful to Babylon (within ANGLE / SwiftShader codegen
 noise) for every shipped feature, not just one fullscreen shader.
 
-The harness reuses the proven NeonBrush pattern — a `ref` page + a `lite` page
+The harness uses a `ref` page + a `lite` page
 per scene and a shared `compare-utils.ts` — with determinism from the
 `?seekTime=<sec>` freeze convention (both engines render one frame at a fixed
 `uTime`, stamp `dataset.animationFrozen`, then stop). Scenes opt in via
@@ -2294,17 +2308,17 @@ Each GL lab scene also has a perf spec measuring its per-frame cost
 the Babylon `ThinEngine` reference render** — there is no committed prior-bundle
 baseline yet (see §13.2). Scenes opt in via `skipPerf: false`.
 
-### 12.4 NeonBrush downstream tests
+### 12.4 Downstream consumer tests
 
-NeonBrush's existing Jest + Playwright suites are the ultimate validation: when NeonBrush flips its `engine/` adapter to lite-gl, all `test:unit` and `test:interaction` runs must stay green with no MAD regression on the existing interaction screenshots.
+A migrating consumer's existing unit and interaction suites are the ultimate validation: when it flips its engine adapter to lite-gl, they must stay green with no MAD regression on its existing screenshots.
 
 ### 12.5 Bundle-size acceptance
 
-NeonBrush measures its production webpack bundle before and after migration.
+A migrating consumer measures its production bundle before and after migration.
 Acceptance: the swap drops the per-page `@babylonjs/core` footprint by **at
-least 10×** for the smallest consumer (e.g. ScanEffect or a single loading
-screen). The 10–12 KB min+gzip estimate in §0 is a hypothesis; if the real
-number is materially worse, investigate before merging the NeonBrush PR.
+least 10×** for the smallest consumer (e.g. a single fullscreen effect). The
+10–12 KB min+gzip estimate in §0 is a hypothesis; if the real number is
+materially worse, investigate before merging the migration.
 
 ---
 
@@ -2455,32 +2469,9 @@ lab/public/gl/              bundle/manifest.json, perf-manifest.json, perf-regre
 docs/gl/architecture/00-lite-gl.md   (this file)
 ```
 
-NeonBrush side (downstream PR):
-
-```
-packages/NeonBrush/
-    package.json                                  add @babylonjs/lite-gl, drop @babylonjs/core (after v2)
-    src/engine/thinEngineFactory.ts               → createNeonContext
-    src/engine/baseEffect.ts                      → free functions
-    src/engine/baseInteractiveEffect.ts           → free functions
-    src/generativeEffects/scanEffect.ts           mechanical rewrite
-    src/embodiement/cloth/clothEffect.ts          mechanical rewrite
-    src/embodiement/clothVNext/clothEffectVNext.ts mechanical rewrite (uses defines)
-    src/embodiement/orb/orbEffect.ts              mechanical rewrite (LANDSCAPE define variant)
-    src/inputs/inputGlow.ts                       mechanical rewrite (uses html-element textures)
-    src/loadingScreen/progressive/…               mechanical rewrite (BACKGROUNDCOLORRAMP define)
-    src/loadingScreen/progressiveVNext/…          mechanical rewrite
-    src/loadingScreen/rocksteady/…                mechanical rewrite
-    src/loadingScreen/core/tiles.ts               mechanical rewrite
-    src/loadingScreen/magic/background.ts         mechanical rewrite
-    src/loadingScreen/magic/particles.ts          UNCHANGED (still uses stock SpriteRenderer)
-    src/loadingScreen/magic/magicLoadingScreen.ts UNCHANGED
-    tools/buildShaders.mjs                        extend with GLSL 1.00 → 3.00 pre-conversion (§6.2)
-```
-
 Estimated package source: **~1.15–1.45 K LOC** (incremented from the original
 estimate to account for the loss/restore protocol added in §4.7).
-Estimated bundle delta for NeonBrush (minified + gzipped, what the page actually
+Estimated bundle delta for a fullscreen-effect consumer (minified + gzipped, what the page actually
 downloads): **~120–150 KB → ~11–14 KB** (≈ 10× smaller — see §12.4 for the
 acceptance criterion).
 

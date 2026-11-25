@@ -19,7 +19,7 @@
  * carries the `RGBA16F` / `RGBA32F` table, so RGBA8 consumers tree-shake it
  * away).
  *
- * Unless `doNotHandleContextLost` is set, the full color/depth/stencil GPU set is rebuilt automatically on
+ * Unless the engine is host-owned (`createHostOwnedGLEngine`), the full color/depth/stencil GPU set is rebuilt automatically on
  * `webglcontextrestored` — the render target registers itself with the engine's
  * `_renderTargets` registry, and the context-restore protocol calls its
  * `_restore` closure AFTER the standalone texture replay. A caller-supplied

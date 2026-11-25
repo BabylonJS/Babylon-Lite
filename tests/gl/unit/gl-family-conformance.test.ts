@@ -46,6 +46,7 @@ type NativeCallable = CallableKeys<typeof Native>;
 const webUberKit: GLKit<Web.WebGLFamily, GLOpName> & Web.WebGLHostOps = {
     // Engine, render loop and frame timing
     createGLEngine: Web.createGLEngine,
+    createHostOwnedGLEngine: Web.createHostOwnedGLEngine,
     disposeGLEngine: Web.disposeGLEngine,
     resizeGLEngine: Web.resizeGLEngine,
     setGLEngineSize: Web.setGLEngineSize,
@@ -148,6 +149,7 @@ const webUberKit: GLKit<Web.WebGLFamily, GLOpName> & Web.WebGLHostOps = {
     disposeBuffer: Web.disposeBuffer,
     bindIndexBuffer: Web.bindIndexBuffer,
     bindAttributes: Web.bindAttributes,
+    bindAttributesCached: Web.bindAttributesCached,
     disableAttributeByIndex: Web.disableAttributeByIndex,
     unbindAllAttributes: Web.unbindAllAttributes,
     unbindInstanceAttributes: Web.unbindInstanceAttributes,
