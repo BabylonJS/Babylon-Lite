@@ -10,6 +10,8 @@ import ts from "typescript";
 interface ModuleImports {
     readonly staticImports: string[];
     readonly dynamicImports: string[];
+    /** Source text of `import()` calls whose target is not a string literal, so it cannot be checked. */
+    readonly uncheckedDynamicImports: string[];
 }
 
 /** Minimal shape of a Rollup/Rolldown output chunk needed for reachability. */
@@ -40,11 +42,13 @@ export function listJsFiles(root: string, skipDirs: readonly string[] = []): str
     return out;
 }
 
-/** Relative static (`import`/`export … from`) and literal dynamic (`import("…")`) edges of one file. */
+/** Relative static (`import`/`export … from`) and literal dynamic (`import("…")`) edges of one file,
+ *  plus any `import()` whose target is not a string literal. */
 function readImports(file: string): ModuleImports {
     const source = ts.createSourceFile(file, readFileSync(file, "utf-8"), ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
     const staticImports: string[] = [];
     const dynamicImports: string[] = [];
+    const uncheckedDynamicImports: string[] = [];
     const resolveRelative = (specifier: string): string | undefined => (specifier.startsWith(".") ? resolve(dirname(file), specifier) : undefined);
     const visit = (node: ts.Node): void => {
         if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -54,22 +58,28 @@ function readImports(file: string): ModuleImports {
             }
         } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
             const [arg] = node.arguments;
-            const target = arg && ts.isStringLiteralLike(arg) ? resolveRelative(arg.text) : undefined;
-            if (target) {
-                dynamicImports.push(target);
+            if (!arg || !ts.isStringLiteralLike(arg)) {
+                uncheckedDynamicImports.push(node.getText(source));
+            } else {
+                const target = resolveRelative(arg.text);
+                if (target) {
+                    dynamicImports.push(target);
+                }
             }
         }
         ts.forEachChild(node, visit);
     };
     visit(source);
-    return { staticImports, dynamicImports };
+    return { staticImports, dynamicImports, uncheckedDynamicImports };
 }
 
 function readGraph(files: readonly string[]): Map<string, ModuleImports> {
     return new Map(files.map((file) => [file, readImports(file)]));
 }
 
-/** Every `loader -import()-> lazy` edge whose target statically reaches back to its loader. */
+/** Every `loader -import()-> lazy` edge whose target statically reaches back to its loader. Only
+ *  string-literal targets can be followed, so any other `import()` form (e.g. a template such as
+ *  `` import(`./text/${kind}.js`) ``) is reported too, rather than silently passing the check. */
 export function findLazyImportCycles(files: readonly string[], root: string): string[] {
     const graph = readGraph(files);
     const closures = new Map<string, Set<string>>();
@@ -91,7 +101,10 @@ export function findLazyImportCycles(files: readonly string[], root: string): st
         return seen;
     };
     const cycles: string[] = [];
-    for (const [loader, { dynamicImports }] of graph) {
+    for (const [loader, { dynamicImports, uncheckedDynamicImports }] of graph) {
+        for (const call of uncheckedDynamicImports) {
+            cycles.push(`${relative(root, loader)} has an unchecked ${call} (use a string-literal target)`);
+        }
         for (const lazy of dynamicImports) {
             if (lazy === loader || staticClosure(lazy).has(loader)) {
                 cycles.push(`${relative(root, loader)} -import()-> ${relative(root, lazy)}`);

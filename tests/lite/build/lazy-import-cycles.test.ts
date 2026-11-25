@@ -29,7 +29,8 @@ describe("@babylonjs/lite lazy-import cycles", () => {
             cycles,
             "Each lazily imported module below statically imports (directly or transitively) the module that " +
                 "lazy-loads it. Rolldown/Vite 8 then emits these chunks for apps that never use them. Move what the " +
-                "lazy module needs into a leaf module that both can import.\n" +
+                "lazy module needs into a leaf module that both can import. An `import()` with a non-literal target " +
+                "cannot be checked; give it a string-literal target.\n" +
                 cycles.join("\n")
         ).toEqual([]);
     });

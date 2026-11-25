@@ -16,7 +16,7 @@
  * Fix a failure by moving the shared code into a leaf module that both sides import.
  */
 import { spawnSync } from "child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { build, type Rolldown } from "vite";
@@ -25,29 +25,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { findLazyImportCycles, findOrphanChunks, findStaticImportCycles, listJsFiles } from "../../shared/import-graph";
 
 const PACKAGE_DIR = resolve(__dirname, "../../../packages/babylon-lite-gl");
-const SRC = resolve(PACKAGE_DIR, "src");
 const DIST = resolve(PACKAGE_DIR, "dist");
 const WEB_ENTRY = resolve(DIST, "index.js");
 const NATIVE_ENTRY = resolve(DIST, "native/index.js");
 
 const tempDirs: string[] = [];
 
-function newestMtime(dir: string): number {
-    let newest = 0;
-    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-        if (entry.isFile()) {
-            newest = Math.max(newest, statSync(join(entry.parentPath, entry.name)).mtimeMs);
-        }
-    }
-    return newest;
-}
-
-/** Builds `dist/` only when it is missing or older than `src/`, so a sibling `gl-build` file that
- *  just rebuilt it is not clobbered (the project runs its files sequentially). */
-function ensureDistBuilt(): void {
-    if (existsSync(WEB_ENTRY) && statSync(WEB_ENTRY).mtimeMs >= newestMtime(SRC)) {
-        return;
-    }
+/** Always rebuilds `dist/` from scratch (`build.mjs` wipes it first). A freshness check could miss
+ *  deleted sources or build-config changes and leave stale modules for the scan to report. */
+function buildCleanDist(): void {
     const built = spawnSync(process.execPath, [resolve(PACKAGE_DIR, "build.mjs")], { cwd: PACKAGE_DIR, encoding: "utf-8" });
     if (built.status !== 0) {
         throw new Error(`babylon-lite-gl build failed:\n${built.stdout ?? ""}${built.stderr ?? ""}`);
@@ -75,7 +61,7 @@ async function viteOrphanChunks(source: string): Promise<{ orphans: string[]; ch
     return { orphans: findOrphanChunks(output), chunkCount: output.filter((o) => o.type === "chunk").length };
 }
 
-beforeAll(ensureDistBuilt);
+beforeAll(buildCleanDist);
 afterAll(() => {
     for (const dir of tempDirs.splice(0)) {
         rmSync(dir, { recursive: true, force: true });
@@ -89,7 +75,8 @@ describe("@babylonjs/lite-gl import cycles", () => {
             cycles,
             "Each lazily imported module below statically imports (directly or transitively) the module that " +
                 "lazy-loads it. Rolldown/Vite 8 then emits these chunks for apps that never use them. Move what the " +
-                "lazy module needs into a leaf module that both can import.\n" +
+                "lazy module needs into a leaf module that both can import. An `import()` with a non-literal target " +
+                "cannot be checked; give it a string-literal target.\n" +
                 cycles.join("\n")
         ).toEqual([]);
     });
@@ -113,7 +100,14 @@ describe("@babylonjs/lite-gl import cycles", () => {
                 `const engine = createGLEngine(document.querySelector("canvas"));\n` +
                 `runRenderLoop(engine, () => clearEngine(engine, { color: { r: 0, g: 0, b: 0 }, depth: true }));\n`,
         ],
-        ["the native entry", `import * as native from ${JSON.stringify(NATIVE_ENTRY)};\nconsole.log(Object.keys(native).length);\n`],
+        [
+            "a minimal native consumer",
+            `import { beginFrame, clearEngine, createNativeEngine, endFrame } from ${JSON.stringify(NATIVE_ENTRY)};\n` +
+                `const engine = createNativeEngine();\n` +
+                `beginFrame(engine);\n` +
+                `clearEngine(engine, { color: { r: 0, g: 0, b: 0 }, depth: true });\n` +
+                `endFrame(engine);\n`,
+        ],
     ] as const) {
         it(`a Vite 8 (Rolldown) build of ${name} emits only chunks reachable from the entry`, async () => {
             const { orphans, chunkCount } = await viteOrphanChunks(source);

@@ -2125,12 +2125,16 @@ exactly. The `gl-build` project enforces on the emitted `dist/**/*.js`:
 - **No lazy-import cycles.** An `import()` target must never statically reach
   the module that lazy-loads it; otherwise Rolldown (Vite 8) emits the lazy
   chunk and everything its loader lazy-loads for apps that never use them.
+  The scan follows only string-literal `import()` targets, so any other form
+  (e.g. ``import(`./text/${kind}.js`)``) fails the check instead of being
+  skipped.
 - **No runtime static cycles.** Value imports form a DAG, so initialisation
   order never depends on which module a consumer imports first. Type-only
   cycles are allowed because `import type` is erased by `tsc` and never reaches
   `dist/`.
-- **No orphan chunks.** Vite 8 builds of an empty web scene and of the
-  `./native` entry emit only chunks reachable from the entry.
+- **No orphan chunks.** Vite 8 builds of an empty web scene and of a minimal
+  `./native` consumer (named imports only) emit only chunks reachable from the
+  entry.
 
 Fix a violation by moving the shared code into a leaf module that both sides
 import, or by turning a types-only back-edge into `import type`.
