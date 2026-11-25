@@ -585,6 +585,31 @@ describe("lite-gl mesh: cached attribute disabling", () => {
             expect(engine._state.instanceLocations).toEqual([0]);
         });
 
+        it("unbindInstanceAttributes resets divisors on the default VAO even while a named VAO is bound", () => {
+            const { mock, engine } = makeEngine();
+            const effect = makeReadyEffect(engine);
+            const vb = createVertexBuffer(engine, new Float32Array(16));
+            const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+            const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ index: 0, size: 2, divisor: 1 }] }], ib, effect);
+            bindAttributesCached(vb, [{ index: 0, size: 2, divisor: 1 }], effect);
+            drawMesh(vao);
+            expect(engine._state.boundVao).not.toBeNull();
+            mock.clear();
+            unbindInstanceAttributes(engine);
+            bindAttributesCached(vb, [{ index: 0, size: 2, divisor: 0 }], effect);
+            // The named VAO's own divisor is untouched; the default VAO's is reset, so the
+            // following per-vertex cached bind correctly elides its divisor.
+            expect(mock.log).toEqual([
+                { name: "bindVertexArray", args: [null] },
+                { name: "vertexAttribDivisor", args: [0, 0] },
+            ]);
+            expect(engine._state.instanceLocations).toEqual([]);
+            drawMesh(vao);
+            mock.clear();
+            unbindInstanceAttributes(engine);
+            expect(mock.log).toEqual([]);
+        });
+
         it("re-issues the divisor after an uncached bind owned the location, even when values match", () => {
             const { mock, engine } = makeEngine();
             const effect = makeReadyEffect(engine);
@@ -716,6 +741,8 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         disableAttributeByIndex(engine, 2);
         // A location the host may have enabled during its scope is disabled too.
         disableAttributeByIndex(engine, 7);
+        // `-1` (an optimized-out attribute) stays a no-op, never INVALID_VALUE.
+        disableAttributeByIndex(engine, -1);
         expect(mock.log).toEqual([
             { name: "bindVertexArray", args: [null] },
             { name: "disableVertexAttribArray", args: [2] },

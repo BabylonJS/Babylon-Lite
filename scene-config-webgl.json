@@ -116,7 +116,7 @@
         "description": "A stencil mask is written into an offscreen render target, then a fullscreen pattern is drawn only where the shared stencil test passes.",
         "tags": ["stencil", "rtt"],
         "maxMad": 2.0,
-        "maxRawKB": 20,
+        "maxRawKB": 20.1,
         "skipParity": false,
         "skipPerf": false
     },

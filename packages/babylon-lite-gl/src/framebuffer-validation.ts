@@ -3,8 +3,10 @@ import type { GLEngineContext } from "./context.js";
 /**
  * Enable or disable synchronous framebuffer completeness checks. Enabled by
  * default, so render-target creation, stencil attachment, resize and restore
- * fail fast (and roll back) on an incomplete framebuffer — e.g. a size above
- * `MAX_TEXTURE_SIZE` that WebGL rejects without throwing. Each check is a
+ * fail fast (and roll back) on an incomplete framebuffer — e.g. a missing or
+ * unsupported attachment that WebGL reports only through the status query.
+ * Sizes above `caps.maxTextureSize` are rejected separately, regardless of this
+ * setting. Each check is a
  * `checkFramebufferStatus` GPU-process round trip; pass `false` to skip them
  * (matching ThinEngine's render-target creation path) when the host already
  * guarantees valid attachments. Affects subsequent framebuffer builds, not

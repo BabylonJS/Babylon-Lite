@@ -236,6 +236,23 @@ describe("lite-gl render-target: createRenderTarget", () => {
         expect(() => createRenderTarget(engine, 1.5, 16)).toThrow();
     });
 
+    it("rejects sizes above MAX_TEXTURE_SIZE before specifying storage, for owned and caller-owned colors", () => {
+        const { mock, engine } = setup();
+        const max = engine.caps.maxTextureSize;
+        const raw = createRawTexture(engine, null, 4, 4);
+        mock.clear();
+        expect(() => createRenderTarget(engine, max + 1, 16)).toThrow(`up to ${max}`);
+        expect(() => createRenderTarget(engine, 16, max + 1, { colorTexture: raw })).toThrow(`up to ${max}`);
+        expect(mock.log).toEqual([]);
+        const rt = createRenderTarget(engine, 4, 4, { colorTexture: raw });
+        mock.clear();
+        expect(() => resizeRenderTarget(rt, max + 1, 4)).toThrow(`up to ${max}`);
+        // The rejected size is never published and the old storage is left alone.
+        expect(mock.log).toEqual([]);
+        expect([rt.width, rt.height, raw.width, raw.height]).toEqual([4, 4, 4, 4]);
+        expect(rt.isReady).toBe(true);
+    });
+
     it("format RED / RG allocates R8 / RG8 and keeps it across resize and restore", () => {
         const { mock, canvas, engine, gl } = setup();
         for (const [format, internalFormat] of [

@@ -601,7 +601,9 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
  *  for offline-safe `webglcontextrestored` replay by default; on a host-owned
  *  engine (`createHostOwnedGLEngine`), it is closed/released after the upload,
  *  and a decode finishing while that engine is lost closes the bitmap and
- *  reports a context-loss error through `onError` instead of `onLoad`. `invertY` and
+ *  reports a context-loss error through `onError` instead of `onLoad`, even when
+ *  the host already disposed the texture (e.g. from `onContextLost`). Otherwise,
+ *  disposing the texture before its decode finishes cancels the load silently. `invertY` and
  *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
  *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
  *  ignored for `ImageBitmap` sources. */
@@ -672,25 +674,28 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         })
         .then((blob) => createImageBitmap(blob, { premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none", imageOrientation: invertY ? "flipY" : "none" }))
         .then((bm) => {
+            // An opted-out host recreates its resources after a loss, so a load
+            // finishing during loss fails — even if the host already disposed
+            // the texture — and a callback-wrapping Promise always settles.
+            if (engine._noRestore && engine._isLost) {
+                bm.close();
+                throw new Error(`lite-gl: context lost while loading ${url}`);
+            }
             if (tex._disposed) {
                 bm.close();
                 return;
             }
             bitmap = bm;
+            // Default recovery defers an in-flight image until restore.
             if (!engine._isLost) {
                 // Through `tex._upload` so a retained mip chain is rebuilt.
                 tex._upload(engine);
                 tex.isReady = true;
             }
-            // Default recovery defers an in-flight image until restore; an
-            // opted-out host releases the bitmap, and a load finishing during
-            // loss fails because the host recreates resources instead.
+            // An opted-out host releases the bitmap once uploaded.
             if (engine._noRestore) {
                 bitmap = null;
                 bm.close();
-                if (engine._isLost) {
-                    throw new Error(`lite-gl: context lost while loading ${url}`);
-                }
             }
             tex._wasReady = true;
             if (onLoad !== undefined) {

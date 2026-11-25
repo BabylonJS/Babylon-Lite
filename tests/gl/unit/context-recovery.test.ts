@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGLEngine, createHostOwnedGLEngine, disposeGLEngine, onContextLost, onContextRestored } from "../../../packages/babylon-lite-gl/src/context";
 import { createEffect, isEffectReady, useEffect } from "../../../packages/babylon-lite-gl/src/effect";
 import { bindAttributes, createIndexBuffer, createMeshVao, createVertexBuffer, disposeBuffer, drawMesh, updateVertexBuffer } from "../../../packages/babylon-lite-gl/src/mesh";
-import { bindTexture, createRawTexture, loadTexture2D, updateRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
+import { bindTexture, createRawTexture, disposeTexture, loadTexture2D, updateRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { createTexture3DFromPixels } from "../../../packages/babylon-lite-gl/src/texture-3d";
 import { createTextureFromSource } from "../../../packages/babylon-lite-gl/src/texture-source";
 import { createDynamicTexture, updateDynamicTexture } from "../../../packages/babylon-lite-gl/src/dynamic-texture";
@@ -264,6 +264,29 @@ describe("lite-gl: host-owned recovery", () => {
         expect(mock.log.filter((call) => call.name === "texImage2D").map((call) => [call.args[3], call.args[4], call.args.at(-1)])).toEqual([[8, 6, null]]);
     });
 
+    it("a caller-owned color resized during loss beyond the restored MAX_TEXTURE_SIZE stays not ready with its paired replay", () => {
+        const { mock, canvas, engine } = setup();
+        const pixels = new Uint8Array(4 * 4 * 4);
+        const raw = createRawTexture(engine, pixels, 4, 4);
+        const rt = createRenderTarget(engine, 4, 4, { colorTexture: raw });
+        fireLost(canvas);
+        resizeRenderTarget(rt, 8, 6);
+        // The restored context supports a smaller size than the lost one did.
+        const getParameter = mock.gl.getParameter.bind(mock.gl);
+        vi.spyOn(mock.gl, "getParameter").mockImplementation((p: number) => (p === mock.gl.MAX_TEXTURE_SIZE ? 6 : getParameter(p)));
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        mock.clear();
+        fireRestored(canvas);
+        expect(engine.caps.maxTextureSize).toBe(6);
+        expect(error).toHaveBeenCalledWith("lite-gl: render target restore failed", expect.any(Error));
+        // Only the retained 4×4 contents replay; the rejected size never reaches GL.
+        expect(mock.log.filter((call) => call.name === "texImage2D").map((call) => [call.args[3], call.args[4], call.args.at(-1)])).toEqual([[4, 4, pixels]]);
+        expect(mock.count("framebufferTexture2D")).toBe(0);
+        expect([raw.width, raw.height]).toEqual([4, 4]);
+        expect(rt.isReady).toBe(false);
+        error.mockRestore();
+    });
+
     it.each([false, true])("async image bitmaps are closed after upload only with opt-out=%s", async (optOut) => {
         const { engine } = setup(optOut);
         const close = vi.fn();
@@ -274,6 +297,26 @@ describe("lite-gl: host-owned recovery", () => {
             loadTexture2D(engine, "test.png", undefined, () => resolve(), reject);
         });
         expect(close).toHaveBeenCalledTimes(optOut ? 1 : 0);
+    });
+
+    it("a host-owned load still fails when the host disposes the texture from onContextLost", async () => {
+        const { mock, canvas, engine } = setup(true);
+        const close = vi.fn();
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve({}) }));
+        vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ width: 2, height: 2, close }));
+        const onLoad = vi.fn();
+        let tex!: ReturnType<typeof loadTexture2D>;
+        const loaded = new Promise<void>((_resolve, reject) => {
+            tex = loadTexture2D(engine, "test.png", undefined, onLoad, reject);
+        });
+        onContextLost(engine, () => disposeTexture(tex));
+        fireLost(canvas);
+        mock.clear();
+        // Disposal must not swallow the failure, or a Promise wrapper would never settle.
+        await expect(loaded).rejects.toThrow("lite-gl: context lost while loading test.png");
+        expect(onLoad).not.toHaveBeenCalled();
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(mock.log).toEqual([]);
     });
 
     it.each([false, true])("handles decode completing during context loss with opt-out=%s", async (optOut) => {

@@ -268,9 +268,15 @@ export function setFramebufferValidation(engine: GLEngineContext, enabled: boole
 
 Framebuffer completeness checks are **on by default**: initial allocation,
 stencil attachment, resize and restore query `checkFramebufferStatus` and
-throw on an incomplete framebuffer (for example a size above
-`MAX_TEXTURE_SIZE`, which WebGL rejects without throwing), so a bad target
-fails at creation instead of silently rendering nothing.
+throw on an incomplete framebuffer (for example a missing or unsupported
+attachment, which WebGL reports only through the status query), so a bad target
+fails at creation instead of silently rendering nothing. Sizes are checked
+separately and always: create, resize and restore reject a width or height
+above `caps.maxTextureSize` before any storage is specified, because WebGL
+rejects an oversized `texImage2D` without throwing and a caller-owned color
+texture would keep its old storage, completing the framebuffer at the wrong
+size. Restore checks against the restored context's refreshed caps, so a target
+that no longer fits stays not ready and its texture keeps its paired replay size.
 
 Each check synchronizes with the GPU process. `setFramebufferValidation(engine,
 false)` skips them, matching ThinEngine's render-target creation path, for
@@ -520,8 +526,11 @@ touching the element buffer or pointers, even if the host left its own VAO bound
 `wipeGLStateCache(engine, true)` also disables every vertex attribute array on
 the default VAO (see §4.7).
 
-Divisors remain issued on every descriptor, including a pointer cache hit, as in
-ThinEngine's `bindInstancesBuffer`; `unbindInstanceAttributes` is unchanged.
+`bindAttributes` issues the divisor on every descriptor, as in ThinEngine's
+`bindInstancesBuffer`; `bindAttributesCached` issues it only when it changes
+(see above). `unbindInstanceAttributes` first selects the default VAO, where
+both binders set the listed divisors, so a named VAO bound in between keeps its
+own divisors and the cached binder's "unlisted means divisor 0" invariant holds.
 
 ### 3.3.3 Host-owned context recovery
 
@@ -547,10 +556,15 @@ modes, without extra GL calls; deletion ownership/registries remain active.
 
 Other resources follow the same policy: replay-only program/RT/mesh-VAO/sprite
 hooks are omitted; raw 2D/3D and decoded-source textures release replay-only pixel
-inputs. Async image loads release owned decoded bitmaps after upload; dynamic
+inputs. Async image loads release owned decoded bitmaps after upload; a decode
+that finishes while the engine is lost reports a context-loss error through
+`onError` (even if the host already disposed the texture), so a Promise wrapper
+always settles. Dynamic
 textures forget their latest source after each upload. HTML element textures
 must keep their element because the public update API takes no source, and
-effects keep public options and names for readiness/cache diagnostics. Render
+effects keep their public `options` (including shader sources) and the
+source-derived cache key for readiness diagnostics and effect deduplication; only
+their restore hook is omitted. Render
 targets retain configuration for resize/deletion; mesh VAOs retain their index
 buffer for drawing but release resolved restore-only bindings after recording.
 Sprites release their static CPU index data; sprite vertex/text scratch arrays
@@ -1402,12 +1416,12 @@ sentinels and populate only the units they actually touch.
 | `gl.uniform3fv` (vec3 arrays)              | None                                           | Never value-cached; lifecycle/readiness/missing-location guards only           |
 | `gl.enableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`               | Location already enabled; named VAOs keep their own recorded state            |
 | `gl.vertexAttribPointer` (default VAO)     | Enabled handle + three numeric slots            | Enabled location has the same buffer, size, type, normalization, stride and offset |
-| `gl.disableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`              | Location already disabled/unset; divisors are left unchanged                  |
+| `gl.disableVertexAttribArray` (default VAO) | `_state.enabledAttribs[location]`              | Location already disabled/unset, or `-1` (always a no-op); divisors are left unchanged |
 | `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
 | `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
 | `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
 | `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget` / `restoreDefaultFramebuffer`)     |
-| `gl.checkFramebufferStatus`                | Optional engine validator, not GL state          | Omitted by default; only queried on allocation/attachment in debug mode       |
+| `gl.checkFramebufferStatus`                | Optional engine validator, not GL state          | Queried on allocation/attachment by default; skipped after `setFramebufferValidation(engine, false)` |
 | `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
 | blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 

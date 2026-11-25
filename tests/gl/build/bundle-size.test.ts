@@ -55,7 +55,7 @@ describe("babylon-lite-gl bundle size ceilings", () => {
 
     for (const [sceneId, baselineBytes] of [
         [1, 11801],
-        [3, 16832],
+        [3, 16843],
         [6, 14850],
     ] as const) {
         it(`keeps 2D-only scene${sceneId} within its byte budget`, async () => {

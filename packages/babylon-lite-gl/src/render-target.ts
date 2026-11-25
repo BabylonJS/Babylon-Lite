@@ -231,12 +231,12 @@ export interface GLRenderTarget {
  * caller-managed (BYO) one. Mirrors Babylon's `createRenderTargetTexture`.
  *
  * @param engine - The engine to allocate GL resources on.
- * @param width - Color attachment width in texels. Must be a positive integer.
- * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param width - Color attachment width in texels. Must be a positive integer up to `caps.maxTextureSize`.
+ * @param height - Color attachment height in texels. Must be a positive integer up to `caps.maxTextureSize`.
  * @param options - See {@link GLRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
- *  positive integers, a GL handle could not be allocated, or the resulting
+ *  positive integers up to `caps.maxTextureSize`, a GL handle could not be allocated, or the resulting
  *  framebuffer is not complete (unless `setFramebufferValidation(engine, false)`
  *  opted out of completeness checks). On failure every partial GPU object (including
  *  an owned color texture) is released first.
@@ -261,8 +261,8 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
  * supports (mirroring Babylon's `getTextureType`).
  *
  * @param engine - The engine to allocate GL resources on.
- * @param width - Color attachment width in texels. Must be a positive integer.
- * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param width - Color attachment width in texels. Must be a positive integer up to `caps.maxTextureSize`.
+ * @param height - Color attachment height in texels. Must be a positive integer up to `caps.maxTextureSize`.
  * @param options - See {@link GLFloatRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws As {@link createRenderTarget}.
@@ -343,15 +343,16 @@ export function generateRenderTargetMipMaps(rt: GLRenderTarget): void {
  * restore hook.
  *
  * @param rt - The render target to resize.
- * @param width - New width in texels (≥ 1).
- * @param height - New height in texels (≥ 1).
+ * @param width - New width in texels (1 to `caps.maxTextureSize`).
+ * @param height - New height in texels (1 to `caps.maxTextureSize`).
+ * @throws If the size is invalid; the target keeps its current size.
  */
 export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void {
     const engine = rt._engine;
     if (rt._disposed) {
         return;
     }
-    validateSize(width, height);
+    validateSize(engine, width, height);
     if (rt.width === width && rt.height === height) {
         return;
     }
@@ -536,7 +537,7 @@ export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void
  *  the owned-or-BYO color texture, allocates the GPU set atomically, and
  *  registers the target. */
 function buildRT(engine: GLEngineContext, width: number, height: number, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
-    validateSize(width, height);
+    validateSize(engine, width, height);
     const gl = engine.gl;
     const byo = options.colorTexture;
     const config: ResolvedRTConfig = {
@@ -608,6 +609,9 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         rt._restore = (target: GLEngineContext): void => {
             // Resilient: a restore failure must not break the engine's restore loop.
             try {
+                // The restored context may support a smaller size; fail before
+                // re-specifying storage and leave the target not ready.
+                validateSize(target, rt.width, rt.height);
                 const tex = rt.texture;
                 // A BYO raw texture replays its last upload; apply a resize made
                 // during loss before reattaching it (contents discarded, as in resize).
@@ -616,6 +620,9 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
                 }
                 allocateRenderTargetGpu(target, rt);
             } catch (err) {
+                // Loss leaves the flag set; a target whose rebuild failed must not
+                // report ready over its dead framebuffer.
+                rt.isReady = false;
                 console.error("lite-gl: render target restore failed", err);
             }
         };
@@ -639,10 +646,15 @@ function resolveColorType(engine: GLEngineContext, type: GLenum): GLenum {
     return type;
 }
 
-/** Validate a render-target size is a pair of positive integers. */
-function validateSize(width: number, height: number): void {
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
-        throw new Error(`lite-gl: render target size must be positive integers, got ${width}x${height}`);
+/** Validate a render-target size is a pair of positive integers within the
+ *  engine's `MAX_TEXTURE_SIZE`. Checked before any storage is (re)specified:
+ *  WebGL rejects an oversized `texImage2D` without throwing, and a caller-owned
+ *  color texture would keep its old storage, completing the framebuffer at the
+ *  wrong size. */
+function validateSize(engine: GLEngineContext, width: number, height: number): void {
+    const max = engine.caps.maxTextureSize;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > max || height > max) {
+        throw new Error(`lite-gl: render target size must be positive integers up to ${max}, got ${width}x${height}`);
     }
 }
 

@@ -444,7 +444,8 @@ export function bindAttributesCached(vb: GLVertexBuffer, descriptors: readonly G
 export function disableAttributeByIndex(engine: GLEngineContext, location: number): void {
     const s = engine._state;
     const enabled = s.enabledAttribs[location];
-    if (engine._isLost || engine._disposed || (s._unknownAttribs ? enabled === null : !enabled)) {
+    // `-1` is the "optimized out" sentinel from `getAttribLocation`: always a no-op.
+    if (location < 0 || engine._isLost || engine._disposed || (s._unknownAttribs ? enabled === null : !enabled)) {
         return;
     }
     bindDefaultVao(engine);
@@ -479,7 +480,8 @@ export function unbindAllAttributes(engine: GLEngineContext): void {
  * Reset the vertex divisor of every attribute touched by {@link bindAttributes}
  * or {@link bindAttributesCached} back to 0 — the lite-gl equivalent of Babylon's `unbindInstanceAttributes`.
  * Call after an instanced draw so a following non-instanced draw is not skewed.
- * No-op on a lost/disposed context.
+ * The divisors are reset on the default VAO (selected if a named VAO is bound),
+ * where these binders set them. No-op on a lost/disposed context.
  *
  * @param engine - The engine.
  */
@@ -487,8 +489,14 @@ export function unbindInstanceAttributes(engine: GLEngineContext): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
-    const gl = engine.gl;
     const locs = engine._state.instanceLocations;
+    if (locs.length === 0) {
+        return;
+    }
+    // The listed divisors live on the default VAO; a named VAO bound since then
+    // owns its own divisors and must not be reset.
+    bindDefaultVao(engine);
+    const gl = engine.gl;
     for (let i = 0; i < locs.length; i++) {
         gl.vertexAttribDivisor(locs[i] as number, 0);
     }

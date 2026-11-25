@@ -303,7 +303,10 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
  *   `onContextLost` callbacks, but never calls `preventDefault()`, so the
  *   browser does not restore the context; `onContextRestored` never fires;
  * - resources created on this engine retain no CPU replay sources (buffer
- *   data, texture pixels, shader sources, sprite indices), saving memory.
+ *   data, texture pixels, sprite indices) and install no restore hooks,
+ *   saving memory. Effects still keep their public `options` (including the
+ *   shader sources) and source-derived cache key, which serve readiness
+ *   diagnostics and effect deduplication rather than replay.
  *
  * After a loss the engine stays lost: dispose it and recreate the engine and
  * every resource (on a fresh canvas or once the host has a new context).
