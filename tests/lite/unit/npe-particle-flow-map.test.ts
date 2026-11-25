@@ -36,9 +36,10 @@ function createFlowScene(
     } as unknown as SceneContext;
 }
 
-/** Mirror scene disposal: mark it disposed, run its disposers, then fail the test on any later camera read. */
+/** Mirror scene disposal: mark it disposed, run its early release and disposers, then fail the test on any later camera read. */
 function disposeFlowScene(scene: SceneContext): void {
     scene._z = true;
+    scene._earlyDispose?.();
     for (const dispose of scene._disposables.splice(0)) {
         dispose();
     }
@@ -344,15 +345,25 @@ describe("NPE UpdateFlowMapBlock", () => {
         expect(system.buffer.dirX[0]! - middle).toBeCloseTo(liveDelta, 6);
     });
 
-    it("adds no scene registration on a second build and detaches a build still decoding", async () => {
+    it("leaves scene disposers in place, chains one early release, and detaches a build still decoding", async () => {
         const scene = createFlowScene();
+        // A material rebuild saves the disposer count before it awaits; a first flow-map build inside that window
+        // must not move the saved prefix, or the rebuild's dedupe keeps a second copy of a shared cleanup.
+        const tail = (): void => undefined;
+        scene._disposables.push(tail);
+        const earlier = vi.fn();
+        scene._earlyDispose = earlier;
         const map = flowMap([255, 128, 128, 255]);
         await attachFlowMap(createParticleSystem(1), map, () => 1, scene);
-        const registrations = scene._disposables.length;
+        const release = scene._earlyDispose;
         let resolveContent!: (content: NpeTextureContent) => void;
         const pending = createParticleSystem(1);
         const attached = attachFlowMap(pending, map, () => 1, scene, { url: "flow.png", invertY: false, _content: new Promise((resolve) => (resolveContent = resolve)) });
-        expect(scene._disposables).toHaveLength(registrations);
+
+        expect(scene._disposables).toHaveLength(1);
+        expect(scene._disposables[0]).toBe(tail);
+        expect(release).not.toBe(earlier);
+        expect(scene._earlyDispose).toBe(release);
 
         disposeFlowScene(scene);
         resolveContent(map);
@@ -360,6 +371,7 @@ describe("NPE UpdateFlowMapBlock", () => {
         pending._scaledStep = 1;
         pending.updateSteps[0]!(0);
 
+        expect(earlier).toHaveBeenCalledOnce();
         expect(pending.buffer.dirX[0]).toBe(0);
     });
 
@@ -375,6 +387,7 @@ describe("NPE UpdateFlowMapBlock", () => {
         animateParticleSystem(system, 1);
 
         expect(scene._disposables).toHaveLength(0);
+        expect(scene._earlyDispose).toBeUndefined();
         expect(system.buffer.dirX[0]).toBe(0);
     });
 

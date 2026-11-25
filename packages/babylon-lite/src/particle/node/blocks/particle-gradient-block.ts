@@ -56,6 +56,7 @@ export const npeBlock: NpeBlockEvaluator = {
             }
             return 0;
         };
-        ctx.setOutput(block.id, "output", getter);
+        // Babylon.js types the output from the first stop input.
+        ctx.setOutput(block.id, "output", getter, ctx.isInt(block, "value0"));
     },
 };

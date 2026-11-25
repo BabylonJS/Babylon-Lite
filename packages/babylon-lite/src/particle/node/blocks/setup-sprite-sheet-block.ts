@@ -4,8 +4,9 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /**
  * `SetupSpriteSheetBlock` — configures the sprite-sheet feature. Allocates the sprite columns via
  * {@link useSpriteSheet} (only now, on this buffer), records the render cell dimensions + the per-particle
- * cell-index column + update step on the system's sprite handle, and attaches the birth hook that seeds a
- * new particle's cell state. Random start cells lazy-load their own column variant. A non-sprite system never
+ * cell-index column + update step on the system's sprite handle, and owns the birth reset that seeds a spawned
+ * particle's cell state before any creation slot, like Babylon.js `Particle._reset`. Random start cells
+ * lazy-load their own column variant and still sample their offset in the update. A non-sprite system never
  * reaches this block, so it allocates no sprite columns and imports none of the sprite module.
  */
 export const npeBlock: NpeBlockEvaluator = {
@@ -23,15 +24,12 @@ export const npeBlock: NpeBlockEvaluator = {
         system._spriteSheet = {
             cellWidth: typeof s.width === "number" ? s.width : 0,
             cellHeight: typeof s.height === "number" ? s.height : 0,
+            startCellID: config.startCellID,
+            endCellID: config.endCellID,
             cellIndex: sheet.cellIndex,
             update: sheet.update,
         };
-        const previousColorDead = system.createColorDead;
-        system.createColorDead = previousColorDead
-            ? (i) => {
-                  previousColorDead(i);
-                  sheet.birth(i);
-              }
-            : sheet.birth;
+        // The sheet owns the birth reset and replaces a SpriteCellIndex reader's zero fallback, so a spawn writes the cell once.
+        system._resetParticle = sheet.birth;
     },
 };

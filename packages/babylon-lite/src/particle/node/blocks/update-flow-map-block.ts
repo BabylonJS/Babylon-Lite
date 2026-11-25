@@ -25,10 +25,12 @@ function getProjectionSource(scene: SceneContext): FlowMapProjectionSource {
         // A scene disposed while the build awaited block loads has already run its disposers, so its source starts detached.
         if (!scene._z) {
             created.scene = scene;
-            // Default disposal stops at the first throwing disposer; this release cannot throw, so it runs before resource teardown.
-            scene._disposables.unshift(() => {
+            // Disposal runs the early-dispose chain before any disposer, so a throwing disposer cannot keep the scene attached.
+            const previous = scene._earlyDispose;
+            scene._earlyDispose = () => {
+                previous?.();
                 created.scene = null;
-            });
+            };
         }
     }
     return source;

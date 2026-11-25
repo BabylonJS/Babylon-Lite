@@ -46,6 +46,6 @@ export const npeBlock: NpeBlockEvaluator = {
         const ifTrue = ctx.input(block, "ifTrue", () => 1);
         const ifFalse = ctx.input(block, "ifFalse", () => 0);
         const getter: NpeGetter = (i) => (evaluate(test, left(i) as number, right(i) as number, epsilon) ? ifTrue(i) : ifFalse(i));
-        ctx.setOutput(block.id, "output", getter);
+        ctx.setOutput(block.id, "output", getter, ctx.isInt(block, "ifTrue"));
     },
 };

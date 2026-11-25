@@ -12,6 +12,6 @@ export const npeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const reference = typeof block.serialized.reference === "number" ? block.serialized.reference : 0;
         const entry: NpeGradientEntry = { reference, value: ctx.input(block, "value", () => 0) };
-        ctx.setOutput(block.id, "output", () => entry as unknown as NpeValue);
+        ctx.setOutput(block.id, "output", () => entry as unknown as NpeValue, ctx.isInt(block, "value"));
     },
 };
