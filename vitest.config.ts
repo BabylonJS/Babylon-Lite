@@ -73,6 +73,8 @@ export default defineConfig({
                     name: "gl-build",
                     include: ["tests/gl/build/**/*.test.ts"],
                     testTimeout: 300_000,
+                    // `public-api.test.ts` rebuilds `packages/babylon-lite-gl/dist`, which other files read.
+                    fileParallelism: false,
                 },
             },
             {
