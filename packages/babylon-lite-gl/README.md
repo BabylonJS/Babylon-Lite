@@ -9,8 +9,7 @@ bundler keeps only what you import.
 It is a focused subset of Babylon.js' rendering primitives, validated to render
 **near-identically** (within ±1–2 LSB ANGLE / SwiftShader codegen noise) to
 Babylon's `ThinEngine` / `EffectRenderer` / `SpriteRenderer` / `HtmlElementTexture`
-path — every feature has a side-by-side parity scene in `tests/gl/parity/` (and,
-downstream, the NeonBrush effect suite). Swapping `@babylonjs/core` for lite-gl
+path — every feature has a side-by-side parity scene in `tests/gl/parity/`. Swapping `@babylonjs/core` for lite-gl
 typically shrinks an effect's shipped bundle **~10–16×** (≈4–6 KB gzip vs
 ≈40–80 KB).
 
@@ -138,7 +137,8 @@ so code can be written once for either backend
 - **Engine / lifecycle** — `createGLEngine`, `disposeGLEngine`, `resizeGLEngine`,
   `getRenderWidth`, `getRenderHeight`, `get/setHardwareScalingLevel`,
   `getRenderingCanvas`, and `on/offContextLost` + `on/offContextRestored`
-  (context-loss is handled: effects and textures are rebuilt on restore).
+  (context-loss is handled: effects and textures are rebuilt on restore;
+  `createHostOwnedGLEngine` opts out for hosts that recreate everything themselves).
 - **Render loop** — `runRenderLoop`, `stopRenderLoop`, plus `beginFrame` /
   `endFrame` for hosts that drive their own frame.
 - **GPU frame timing (optional)** — `captureGPUFrameTime`,
@@ -184,7 +184,8 @@ so code can be written once for either backend
   `readRenderTargetPixelsToBuffer` (same, into a `PIXEL_PACK_BUFFER` at a byte
   `offset`), `disposeRenderTarget`.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
-  `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
+  `createIndexBuffer`, `bindAttributes` (or `bindAttributesCached` to elide unchanged
+  pointers and divisors when rebinding every draw), `drawIndexed` (instanced), `disposeBuffer`.
 - **Depth / stencil / scissor** — `setDepthState`, `setStencilState`,
   `setStencilOpSeparate` (independent front/back operations), `setCullState`,
   `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.

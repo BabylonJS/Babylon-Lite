@@ -10,7 +10,8 @@
  * pixels are pushed on demand from a canvas / `OffscreenCanvas` / image / video
  * / `ImageBitmap` / `ImageData` source. The most recent source is retained
  * internally and replayed into the fresh handle on `webglcontextrestored` by the
- * engine's standard context-restore protocol.
+ * engine's standard context-restore protocol unless the engine is host-owned
+ * (`createHostOwnedGLEngine`); that mode drops the source reference after each upload.
  */
 import {
     bindTextureForUpload,
@@ -31,7 +32,8 @@ import type { GLEngineContext } from "./context.js";
  *  The texture is immediately sampleable (reads as transparent black until the
  *  first update). It is context-restore-safe: the most recent source pushed via
  *  {@link updateDynamicTexture} is replayed into the fresh handle on
- *  `webglcontextrestored` (and re-blanked if no update happened yet).
+ *  `webglcontextrestored` (and re-blanked if no update happened yet), unless
+ *  the engine is host-owned (`createHostOwnedGLEngine`).
  *
  *  @param engine - The engine to create GL resources on.
  *  @param width - Texture width in texels (clamped to ≥ 1).
@@ -105,7 +107,8 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
 /** Push 2D pixels into a {@link createDynamicTexture} texture from a canvas /
  *  `OffscreenCanvas` / image / video / `ImageBitmap` / `ImageData` source — the
  *  WebGL counterpart of Babylon's `ThinEngine.updateDynamicTexture`. The source
- *  is retained on the texture so it is replayed on `webglcontextrestored`, and
+ *  is retained on the texture for `webglcontextrestored` unless the engine is
+ *  host-owned (`createHostOwnedGLEngine`), and
  *  `tex.width` / `tex.height` follow the source's size (`texImage2D` resizes
  *  the storage). No-op when the context is lost/disposed or the texture is
  *  disposed.
@@ -123,7 +126,15 @@ export function updateDynamicTexture(tex: GLTexture, source: TexImageSource, opt
     tex._dynSource = source;
     tex._invertY = options?.invertY;
     tex._premultiplyAlpha = options?.premultiplyAlpha;
-    tex._upload(engine);
+    try {
+        tex._upload(engine);
+    } finally {
+        // Also on a throwing upload (e.g. a cross-origin source): a host-owned
+        // engine never replays, so it must not keep the source alive.
+        if (engine._noRestore) {
+            tex._dynSource = null;
+        }
+    }
 }
 
 /** Forget the source a dynamic texture retained for context-restore replay.

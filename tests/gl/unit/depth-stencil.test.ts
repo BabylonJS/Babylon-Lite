@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createGLEngine, wipeGLStateCache } from "../../../packages/babylon-lite-gl/src/context";
 import {
     setDepthState,
@@ -11,6 +11,7 @@ import {
 } from "../../../packages/babylon-lite-gl/src/depth-stencil";
 import { applyGLStates } from "../../../packages/babylon-lite-gl/src/apply-states";
 import { createRenderTarget, disposeRenderTarget, resizeRenderTarget, bindRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
+import { setFramebufferValidation } from "../../../packages/babylon-lite-gl/src/framebuffer-validation";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function makeEngine() {
@@ -405,7 +406,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         expect(store).toHaveLength(1);
         expect(store[0]?.args[1]).toBe(gl.DEPTH24_STENCIL8);
         expect(callsNamed(mock, "framebufferRenderbuffer")[0]?.args[1]).toBe(gl.DEPTH_STENCIL_ATTACHMENT);
-        // Completeness is validated; the field now holds the packed buffer.
+        // The default path validates the stencil attachment once.
         expect(mock.count("checkFramebufferStatus")).toBe(1);
         expect(rt._depthStencil).not.toBeNull();
         expect(rt._depthStencil).not.toBe(depthOnly);
@@ -539,5 +540,88 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         expect(reattach.length).toBeGreaterThanOrEqual(1);
         // A failed first opt-in must not install the resize/restore hook.
         expect(rt._rebuildDepthStencil).toBeUndefined();
+    });
+
+    it.each([false, true])("validation enabled=%s preserves stencil commit/release ordering through resize and restore", (enabled) => {
+        const { mock, canvas, engine } = makeRTEngine();
+        const gl = engine.gl;
+        const rt = createRenderTarget(engine, 32, 32, { generateDepthBuffer: true });
+        const oldDepth = rt._depthStencil;
+        setFramebufferValidation(engine, enabled);
+        mock.clear();
+        generateRenderTargetStencil(rt);
+        expect(mock.log.filter((call) => ["framebufferRenderbuffer", "checkFramebufferStatus", "deleteRenderbuffer"].includes(call.name))).toEqual([
+            { name: "framebufferRenderbuffer", args: [gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, rt._depthStencil] },
+            ...(enabled ? [{ name: "checkFramebufferStatus", args: [gl.FRAMEBUFFER] }] : []),
+            { name: "deleteRenderbuffer", args: [oldDepth] },
+        ]);
+        mock.clear();
+        resizeRenderTarget(rt, 64, 32);
+        expect(mock.count("checkFramebufferStatus")).toBe(enabled ? 2 : 0);
+        expect(rt._depthStencil).not.toBeNull();
+        const oldPacked = rt._depthStencil;
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(mock.count("checkFramebufferStatus")).toBe(enabled ? 2 : 0);
+        expect(rt.isReady).toBe(true);
+        expect(rt._depthStencil).not.toBe(oldPacked);
+        // The temporary core depth is released once after the packed replacement
+        // is attached; the live packed attachment is retained.
+        expect(mock.count("deleteRenderbuffer")).toBe(1);
+        expect(callsNamed(mock, "deleteRenderbuffer").some((call) => call.args[0] === rt._depthStencil)).toBe(false);
+    });
+
+    it("rolls back an attachment exception raised before validation", () => {
+        const { mock, engine } = makeRTEngine();
+        const rt = createRenderTarget(engine, 32, 32, { generateDepthBuffer: true });
+        const oldDepth = rt._depthStencil;
+        const storage = vi.spyOn(engine.gl, "renderbufferStorage").mockImplementationOnce(() => {
+            throw new Error("storage failed");
+        });
+        mock.clear();
+        try {
+            expect(() => generateRenderTargetStencil(rt)).toThrow("storage failed");
+            expect(mock.count("checkFramebufferStatus")).toBe(0);
+            expect(mock.count("deleteRenderbuffer")).toBe(1);
+            expect(rt._depthStencil).toBe(oldDepth);
+            expect(rt._rebuildDepthStencil).toBeUndefined();
+            expect(engine._state.boundFramebuffer).toBeNull();
+        } finally {
+            storage.mockRestore();
+        }
+    });
+
+    it("restore cleans up the live packed buffer exactly once when the final core validation fails", () => {
+        const { mock, canvas, engine } = makeRTEngine();
+        const gl = engine.gl;
+        const rt = createRenderTarget(engine, 32, 32, { generateDepthBuffer: true });
+        generateRenderTargetStencil(rt);
+        fireLost(canvas);
+        mock.clear();
+        const check = vi.spyOn(gl, "checkFramebufferStatus").mockReturnValueOnce(gl.FRAMEBUFFER_COMPLETE).mockReturnValueOnce(0x8cdd);
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            fireRestored(canvas);
+            expect(check).toHaveBeenCalledTimes(2);
+            expect(error).toHaveBeenCalledExactlyOnceWith(
+                "lite-gl: render target restore failed",
+                expect.objectContaining({ message: "lite-gl: render target framebuffer incomplete (status 0x8cdd)" })
+            );
+            const attached = callsNamed(mock, "framebufferRenderbuffer").map((call) => call.args[3]);
+            const deleted = callsNamed(mock, "deleteRenderbuffer").map((call) => call.args[0]);
+            expect(attached).toHaveLength(2);
+            expect(deleted).toHaveLength(2);
+            expect(deleted[0]).toBe(attached[0]);
+            expect(deleted[1]).toBe(attached[1]);
+            expect(rt._depthStencil).toBeNull();
+            expect(rt._framebuffer).toBeNull();
+            expect(rt.isReady).toBe(false);
+            expect(mock.count("deleteFramebuffer")).toBe(1);
+            expect(mock.count("deleteTexture")).toBe(1);
+        } finally {
+            check.mockRestore();
+            error.mockRestore();
+        }
     });
 });

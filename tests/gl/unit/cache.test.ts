@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     applyEffectWrapper,
+    bindIndexBuffer,
     bindTexture,
     createEffect,
     createEffectWrapper,
+    createIndexBuffer,
     createRawTexture,
     createGLEngine,
     disposeEffect,
@@ -17,11 +19,14 @@ import {
     offContextRestored,
     onContextLost,
     onContextRestored,
+    restoreDefaultFramebuffer,
     setEffectFloat,
     setEffectFloat2,
     setEffectTexture,
     setViewport,
     useEffect,
+    unbindTexture,
+    updateRawTexture,
     wipeGLStateCache,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -192,6 +197,113 @@ describe("lite-gl cache: uniform setters", () => {
 });
 
 describe("lite-gl cache: textures + samplers", () => {
+    it("initial texture state forces an explicit unit-zero null unbind, then elides repeats", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        mock.clear();
+        unbindTexture(engine, 0);
+        unbindTexture(engine, 0);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
+    it.each(["bind", "unbind"] as const)("wipe forces unit-zero %s after a nonzero active unit, then elides repeats", (operation) => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        bindTexture(tex, 7);
+        wipeGLStateCache(engine);
+        mock.clear();
+        for (let i = 0; i < 2; i++) {
+            if (operation === "bind") {
+                bindTexture(tex, 0);
+            } else {
+                unbindTexture(engine, 0);
+            }
+        }
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, operation === "bind" ? tex.handle : null] },
+        ]);
+        mock.clear();
+        if (operation === "bind") {
+            bindTexture(tex, 0);
+        } else {
+            unbindTexture(engine, 0);
+        }
+        expect(mock.log).toEqual([]);
+    });
+
+    it("wipe forces a null unbind on an unknown nonzero unit without clearing other cached bindings", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        bindTexture(tex, 5);
+        wipeGLStateCache(engine);
+        bindTexture(tex, 0);
+        mock.clear();
+        unbindTexture(engine, 5);
+        unbindTexture(engine, 5);
+        bindTexture(tex, 0);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0 + 5] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
+    it("wipe forces an upload to select and bind unit zero before texImage2D", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const data = new Uint8Array([255, 0, 0, 255]);
+        const tex = createRawTexture(engine, data, 1, 1);
+        bindTexture(tex, 7);
+        wipeGLStateCache(engine);
+        mock.clear();
+        updateRawTexture(tex, data);
+        expect(mock.log.filter((call) => ["activeTexture", "bindTexture", "texImage2D"].includes(call.name))).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+            { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data] },
+        ]);
+        mock.clear();
+        updateRawTexture(tex, data);
+        expect(mock.count("activeTexture")).toBe(0);
+        expect(mock.count("bindTexture")).toBe(0);
+        expect(mock.count("texImage2D")).toBe(1);
+    });
+
+    it("restore reselects unit zero before replaying uploads and leaves untouched units unknown", () => {
+        const { mock, canvas, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const data = new Uint8Array([255, 0, 0, 255]);
+        const tex = createRawTexture(engine, data, 1, 1);
+        bindTexture(tex, 7);
+        const oldHandle = tex.handle;
+        fireLost(canvas);
+        mock.clear();
+        bindTexture(tex, 0);
+        unbindTexture(engine, 7);
+        updateRawTexture(tex, data);
+        expect(mock.log).toEqual([]);
+        fireRestored(canvas);
+        expect(tex.handle).not.toBe(oldHandle);
+        expect(mock.log.filter((call) => ["activeTexture", "bindTexture", "texImage2D"].includes(call.name))).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+            { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data] },
+        ]);
+        mock.clear();
+        bindTexture(tex, 0);
+        unbindTexture(engine, 7);
+        unbindTexture(engine, 7);
+        expect(mock.log).toEqual([
+            { name: "activeTexture", args: [gl.TEXTURE0 + 7] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, null] },
+        ]);
+    });
+
     it("sampler uniforms assigned exactly once at finalization (not per setEffectTexture call)", () => {
         const { mock, engine, effect } = makeReadyEffect();
         // After finalization, there should be exactly 2 uniform1i calls — one per sampler.
@@ -429,6 +541,88 @@ describe("lite-gl cache: wipeGLStateCache", () => {
         const { engine } = makeReadyEffect();
         disposeGLEngine(engine);
         expect(() => wipeGLStateCache(engine)).not.toThrow();
+    });
+
+    it("leaves the VAO binding unknown, so index-buffer work rebinds the default VAO over a host VAO", () => {
+        const { mock, engine } = makeReadyEffect();
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        bindIndexBuffer(ib);
+        engine.gl.bindVertexArray(engine.gl.createVertexArray());
+        wipeGLStateCache(engine);
+        mock.clear();
+        bindIndexBuffer(ib);
+        expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
+            { name: "bindBuffer", args: [engine.gl.ELEMENT_ARRAY_BUFFER, ib.handle] },
+        ]);
+    });
+
+    it("leaves the framebuffer binding unknown, so restoreDefaultFramebuffer rebinds the canvas over a host FBO", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        restoreDefaultFramebuffer(engine);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
+        wipeGLStateCache(engine);
+        mock.clear();
+        restoreDefaultFramebuffer(engine);
+        restoreDefaultFramebuffer(engine);
+        expect(mock.log.filter((c) => c.name === "bindFramebuffer")).toEqual([{ name: "bindFramebuffer", args: [gl.FRAMEBUFFER, null] }]);
+    });
+
+    it("treats the VAO and framebuffer bindings as unknown at creation and after context loss", () => {
+        const mock = createMockGL();
+        const canvas = createMockCanvas(mock);
+        const engine = createGLEngine(canvas);
+        expect(engine._state.boundVao).toBeUndefined();
+        expect(engine._state.boundFramebuffer).toBeUndefined();
+        restoreDefaultFramebuffer(engine);
+        expect(engine._state.boundFramebuffer).toBeNull();
+        fireLost(canvas);
+        fireRestored(canvas);
+        expect(engine._state.boundVao).toBeUndefined();
+        expect(engine._state.boundFramebuffer).toBeUndefined();
+    });
+
+    it("bruteForce normalizes untracked GL state; the plain wipe issues no GL call", () => {
+        const { mock, engine } = makeReadyEffect();
+        const gl = engine.gl;
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        mock.clear();
+        wipeGLStateCache(engine);
+        expect(mock.log).toEqual([]);
+        wipeGLStateCache(engine, true);
+        const units = engine._state.boundTextures.length;
+        expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
+            ...Array.from({ length: 16 }, (_, i) => ({ name: "disableVertexAttribArray", args: [i] })),
+            ...Array.from({ length: units }, (_, u) => ({ name: "bindSampler", args: [u, null] })),
+            { name: "bindBuffer", args: [gl.PIXEL_UNPACK_BUFFER, null] },
+            { name: "bindBuffer", args: [gl.PIXEL_PACK_BUFFER, null] },
+            ...[
+                gl.UNPACK_ROW_LENGTH,
+                gl.UNPACK_IMAGE_HEIGHT,
+                gl.UNPACK_SKIP_PIXELS,
+                gl.UNPACK_SKIP_ROWS,
+                gl.UNPACK_SKIP_IMAGES,
+                gl.PACK_ROW_LENGTH,
+                gl.PACK_SKIP_PIXELS,
+                gl.PACK_SKIP_ROWS,
+            ].map((p) => ({
+                name: "pixelStorei",
+                args: [p, 0],
+            })),
+            { name: "pixelStorei", args: [gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.BROWSER_DEFAULT_WEBGL] },
+            { name: "frontFace", args: [gl.CCW] },
+            { name: "depthRange", args: [0, 1] },
+            { name: "clearDepth", args: [1] },
+            { name: "clearStencil", args: [0] },
+            { name: "blendColor", args: [0, 0, 0, 0] },
+            ...[gl.POLYGON_OFFSET_FILL, gl.RASTERIZER_DISCARD, gl.SAMPLE_COVERAGE, gl.SAMPLE_ALPHA_TO_COVERAGE].map((cap) => ({ name: "disable", args: [cap] })),
+        ]);
+        // The default VAO is now KNOWN bound: the next element bind skips the VAO rebind.
+        mock.clear();
+        bindIndexBuffer(ib);
+        expect(mock.log).toEqual([{ name: "bindBuffer", args: [gl.ELEMENT_ARRAY_BUFFER, ib.handle] }]);
     });
 });
 

@@ -21,6 +21,7 @@ export type { WebGLFamily, WebGLHostOps } from "./web-family.js";
 // ─── Engine / context ────────────────────────────────────────────────
 export {
     createGLEngine,
+    createHostOwnedGLEngine,
     disposeGLEngine,
     resizeGLEngine,
     setGLEngineSize,
@@ -38,6 +39,7 @@ export {
     offContextRestored,
 } from "./context.js";
 export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.js";
+export { setFramebufferValidation } from "./framebuffer-validation.js";
 
 // ─── Alpha-to-coverage (optional) ───────────────────────────────────
 export { getAlphaToCoverage, getCurrentSampleCount, setAlphaToCoverage } from "./alpha-to-coverage.js";
@@ -150,6 +152,9 @@ export {
     disposeBuffer,
     bindIndexBuffer,
     bindAttributes,
+    bindAttributesCached,
+    disableAttributeByIndex,
+    unbindAllAttributes,
     unbindInstanceAttributes,
     drawIndexed,
     createMeshVao,

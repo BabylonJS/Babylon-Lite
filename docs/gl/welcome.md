@@ -3,7 +3,7 @@
 `@babylonjs/lite-gl` is the **WebGL2** sibling of the WebGPU `@babylonjs/lite`
 engine: a function-based (no classes), tree-shakeable micro-engine for
 fullscreen effects, sprites and dynamic textures. It exists so downstream
-consumers (NeonBrush; later ShapeBuilder) can drop `@babylonjs/core` for a
+`ThinEngine` consumers can drop `@babylonjs/core` for a
 **~10–16× smaller** bundle.
 
 > **WebGL2-only, GLSL ES 3.00-only.** Shaders must be authored in ES 3.00 (no
@@ -16,11 +16,10 @@ consumers (NeonBrush; later ShapeBuilder) can drop `@babylonjs/core` for a
 four-layer test harness (§12), the lab gallery/dashboard (§13), and the as-built
 file manifest (§14).
 
-**Porting a `@babylonjs/core` consumer** (NeonBrush, ShapeBuilder, …) to lite-gl?
+**Porting a `@babylonjs/core` consumer** to lite-gl?
 Start with the [**Porting Guide & Rulebook**](./porting-guide.md) — the ordered
 workflow plus every hard-won rule (shader conversion, texture/blend/sprite
-gotchas, parity validation, the tarball dev loop) distilled from the NeonBrush
-migration.
+gotchas, parity validation, the tarball dev loop).
 
 ## Build & Test
 

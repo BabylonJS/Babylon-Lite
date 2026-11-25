@@ -128,6 +128,13 @@ export interface GLTexture {
      * @internal
      */
     _dynSource?: TexImageSource | null;
+    /**
+     * `true` for a {@link createTextureFromHandle} wrapper created with
+     * `ownsHandle = false`: `disposeTexture` releases the wrapper without
+     * deleting the borrowed `WebGLTexture`.
+     * @internal
+     */
+    _borrowed?: boolean;
     /** `invertY` of the latest raw / dynamic / HTML-element update
      *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `invertY`. @internal */
@@ -165,12 +172,12 @@ export interface GLTexture {
 export function setUnpackState(engine: GLEngineContext, flipY: boolean, premultiplyAlpha: boolean, alignment = 4): void {
     const gl = engine.gl;
     const s = engine._state;
-    const fy = flipY ? 1 : 0;
+    const fy = +flipY;
     if (s.unpackFlipY !== fy) {
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, fy);
         s.unpackFlipY = fy;
     }
-    const pm = premultiplyAlpha ? 1 : 0;
+    const pm = +premultiplyAlpha;
     if (s.unpackPremultiplyAlpha !== pm) {
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, pm);
         s.unpackPremultiplyAlpha = pm;
@@ -183,10 +190,11 @@ export function setUnpackState(engine: GLEngineContext, flipY: boolean, premulti
 
 /** Apply sampling and wrap state to the texture currently bound for upload. @internal */
 export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void {
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+    const target = gl.TEXTURE_2D;
+    gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, minFilter);
+    gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, magFilter);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_S, wrapS);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_T, wrapT);
 }
 
 /** GL min/mag filters resolved from a {@link GLSamplingMode} preset. Spread
@@ -270,7 +278,8 @@ export interface GLRawTextureOptions extends GLTextureOptions {
  * RGBA8 by default; set {@link GLRawTextureOptions.format} / `type` for other
  * layouts. The pixel data can be replaced later via {@link updateRawTexture};
  * the sampling and wrap can be changed via {@link updateTextureSamplingMode} /
- * {@link updateTextureWrapMode}.
+ * {@link updateTextureWrapMode}. Upload data is retained by reference for
+ * automatic recovery unless the engine is host-owned (`createHostOwnedGLEngine`).
  *
  * @param engine - The engine.
  * @param data - Initial pixels matching `format` / `type`, or `null` for an
@@ -303,17 +312,25 @@ export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView 
 
     // Mutable upload state — `updateRawTexture` mutates these and re-runs
     // `upload`, so the context-restore replay (which calls the same `upload`)
-    // always reproduces the latest contents.
+    // always reproduces the latest contents. The replayed dimensions stay
+    // paired with the replayed pixels: `tex.width` / `height` may run ahead of
+    // them (a render-target resize during loss, applied by its restore).
     let curData = data;
     let curWidth = width;
     let curHeight = height;
     let curAlign = opts.unpackAlignment ?? 4;
 
-    const upload = (target: GLEngineContext): void => {
+    const upload = (target: GLEngineContext, pixels = curData, w = curWidth, h = curHeight, alignment = curAlign): void => {
+        curData = target._noRestore ? null : pixels;
+        curWidth = w;
+        curHeight = h;
+        curAlign = alignment;
+        tex.width = w;
+        tex.height = h;
         const g = target.gl;
-        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiply, curAlign);
+        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiply, alignment);
         bindTextureForUpload(target, tex.handle);
-        g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
+        g.texImage2D(g.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, pixels);
     };
 
     const initializeParameters = (target: GLEngineContext): void => {
@@ -330,17 +347,9 @@ export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView 
         _disposed: false,
         _refCount: 1,
         _upload: upload,
+        _updateRaw: upload,
         _initializeParameters: initializeParameters,
         _wasReady: true,
-    };
-    tex._updateRaw = (target: GLEngineContext, newData: ArrayBufferView | null, newWidth: number, newHeight: number, unpackAlignment: number): void => {
-        curData = newData;
-        curWidth = newWidth;
-        curHeight = newHeight;
-        curAlign = unpackAlignment;
-        tex.width = newWidth;
-        tex.height = newHeight;
-        upload(target);
     };
     upload(engine);
     initializeParameters(engine);
@@ -542,13 +551,14 @@ export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLen
 
 /**
  * Wrap an existing raw `WebGLTexture` (e.g. one created by a host renderer or a
- * previous engine) as a {@link GLTexture} — the lite-gl equivalent of
- * ShapeBuilder's `createTextureGraphicsResourceFromExternalWebGLTexture`.
+ * previous engine) as a {@link GLTexture}.
  *
  * The wrapper does NOT own the underlying handle's upload — it is NOT registered
  * for context-restore replay (the external owner is responsible for that) and is
- * marked ready immediately. `disposeTexture` will still `gl.deleteTexture` it, so
- * only wrap a handle whose deletion you intend lite-gl to manage.
+ * marked ready immediately. By default `disposeTexture` still `gl.deleteTexture`s
+ * the handle; pass `ownsHandle = false` to BORROW a handle the host keeps
+ * owning (e.g. a texture shared with another renderer), so disposal only
+ * releases the wrapper and its cached bindings.
  *
  * @param engine - The engine.
  * @param handle - The external `WebGLTexture`.
@@ -557,9 +567,10 @@ export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLen
  * @param options - Optional sampling state to apply once (min/mag/wrapS/wrapT).
  *  Upload-only options (`invertY`, `premultiplyAlpha`, `unpackAlignment`,
  *  `internalFormat`) do not apply — the handle's pixels are owned externally.
+ * @param ownsHandle - When `false`, `disposeTexture` never deletes `handle`. Default `true`.
  * @returns A {@link GLTexture} wrapping the handle.
  */
-export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTexture, width: number, height: number, options?: GLTextureOptions): GLTexture {
+export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTexture, width: number, height: number, options?: GLTextureOptions, ownsHandle = true): GLTexture {
     const tex: GLTexture = {
         handle,
         target: engine.gl.TEXTURE_2D,
@@ -573,6 +584,9 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
         _upload: () => {},
         _wasReady: true,
     };
+    if (!ownsHandle) {
+        tex._borrowed = true;
+    }
     if (options !== undefined) {
         const gl = engine.gl;
         bindTextureForUpload(engine, handle);
@@ -584,7 +598,12 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
 /** Asynchronous image upload.The returned texture is immediately usable (1×1
  *  transparent placeholder); `isReady` flips true once the image has been
  *  decoded and uploaded. The decoded `ImageBitmap` is retained on the texture
- *  for offline-safe `webglcontextrestored` replay. `invertY` and
+ *  for offline-safe `webglcontextrestored` replay by default; on a host-owned
+ *  engine (`createHostOwnedGLEngine`), it is closed/released after the upload,
+ *  and a decode finishing while that engine is lost closes the bitmap and
+ *  reports a context-loss error through `onError` instead of `onLoad`, even when
+ *  the host already disposed the texture (e.g. from `onContextLost`). Otherwise,
+ *  disposing the texture before its decode finishes cancels the load silently. `invertY` and
  *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
  *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
  *  ignored for `ImageBitmap` sources. */
@@ -603,7 +622,6 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
     const premultiplyAlpha = opts.premultiplyAlpha ?? false;
 
     let bitmap: ImageBitmap | null = null;
-    const placeholderPixels = new Uint8Array([0, 0, 0, 0]);
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
@@ -618,7 +636,8 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
             tex.width = bitmap.width;
             tex.height = bitmap.height;
         } else {
-            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, placeholderPixels);
+            // null leaves WebGL2's zero-initialized texel: transparent black.
+            g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, null);
         }
     };
 
@@ -655,18 +674,28 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         })
         .then((blob) => createImageBitmap(blob, { premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none", imageOrientation: invertY ? "flipY" : "none" }))
         .then((bm) => {
+            // An opted-out host recreates its resources after a loss, so a load
+            // finishing during loss fails — even if the host already disposed
+            // the texture — and a callback-wrapping Promise always settles.
+            if (engine._noRestore && engine._isLost) {
+                bm.close();
+                throw new Error(`lite-gl: context lost while loading ${url}`);
+            }
             if (tex._disposed) {
                 bm.close();
                 return;
             }
             bitmap = bm;
-            // If the context is lost mid-flight, defer the upload — the restore
-            // handler will call _upload again, which will then see `bitmap !== null`
-            // and replay the real image.
+            // Default recovery defers an in-flight image until restore.
             if (!engine._isLost) {
                 // Through `tex._upload` so a retained mip chain is rebuilt.
                 tex._upload(engine);
                 tex.isReady = true;
+            }
+            // An opted-out host releases the bitmap once uploaded.
+            if (engine._noRestore) {
+                bitmap = null;
+                bm.close();
             }
             tex._wasReady = true;
             if (onLoad !== undefined) {
@@ -748,7 +777,9 @@ export function bindTextureForUpload(engine: GLEngineContext, handle: WebGLTextu
  *  Deregistration is expected O(1), independent of the live texture count.
  *  Shared references keep the texture registered until its final release;
  *  repeated disposal is a no-op. Unregistered wrappers keep their existing
- *  handle-deletion semantics without affecting the live registry. */
+ *  handle-deletion semantics without affecting the live registry; borrowed
+ *  wrappers (`createTextureFromHandle(…, ownsHandle = false)`) never delete
+ *  their handle. */
 export function disposeTexture(tex: GLTexture): void {
     if (tex._disposed) {
         return;
@@ -760,13 +791,15 @@ export function disposeTexture(tex: GLTexture): void {
     }
     tex._disposed = true;
     engine._textures.delete(tex);
-    if (!engine._isLost && !engine._disposed) {
+    if (!tex._borrowed && !engine._isLost && !engine._disposed) {
         engine.gl.deleteTexture(tex.handle);
     }
     const bound = engine._state.boundTextures;
     for (let u = 0; u < bound.length; u++) {
         if (bound[u] === tex.handle) {
-            bound[u] = null;
+            // A deleted handle leaves the unit unbound; a borrowed one is still
+            // bound in GL, so the slot becomes unknown and the next unbind is issued.
+            bound[u] = tex._borrowed ? undefined : null;
         }
     }
 }
@@ -800,7 +833,7 @@ export function resolveLdrInternalFormat(gl: WebGL2RenderingContext, format: GLe
 
 /** Internal — pick a sized internalFormat for `texImage2D`. WebGL2 prefers
  *  sized formats for non-color-renderable / non-readback paths; for the
- *  NeonBrush use cases (sample-only) the unsized format works too, but sized
+ *  sample-only use cases the unsized format works too, but sized
  *  is more portable. Shared with the render-target module.
  *  @internal */
 export function pickSizedInternalFormat(gl: WebGL2RenderingContext, format: GLenum, type: GLenum): GLenum {

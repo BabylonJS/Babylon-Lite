@@ -19,7 +19,7 @@
  * carries the `RGBA16F` / `RGBA32F` table, so RGBA8 consumers tree-shake it
  * away).
  *
- * The full color/depth/stencil GPU set is rebuilt automatically on
+ * Unless the engine is host-owned (`createHostOwnedGLEngine`), the full color/depth/stencil GPU set is rebuilt automatically on
  * `webglcontextrestored` — the render target registers itself with the engine's
  * `_renderTargets` registry, and the context-restore protocol calls its
  * `_restore` closure AFTER the standalone texture replay. A caller-supplied
@@ -28,6 +28,7 @@
  */
 import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
+import { validateFramebuffer } from "./framebuffer-validation.js";
 
 /**
  * Presents a retained composition target to the whole canvas without disturbing
@@ -42,10 +43,6 @@ export function presentRenderTarget(target: GLRenderTarget): void {
     }
     const gl = engine.gl;
     const s = engine._state;
-    // A wiped cache records the canvas binding whatever is actually bound, so that binding is reissued.
-    if (s.boundFramebuffer === null) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
     restoreDefaultFramebuffer(engine);
     // Queried with the canvas framebuffer bound; its sample count is fixed when the context is created.
     engine._canvasSamples ??= Number(gl.getParameter(gl.SAMPLES));
@@ -222,7 +219,7 @@ export interface GLRenderTarget {
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal Rebuild the FBO + renderbuffer (+ owned color texture) into
      *  fresh handles after `webglcontextrestored`. */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
 }
 
 /**
@@ -234,13 +231,14 @@ export interface GLRenderTarget {
  * caller-managed (BYO) one. Mirrors Babylon's `createRenderTargetTexture`.
  *
  * @param engine - The engine to allocate GL resources on.
- * @param width - Color attachment width in texels. Must be a positive integer.
- * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param width - Color attachment width in texels. Must be a positive integer up to `caps.maxTextureSize`.
+ * @param height - Color attachment height in texels. Must be a positive integer up to `caps.maxTextureSize`.
  * @param options - See {@link GLRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
- *  positive integers, a GL handle could not be allocated, or the resulting
- *  framebuffer is not complete. On failure every partial GPU object (including
+ *  positive integers up to `caps.maxTextureSize`, a GL handle could not be allocated, or the resulting
+ *  framebuffer is not complete (unless `setFramebufferValidation(engine, false)`
+ *  opted out of completeness checks). On failure every partial GPU object (including
  *  an owned color texture) is released first.
  */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
@@ -263,8 +261,8 @@ export function createRenderTarget(engine: GLEngineContext, width: number, heigh
  * supports (mirroring Babylon's `getTextureType`).
  *
  * @param engine - The engine to allocate GL resources on.
- * @param width - Color attachment width in texels. Must be a positive integer.
- * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param width - Color attachment width in texels. Must be a positive integer up to `caps.maxTextureSize`.
+ * @param height - Color attachment height in texels. Must be a positive integer up to `caps.maxTextureSize`.
  * @param options - See {@link GLFloatRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws As {@link createRenderTarget}.
@@ -345,15 +343,16 @@ export function generateRenderTargetMipMaps(rt: GLRenderTarget): void {
  * restore hook.
  *
  * @param rt - The render target to resize.
- * @param width - New width in texels (≥ 1).
- * @param height - New height in texels (≥ 1).
+ * @param width - New width in texels (1 to `caps.maxTextureSize`).
+ * @param height - New height in texels (1 to `caps.maxTextureSize`).
+ * @throws If the size is invalid; the target keeps its current size.
  */
 export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void {
     const engine = rt._engine;
     if (rt._disposed) {
         return;
     }
-    validateSize(width, height);
+    validateSize(engine, width, height);
     if (rt.width === width && rt.height === height) {
         return;
     }
@@ -538,7 +537,7 @@ export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void
  *  the owned-or-BYO color texture, allocates the GPU set atomically, and
  *  registers the target. */
 function buildRT(engine: GLEngineContext, width: number, height: number, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
-    validateSize(width, height);
+    validateSize(engine, width, height);
     const gl = engine.gl;
     const byo = options.colorTexture;
     const config: ResolvedRTConfig = {
@@ -580,7 +579,6 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
-        _restore: () => {},
     };
 
     rt._deleteGpu = (glc: WebGL2RenderingContext): void => {
@@ -607,14 +605,28 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         rt.isReady = false;
     };
 
-    rt._restore = (target: GLEngineContext): void => {
-        // Resilient: a restore failure must not break the engine's restore loop.
-        try {
-            allocateRenderTargetGpu(target, rt);
-        } catch (err) {
-            console.error("lite-gl: render target restore failed", err);
-        }
-    };
+    if (!engine._noRestore) {
+        rt._restore = (target: GLEngineContext): void => {
+            // Resilient: a restore failure must not break the engine's restore loop.
+            try {
+                // The restored context may support a smaller size; fail before
+                // re-specifying storage and leave the target not ready.
+                validateSize(target, rt.width, rt.height);
+                const tex = rt.texture;
+                // A BYO raw texture replays its last upload; apply a resize made
+                // during loss before reattaching it (contents discarded, as in resize).
+                if (!config.ownsColorTexture && (tex.width !== rt.width || tex.height !== rt.height)) {
+                    tex._updateRaw?.(target, null, rt.width, rt.height, 4);
+                }
+                allocateRenderTargetGpu(target, rt);
+            } catch (err) {
+                // Loss leaves the flag set; a target whose rebuild failed must not
+                // report ready over its dead framebuffer.
+                rt.isReady = false;
+                console.error("lite-gl: render target restore failed", err);
+            }
+        };
+    }
 
     allocateRenderTargetGpu(engine, rt);
     engine._renderTargets.push(rt);
@@ -634,16 +646,21 @@ function resolveColorType(engine: GLEngineContext, type: GLenum): GLenum {
     return type;
 }
 
-/** Validate a render-target size is a pair of positive integers. */
-function validateSize(width: number, height: number): void {
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
-        throw new Error(`lite-gl: render target size must be positive integers, got ${width}x${height}`);
+/** Validate a render-target size is a pair of positive integers within the
+ *  engine's `MAX_TEXTURE_SIZE`. Checked before any storage is (re)specified:
+ *  WebGL rejects an oversized `texImage2D` without throwing, and a caller-owned
+ *  color texture would keep its old storage, completing the framebuffer at the
+ *  wrong size. */
+function validateSize(engine: GLEngineContext, width: number, height: number): void {
+    const max = engine.caps.maxTextureSize;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > max || height > max) {
+        throw new Error(`lite-gl: render target size must be positive integers up to ${max}, got ${width}x${height}`);
     }
 }
 
 /**
  * (Re)allocate the color texture (iff owned), framebuffer and depth/stencil
- * renderbuffer into fresh handles, attach them, and validate completeness.
+ * renderbuffer into fresh handles, attach them, and validate completeness (unless opted out).
  * Shared by create / resize / context-restore. No-op on a lost/disposed context.
  *
  * ATOMIC: captures the previously-bound framebuffer and restores it in a
@@ -658,7 +675,8 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
     const gl = engine.gl;
     const s = engine._state;
     const c = rt._config;
-    const prevFb = s.boundFramebuffer;
+    // An unknown (wiped) binding is restored as the canvas.
+    const prevFb = s.boundFramebuffer ?? null;
     let createdTexture: WebGLTexture | null = null;
     let fb: WebGLFramebuffer | null = null;
     let rb: WebGLRenderbuffer | null = null;
@@ -711,10 +729,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         // A helper-attached stencil replaces/augments the depth-only buffer.
         rt._rebuildDepthStencil?.(engine);
 
-        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-            throw new Error(`lite-gl: render target framebuffer incomplete (status 0x${status.toString(16)})`);
-        }
+        validateFramebuffer(engine, false);
         rt.isReady = true;
     } catch (e) {
         // Free whatever depth/stencil renderbuffer is currently attached. After a

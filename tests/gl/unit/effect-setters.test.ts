@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
+import { createGLEngine, disposeGLEngine } from "../../../packages/babylon-lite-gl/src/context";
 import {
     createEffect,
     isEffectReady,
+    disposeEffect,
     setEffectVector2,
     setEffectDirectColor4,
     setEffectMatrix,
@@ -16,6 +17,7 @@ import {
     type GLEffect,
 } from "../../../packages/babylon-lite-gl/src/effect";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
+import { beginFrame, endFrame } from "../../../packages/babylon-lite-gl/src/render-loop";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function makeEngine() {
@@ -30,7 +32,7 @@ function makeReadyEffect(engine: ReturnType<typeof makeEngine>["engine"]): GLEff
         name: "setters",
         vertexSource: "v",
         fragmentSource: "f",
-        uniformNames: ["u_v2", "u_col", "u_mat", "u_mat3", "u_arr", "u_arr4", "u_iarr"],
+        uniformNames: ["u_v2", "u_col", "u_mat", "u_mat3", "u_arr", "u_arr3", "u_arr4", "u_iarr"],
         samplerNames: [],
     });
     isEffectReady(eff);
@@ -99,6 +101,74 @@ describe("lite-gl effect: extended uniform setters", () => {
         mock.clear();
         setEffectIntArray(eff, "u_iarr", a);
         expect(callsNamed(mock, "uniform1iv")[0]?.args[1]).toBe(a);
+    });
+
+    it.each(["typed", "plain"] as const)("setEffectFloatArray3 passes %s arrays directly and never elides across frames or in-place edits", (kind) => {
+        const { mock, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        const array = kind === "typed" ? new Float32Array([1, 2, 3, 4, 5, 6]) : [1, 2, 3, 4, 5, 6];
+        const upload = { name: "uniform3fv", args: [eff.uniformLocations.u_arr3, array] };
+        mock.clear();
+        beginFrame(engine);
+        setEffectFloatArray3(eff, "u_arr3", array);
+        setEffectFloatArray3(eff, "u_arr3", array);
+        endFrame(engine);
+        beginFrame(engine);
+        setEffectFloatArray3(eff, "u_arr3", array);
+        endFrame(engine);
+        expect(mock.log).toEqual([upload, upload, upload]);
+        expect(mock.log[0]?.args[1]).toBe(array);
+        array[0] = 9;
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([upload]);
+        expect(mock.log[0]?.args[1]).toBe(array);
+    });
+
+    it("setEffectFloatArray3 no-ops before readiness and for null/undefined locations without poisoning later uploads", () => {
+        const { mock, engine } = makeEngine();
+        const eff = createEffect(engine, { name: "triples", vertexSource: "v", fragmentSource: "f", uniformNames: ["u_arr3", "__missing_null"], samplerNames: [] });
+        const array = [1, 2, 3];
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([]);
+        isEffectReady(eff);
+        mock.clear();
+        setEffectFloatArray3(eff, "__missing_null", array);
+        setEffectFloatArray3(eff, "undeclared", array);
+        expect(mock.log).toEqual([]);
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([{ name: "uniform3fv", args: [eff.uniformLocations.u_arr3, array] }]);
+    });
+
+    it("setEffectFloatArray3 skips loss, replays the same array to the replacement program, and skips disposed effects/engines", () => {
+        const { mock, canvas, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        const array = new Float32Array([1, 2, 3]);
+        setEffectFloatArray3(eff, "u_arr3", array);
+        const oldLocation = eff.uniformLocations.u_arr3;
+        fireLost(canvas);
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([]);
+        fireRestored(canvas);
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([]);
+        isEffectReady(eff);
+        expect(eff.uniformLocations.u_arr3).not.toBe(oldLocation);
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([{ name: "uniform3fv", args: [eff.uniformLocations.u_arr3, array] }]);
+        disposeEffect(eff);
+        mock.clear();
+        setEffectFloatArray3(eff, "u_arr3", array);
+        expect(mock.log).toEqual([]);
+        const other = makeReadyEffect(engine);
+        disposeGLEngine(engine);
+        mock.clear();
+        setEffectFloatArray3(other, "u_arr3", array);
+        expect(mock.log).toEqual([]);
     });
 
     it("uploads vec2 and vec3 arrays without losing in-place changes", () => {

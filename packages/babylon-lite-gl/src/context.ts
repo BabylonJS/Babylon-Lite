@@ -19,7 +19,9 @@ export interface GLManagedBuffer {
     /** @internal */
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal */
-    _restore: (engine: GLEngineContext) => void;
+    _restore?: (engine: GLEngineContext) => void;
+    /** Retained upload source, absent when replay is disabled or disposed. @internal */
+    _data?: ArrayBufferView;
 }
 
 /**
@@ -185,11 +187,15 @@ export interface GLEngineContext {
     /** @internal */
     _onRestored: (() => void)[];
     /**
-     * True between `webglcontextlost` and `webglcontextrestored`. While
-     * true, every `setEffect*` / `bindTexture` / `drawEffect` is a no-op.
+     * True after `webglcontextlost` until automatic recovery completes, or
+     * permanently when recovery is disabled. While true, every `setEffect*` /
+     * `bindTexture` / `drawEffect` is a no-op.
      * @internal
      */
     _isLost: boolean;
+    /** Host-owned recovery policy, set only by `createHostOwnedGLEngine`;
+     *  not cached GL state. @internal */
+    _noRestore?: true;
     /**
      * True once the context has been disposed; subsequent calls become no-ops.
      * @internal
@@ -224,6 +230,11 @@ export interface GLEngineContext {
     /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
      * @internal */
     _gpuFrameTime?: GLPerfCounter;
+    /** Set by `setFramebufferValidation(engine, false)` to skip framebuffer
+     * completeness checks. Configuration, not cached GL state: retained across
+     * cache wipes/restores.
+     * @internal */
+    _skipFramebufferValidation?: boolean;
     /** Sample count of the canvas drawing buffer, queried lazily by `presentRenderTarget`.
      * @internal */
     _canvasSamples?: number;
@@ -232,7 +243,8 @@ export interface GLEngineContext {
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
  *  Accepts an `HTMLCanvasElement` or an `OffscreenCanvas` (worker render paths —
  *  e.g. the Lottie player — which size the drawing buffer via `setGLEngineSize`).
- *  Throws if WebGL2 is unsupported. */
+ *  Throws if WebGL2 is unsupported. Resources recover automatically after
+ *  context loss; use `createHostOwnedGLEngine` when the host recreates instead. */
 export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext {
     const o = options ?? {};
     const attrs: WebGLContextAttributes = {
@@ -271,17 +283,45 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         _onRestored: [],
         _isLost: false,
         _disposed: false,
-        _lostHandler: () => {},
-        _restoredHandler: () => {},
+        _lostHandler: (e: Event) => handleContextLost(engine, e),
+        _restoredHandler: () => handleContextRestored(engine),
         _wasLoopActive: false,
         _scheduleFrame: null,
     };
 
-    engine._lostHandler = (e: Event) => handleContextLost(engine, e);
-    engine._restoredHandler = () => handleContextRestored(engine);
     canvas.addEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
     canvas.addEventListener("webglcontextrestored", engine._restoredHandler, false);
 
+    return engine;
+}
+
+/**
+ * Create an engine whose context-loss recovery is owned by the host, matching
+ * ThinEngine's `doNotHandleContextLost: true`. Same canvas/options contract as
+ * {@link createGLEngine}, except:
+ * - `webglcontextlost` still stops rendering, marks the engine lost and fires
+ *   `onContextLost` callbacks, but never calls `preventDefault()`, so the
+ *   browser does not restore the context; `onContextRestored` never fires;
+ * - resources created on this engine retain no CPU replay sources (buffer
+ *   data, texture pixels, sprite indices) and install no restore hooks,
+ *   saving memory. Effects still keep their public `options` (including the
+ *   shader sources) and source-derived cache key, which serve readiness
+ *   diagnostics and effect deduplication rather than replay.
+ *
+ * After a loss the engine stays lost: dispose it and recreate the engine and
+ * every resource (on a fresh canvas or once the host has a new context).
+ *
+ * @param canvas - An `HTMLCanvasElement` or `OffscreenCanvas`.
+ * @param options - WebGL2 context attributes, as for {@link createGLEngine}.
+ * @returns The engine. Throws if WebGL2 is unsupported.
+ */
+export function createHostOwnedGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, options?: GLEngineOptions): GLEngineContext {
+    const engine = createGLEngine(canvas, options);
+    engine._noRestore = true;
+    canvas.removeEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
+    canvas.removeEventListener("webglcontextrestored", engine._restoredHandler, false);
+    engine._lostHandler = () => handleContextLost(engine);
+    canvas.addEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
     return engine;
 }
 
@@ -342,6 +382,7 @@ export function disposeGLEngine(engine: GLEngineContext): void {
         if (!buf._disposed) {
             buf._disposed = true;
             buf._deleteGpu(gl);
+            buf._data = buf._restore = undefined;
         }
     }
     engine._buffers.length = 0;
@@ -416,19 +457,78 @@ export function setGLEngineSize(engine: GLEngineContext, width: number, height: 
  * skip the state changes needed to re-establish the scope, producing corrupted
  * output. Owned GPU resources (the shared quad, render targets, meshes,
  * effects, textures) are preserved — only the cached "current GL state" is
- * reset. Mirrors Babylon's `Engine.wipeCaches()`.
+ * reset. Mirrors Babylon's `Engine.wipeCaches(bruteForce)`.
+ *
+ * After a wipe the VAO / framebuffer bindings are UNKNOWN (not assumed to be
+ * the defaults), so the next mesh / render-target call rebinds them even if the
+ * host left its own objects bound. The current program is forgotten: call
+ * `useEffect` again before drawing.
+ *
+ * `bruteForce` additionally normalizes, with raw GL calls, state lite-gl relies
+ * on but never caches, back to WebGL2 defaults: the default VAO with every
+ * vertex attribute array disabled, sampler objects unbound from every texture
+ * unit, no `PIXEL_PACK` / `PIXEL_UNPACK` buffer, zero pack / unpack row and
+ * skip layout, browser-default unpack colorspace conversion, `frontFace(CCW)`,
+ * `depthRange(0, 1)`, `clearDepth(1)`, `clearStencil(0)`, `blendColor(0, 0, 0, 0)`
+ * and `POLYGON_OFFSET_FILL` / `RASTERIZER_DISCARD` / `SAMPLE_COVERAGE` /
+ * `SAMPLE_ALPHA_TO_COVERAGE` disabled. Use it when the host may leave arbitrary
+ * state behind (it costs roughly `MAX_VERTEX_ATTRIBS + maxTextureUnits + 20`
+ * GL calls); per-draw hand-offs with a known host should prefer the plain wipe
+ * plus targeted resets.
  *
  * No-op while the context is lost or the engine is disposed.
+ *
+ * @param engine - The engine.
+ * @param bruteForce - Also normalize untracked GL state (see above). Default `false`.
  */
-export function wipeGLStateCache(engine: GLEngineContext): void {
+export function wipeGLStateCache(engine: GLEngineContext, bruteForce = false): void {
     if (engine._disposed || engine._isLost) {
         return;
     }
-    resetGLStateCache(engine._state);
+    const s = engine._state;
+    resetGLStateCache(s);
+    // Brute force disables every attribute array below; a plain wipe leaves
+    // host-enabled arrays unknown (ThinEngine's `_mustWipeVertexAttributes`).
+    s._unknownAttribs = !bruteForce;
     const invalidators = engine._stateCacheInvalidators;
     if (invalidators) {
         for (const invalidate of invalidators) {
             invalidate();
+        }
+    }
+    if (bruteForce) {
+        const gl = engine.gl;
+        gl.bindVertexArray(null);
+        s.boundVao = null;
+        const attribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+        for (let i = 0; i < attribs; i++) {
+            gl.disableVertexAttribArray(i);
+        }
+        for (let u = 0; u < s.boundTextures.length; u++) {
+            gl.bindSampler(u, null);
+        }
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        for (const p of [
+            gl.UNPACK_ROW_LENGTH,
+            gl.UNPACK_IMAGE_HEIGHT,
+            gl.UNPACK_SKIP_PIXELS,
+            gl.UNPACK_SKIP_ROWS,
+            gl.UNPACK_SKIP_IMAGES,
+            gl.PACK_ROW_LENGTH,
+            gl.PACK_SKIP_PIXELS,
+            gl.PACK_SKIP_ROWS,
+        ]) {
+            gl.pixelStorei(p, 0);
+        }
+        gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.BROWSER_DEFAULT_WEBGL);
+        gl.frontFace(gl.CCW);
+        gl.depthRange(0, 1);
+        gl.clearDepth(1);
+        gl.clearStencil(0);
+        gl.blendColor(0, 0, 0, 0);
+        for (const cap of [gl.POLYGON_OFFSET_FILL, gl.RASTERIZER_DISCARD, gl.SAMPLE_COVERAGE, gl.SAMPLE_ALPHA_TO_COVERAGE]) {
+            gl.disable(cap);
         }
     }
 }
@@ -488,7 +588,8 @@ export function offContextLost(engine: GLEngineContext, cb: () => void): void {
     }
 }
 
-/** Register a `webglcontextrestored` callback. Duplicate registrations are ignored. */
+/** Register an automatic `webglcontextrestored` callback. Never fires on an
+ *  engine from `createHostOwnedGLEngine`. Duplicate registrations are ignored. */
 export function onContextRestored(engine: GLEngineContext, cb: () => void): void {
     if (engine._onRestored.indexOf(cb) === -1) {
         engine._onRestored.push(cb);
@@ -505,10 +606,10 @@ export function offContextRestored(engine: GLEngineContext, cb: () => void): voi
 
 /* ─────────────────────────  internal: loss / restore  ───────────────────── */
 
-function handleContextLost(engine: GLEngineContext, e: Event): void {
+function handleContextLost(engine: GLEngineContext, e?: Event): void {
     // Opt-in to restore. Without preventDefault() the browser will NOT fire
-    // webglcontextrestored later.
-    e.preventDefault();
+    // webglcontextrestored later. Host-owned engines pass no event.
+    e?.preventDefault();
     if (engine._isLost || engine._disposed) {
         return;
     }
@@ -555,7 +656,7 @@ function handleContextRestored(engine: GLEngineContext): void {
     Object.assign(engine.caps, queryCaps(engine.gl));
     for (const eff of engine._effects) {
         if (!eff._disposed) {
-            eff._restore(engine);
+            eff._restore!(engine);
         }
     }
     for (const tex of engine._textures) {
@@ -579,13 +680,13 @@ function handleContextRestored(engine: GLEngineContext): void {
     // RT, not the `_textures` registry).
     for (const rt of engine._renderTargets) {
         if (!rt._disposed) {
-            rt._restore(engine);
+            rt._restore!(engine);
         }
     }
     // Mesh buffers re-upload their retained CPU data into fresh GL buffers.
     for (const buf of engine._buffers) {
         if (!buf._disposed) {
-            buf._restore(engine);
+            buf._restore!(engine);
         }
     }
     if (engine._wasLoopActive && engine._loops.length > 0 && engine._scheduleFrame !== null) {

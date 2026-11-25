@@ -116,7 +116,8 @@ export function setEffectTexture3D(effect: GLEffect, samplerName: string, tex: G
  * Upload a tightly packed RGBA8 volume to a native WebGL2 3D texture. Useful
  * for color-grading LUTs without flattening the cube into a 2D atlas. The
  * default linear, clamp-to-edge sampling interpolates all three axes in
- * hardware. The source must remain unchanged for context-restore replay;
+ * hardware. Unless the engine is host-owned (`createHostOwnedGLEngine`), the source
+ * is retained and must remain unchanged for context-restore replay;
  * release the texture with `disposeTexture3D` when done.
  *
  * @param engine - WebGL2 engine.
@@ -157,12 +158,13 @@ export function createTexture3DFromPixels(
         throw new Error("lite-gl: gl.createTexture returned null");
     }
 
+    let pixels: Uint8Array | null = data;
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
         setUnpackState(target, false, false, 4);
         setUnpack3DLayout(target);
         bindTexture3DRaw(target, 0, tex.handle, true);
-        g.texImage3D(g.TEXTURE_3D, 0, format, width, height, depth, 0, g.RGBA, g.UNSIGNED_BYTE, data);
+        g.texImage3D(g.TEXTURE_3D, 0, format, width, height, depth, 0, g.RGBA, g.UNSIGNED_BYTE, pixels);
         if (tex._hasMipMaps) {
             g.generateMipmap(g.TEXTURE_3D);
         }
@@ -196,6 +198,9 @@ export function createTexture3DFromPixels(
         _wasReady: true,
     };
     upload(engine);
+    if (engine._noRestore) {
+        pixels = null;
+    }
     initializeParameters(engine);
     engine._textures.add(tex);
     return tex;

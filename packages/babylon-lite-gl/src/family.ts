@@ -308,7 +308,7 @@ export interface GLOps<F extends GLFamily> {
     // Engine, render loop and frame timing
     readonly resizeGLEngine: (engine: F["engine"]) => void;
     readonly setGLEngineSize: (engine: F["engine"], width: number, height: number) => void;
-    readonly wipeGLStateCache: (engine: F["engine"]) => void;
+    readonly wipeGLStateCache: (engine: F["engine"], bruteForce?: boolean) => void;
     readonly getRenderWidth: (engine: F["engine"]) => number;
     readonly getRenderHeight: (engine: F["engine"]) => number;
     readonly getTextureCount: (engine: F["engine"]) => number;
@@ -328,6 +328,7 @@ export interface GLOps<F extends GLFamily> {
     readonly endFrame: (engine: F["engine"]) => void;
     readonly captureGPUFrameTime: (engine: F["engine"], enabled: boolean) => void;
     readonly getGPUFrameTimeCounter: (engine: F["engine"]) => F["perfCounter"];
+    readonly setFramebufferValidation: (engine: F["engine"], enabled: boolean) => void;
 
     // Effects and the fullscreen effect renderer
     readonly createEffect: (engine: F["engine"], options: GLEffectOptions) => F["effect"];
@@ -406,6 +407,9 @@ export interface GLOps<F extends GLFamily> {
     readonly disposeBuffer: (buffer: F["vertexBuffer"] | F["indexBuffer"]) => void;
     readonly bindIndexBuffer: (ib: F["indexBuffer"]) => void;
     readonly bindAttributes: (vb: F["vertexBuffer"], descriptors: readonly F["attributeDescriptor"][], effect: F["effect"], computeStride?: boolean) => void;
+    readonly bindAttributesCached: (vb: F["vertexBuffer"], descriptors: readonly F["attributeDescriptor"][], effect: F["effect"], computeStride?: boolean) => void;
+    readonly disableAttributeByIndex: (engine: F["engine"], location: number) => void;
+    readonly unbindAllAttributes: (engine: F["engine"]) => void;
     readonly unbindInstanceAttributes: (engine: F["engine"]) => void;
     readonly drawIndexed: (ib: F["indexBuffer"], indexCount: number, indexStart?: number, instanceCount?: F["instanceCount"]) => void;
     readonly createMeshVao: (

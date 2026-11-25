@@ -2,8 +2,8 @@
  * HTML element textures.
  *
  * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
- * `sideEffects: false`, so consumers that don't need it (everything except
- * NeonBrush's `InputGlow`) tree-shake it out.
+ * `sideEffects: false`, so consumers that don't sample HTML elements
+ * tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
 import {

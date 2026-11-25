@@ -78,26 +78,37 @@ export const RS_DESIRED = 21;
  */
 export interface GLState {
     currentProgram: WebGLProgram | null;
+    /** Active texture unit, or -1 when unknown. */
     activeTextureUnit: number;
-    /** Per-unit TEXTURE_2D binding; length === caps.maxTextureUnits. */
-    boundTextures: (WebGLTexture | null)[];
+    /** Default-VAO pointer format/stride/offset/divisor quadruples
+     *  (`MAX_VERTEX_ATTRIBS * 4`), allocated once on first bindAttributesCached.
+     *  Buffer identity and enable state live together in enabledAttribs. @internal */
+    _attributePointers?: Float64Array;
+    /** Per-unit TEXTURE_2D binding; undefined = unknown, null = confirmed unbound.
+     *  Length === caps.maxTextureUnits. */
+    boundTextures: (WebGLTexture | null | undefined)[];
     /** Per-unit TEXTURE_3D binding, allocated only when first used. @internal */
     _boundTextures3D?: (WebGLTexture | null | undefined)[];
     /** Cached zero WebGL2 unpack row/image/skip layout for 3D uploads. @internal */
     _unpack3DLayoutKnown?: boolean;
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
-    boundVao: WebGLVertexArrayObject | null;
+    /** Bound VAO; `null` = the default VAO, `undefined` = unknown (fresh or wiped
+     *  cache, context loss), so the next VAO bind is always issued. */
+    boundVao: WebGLVertexArrayObject | null | undefined;
     viewportX: number;
     viewportY: number;
     viewportW: number;
     viewportH: number;
     /**
-     * Currently-bound draw framebuffer, or `null` for the default (canvas)
-     * framebuffer. Owned by the render-target module's `bindRenderTarget`
-     * (binding `null` returns to the canvas). Reset to `null` on context-lost.
+     * Currently-bound draw framebuffer, `null` for the default (canvas)
+     * framebuffer, or `undefined` when unknown (fresh or wiped cache — the
+     * context may be shared with a host that left its own framebuffer bound).
+     * Owned by the render-target module's `bindRenderTarget` (binding `null`
+     * returns to the canvas). Reset to `undefined` by `wipeGLStateCache` and on
+     * context loss.
      */
-    boundFramebuffer: WebGLFramebuffer | null;
+    boundFramebuffer: WebGLFramebuffer | null | undefined;
     /**
      * Deferred render-state (blend / depth / cull / stencil / color-mask) packed
      * into a flat `Float64Array(46)`. Slots `0..20` (indexed by the `RS_*`
@@ -168,12 +179,18 @@ export interface GLState {
     /** Cached `gl.pixelStorei(UNPACK_PREMULTIPLY_ALPHA_WEBGL)`, or `-1` unset. */
     unpackPremultiplyAlpha: number;
     /**
-     * Per-location vertex-attribute enable flags for the DEFAULT (null) VAO —
+     * Per-location vertex-attribute bindings for the DEFAULT (null) VAO —
      * the mesh / instancing path (mirrors Babylon's `_vertexAttribArraysEnabled`).
-     * Index is the attribute location. lite-gl's quad / sprite paths use their
-     * own VAOs and do not touch this. Cleared on context-lost.
+     * A buffer handle means enabled with that pointer; true means enabled with
+     * an invalidated pointer; null means confirmed disabled; undefined means
+     * disabled — or unknown while `_unknownAttribs` is set. Index is the
+     * attribute location. Cleared on context loss or cache wipe.
      */
-    enabledAttribs: boolean[];
+    enabledAttribs: (WebGLBuffer | true | null)[];
+    /** Set by a plain (non-brute-force) cache wipe: unrecorded default-VAO
+     *  attribute slots may have been enabled by the host, so disables must not
+     *  elide them until `unbindAllAttributes` normalizes every slot. @internal */
+    _unknownAttribs?: boolean;
     /**
      * Attribute locations currently configured with a non-default vertex divisor
      * (instanced attributes), mirroring Babylon's `_currentInstanceLocations`.
@@ -219,20 +236,21 @@ function resetRenderStateArray(rs: Float64Array): void {
     applyRenderStateSentinels(rs);
 }
 
-/** Allocate a fresh, fully-null GLState sized for `maxTextureUnits`. */
+/** Allocate a fresh GLState with unknown texture, VAO and framebuffer bindings
+ *  (the canvas context may already be in use by a host), sized for `maxTextureUnits`. */
 export function createGLState(maxTextureUnits: number): GLState {
     return {
         currentProgram: null,
-        activeTextureUnit: 0,
-        boundTextures: new Array<WebGLTexture | null>(maxTextureUnits).fill(null),
+        activeTextureUnit: -1,
+        boundTextures: new Array<WebGLTexture | null | undefined>(maxTextureUnits),
         boundArrayBuffer: null,
         boundElementBuffer: null,
-        boundVao: null,
+        boundVao: undefined,
         viewportX: 0,
         viewportY: 0,
         viewportW: 0,
         viewportH: 0,
-        boundFramebuffer: null,
+        boundFramebuffer: undefined,
         rs: createRenderStateArray(),
         statesDirty: false,
         scissorEnabled: -1,
@@ -257,7 +275,9 @@ export function createGLState(maxTextureUnits: number): GLState {
  *  deferred render-state array (BOTH the actual applied values and the DESIRED
  *  twins) plus `statesDirty` — to its unset sentinel, WITHOUT discarding owned
  *  GPU resources (the shared quad). After this, the next setter in each category
- *  is re-issued rather than elided.
+ *  is re-issued rather than elided. The VAO and framebuffer bindings become
+ *  `undefined` (unknown), NOT `null`: `null` is a real binding (default VAO /
+ *  canvas) and would elide the rebind while the host's object is still bound.
  *
  *  Used by `resetGLState` (context-lost) and by `wipeGLStateCache` (a host that
  *  shares the GL context calling in after mutating raw `gl.*` state). The shared
@@ -265,16 +285,16 @@ export function createGLState(maxTextureUnits: number): GLState {
  *  here to avoid leaking + needlessly rebuilding them every render scope. */
 export function resetGLStateCache(state: GLState): void {
     state.currentProgram = null;
-    state.activeTextureUnit = 0;
-    state.boundTextures.fill(null);
+    state.activeTextureUnit = -1;
+    state.boundTextures.fill(undefined);
     state.boundArrayBuffer = null;
     state.boundElementBuffer = null;
-    state.boundVao = null;
+    state.boundVao = undefined;
     state.viewportX = 0;
     state.viewportY = 0;
     state.viewportW = 0;
     state.viewportH = 0;
-    state.boundFramebuffer = null;
+    state.boundFramebuffer = undefined;
     resetRenderStateArray(state.rs);
     state.statesDirty = false;
     state.scissorEnabled = -1;

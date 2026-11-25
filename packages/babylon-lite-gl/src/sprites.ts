@@ -7,8 +7,8 @@
  * This is the lite-gl equivalent of Babylon's `SpriteRenderer` + `ThinSprite`
  * (`Sprites/spriteRenderer.js`, `Sprites/thinSprite.js`). The vertex layout,
  * per-cell UV math and corner/rotation transform are copied verbatim from the
- * non-instanced path of Babylon's `SpriteRenderer` so a future NeonBrush port
- * renders identically. The shaders are the GLSL ES 3.00 translation of
+ * non-instanced path of Babylon's `SpriteRenderer` so a ported `ThinEngine`
+ * consumer renders identically. The shaders are the GLSL ES 3.00 translation of
  * Babylon's `Shaders/sprites.vertex.js` / `sprites.fragment.js`, with the
  * fog / log-depth / pixel-perfect / alpha-test branches removed (lite-gl has
  * no depth attachment by default — see notes on `disableDepthWrite` below).
@@ -234,10 +234,8 @@ export interface GLSpriteRenderer {
     /** @internal Preallocated CPU-side vertex scratch — reused every frame
      *  (`renderSprites` performs zero allocations). */
     _vertexData: Float32Array;
-    /** @internal Preallocated index data, uploaded once. */
-    _indices: Uint16Array;
     /** @internal Context-restored handler — rebuilds the GPU buffers. */
-    _restore: () => void;
+    _restore?: () => void;
     /** @internal True once disposed; subsequent calls are no-ops. */
     _disposed: boolean;
 }
@@ -250,7 +248,9 @@ export interface GLSpriteRenderer {
  * Preallocates the CPU vertex scratch and the index buffer at `capacity`, so
  * {@link renderSprites} performs no allocations. The sprite GPU buffers are
  * rebuilt automatically on `webglcontextrestored` (the owned effect is rebuilt
- * by the engine's context-restore protocol).
+ * by the engine's context-restore protocol), unless the engine is host-owned
+ * (`createHostOwnedGLEngine`). Static index data is regenerated on rebuild, not
+ * retained.
  *
  * @param engine - The engine to create GL resources on.
  * @param options - See {@link GLSpriteRendererOptions}.
@@ -280,19 +280,6 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
         attributeNames: SPRITE_ATTRIBUTES,
     });
 
-    // Build the static index buffer data once: [0,1,2, 0,2,3] per sprite.
-    const indices = new Uint16Array(capacity * INDICES_PER_SPRITE);
-    for (let i = 0; i < capacity; i++) {
-        const v = i * VERTS_PER_SPRITE;
-        const o = i * INDICES_PER_SPRITE;
-        indices[o] = v;
-        indices[o + 1] = v + 1;
-        indices[o + 2] = v + 2;
-        indices[o + 3] = v;
-        indices[o + 4] = v + 2;
-        indices[o + 5] = v + 3;
-    }
-
     const renderer: GLSpriteRenderer = {
         texture: options.texture,
         cellWidth,
@@ -307,16 +294,16 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
         _vbo: null,
         _ibo: null,
         _vertexData: new Float32Array(capacity * VERTS_PER_SPRITE * FLOATS_PER_VERTEX),
-        _indices: indices,
-        _restore: () => {},
         _disposed: false,
     };
 
-    renderer._restore = (): void => {
-        buildSpriteBuffers(engine, renderer);
-    };
-    onContextRestored(engine, renderer._restore);
     buildSpriteBuffers(engine, renderer);
+    if (!engine._noRestore) {
+        renderer._restore = (): void => {
+            buildSpriteBuffers(engine, renderer);
+        };
+        onContextRestored(engine, renderer._restore);
+    }
     return renderer;
 }
 
@@ -518,7 +505,9 @@ export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void {
         return;
     }
     renderer._disposed = true;
-    offContextRestored(engine, renderer._restore);
+    if (renderer._restore) {
+        offContextRestored(engine, renderer._restore);
+    }
     disposeEffect(renderer._effect);
     if (!engine._isLost && !engine._disposed) {
         const gl = engine.gl;
@@ -599,5 +588,14 @@ function buildSpriteBuffers(engine: GLEngineContext, renderer: GLSpriteRenderer)
     renderer._ibo = ibo;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     s.boundElementBuffer = ibo;
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, renderer._indices, gl.STATIC_DRAW);
+    // Regenerate the static [0,1,2, 0,2,3] pattern instead of retaining it:
+    // creation and the rare restore pay one transient array, nothing per frame.
+    const indices = new Uint16Array(renderer.capacity * INDICES_PER_SPRITE);
+    for (let i = 0, v = 0; i < indices.length; i += INDICES_PER_SPRITE, v += VERTS_PER_SPRITE) {
+        indices[i] = indices[i + 3] = v;
+        indices[i + 1] = v + 1;
+        indices[i + 2] = indices[i + 4] = v + 2;
+        indices[i + 5] = v + 3;
+    }
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 }

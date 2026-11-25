@@ -40,16 +40,14 @@ describe("babylon-lite-gl bundle size ceilings", () => {
                 })
             ).outputFiles[0]!;
 
-        // Exact pre-3D sizes, measured with this same esbuild configuration at HEAD
-        // (createRawTexture includes the `_engine` back-pointer and its optional
-        // `format` / `type` defaults).
+        // Pre-3D budgets measured with this same esbuild configuration.
         for (const [name, maxBytes] of [
             ["createRawTexture", 1755],
             ["bindTexture", 317],
             ["setEffectTexture", 419],
         ] as const) {
             const output = await bundle(name);
-            expect(output.contents.byteLength, `${name} grew beyond its pre-3D bundle`).toBeLessThanOrEqual(maxBytes);
+            expect(output.contents.byteLength, `${name} grew beyond its 2D-only budget`).toBeLessThanOrEqual(maxBytes);
             expect(output.text).not.toMatch(/texImage3D|TEXTURE_3D|_boundTextures3D/);
         }
         expect((await bundle("createTexture3DFromPixels")).text).toContain("texImage3D");
@@ -57,10 +55,10 @@ describe("babylon-lite-gl bundle size ceilings", () => {
 
     for (const [sceneId, baselineBytes] of [
         [1, 11801],
-        [3, 16832],
+        [3, 16843],
         [6, 14850],
     ] as const) {
-        it(`keeps 2D-only scene${sceneId} at or below its pre-3D byte count`, async () => {
+        it(`keeps 2D-only scene${sceneId} within its byte budget`, async () => {
             const result = await build({
                 entryPoints: [resolve(repoRoot, `lab/gl/src/scene${sceneId}.ts`)],
                 bundle: true,
@@ -123,6 +121,27 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect(waiting).toContain("requestAnimationFrame");
         expect(waiting).toContain("cancelAnimationFrame");
         expect(waiting).toContain("new Promise");
+    });
+
+    it("fails fast on incomplete framebuffers by default", async () => {
+        const bundle = async (exports: string) =>
+            (
+                await build({
+                    stdin: { contents: `export { ${exports} } from "babylon-lite-gl";`, resolveDir: repoRoot, sourcefile: "framebuffer-entry.ts" },
+                    bundle: true,
+                    minify: true,
+                    treeShaking: true,
+                    format: "esm",
+                    target: "esnext",
+                    platform: "browser",
+                    legalComments: "none",
+                    alias: liteGlAlias,
+                    write: false,
+                })
+            ).outputFiles[0]!.text;
+        const defaults = await bundle("createGLEngine, createRenderTarget, generateRenderTargetStencil");
+        expect(defaults).toContain("checkFramebufferStatus");
+        expect(defaults).toContain("framebuffer incomplete");
     });
 
     it("keeps decoded-source creation out of raw-texture-only bundles", async () => {

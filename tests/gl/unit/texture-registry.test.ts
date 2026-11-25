@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+    bindTexture,
     createDynamicTexture,
     createEffect,
     createFloatTexture,
@@ -15,6 +16,7 @@ import {
     loadTexture2D,
     onContextLost,
     onContextRestored,
+    unbindTexture,
     type GLEngineContext,
     type GLTexture,
     type GLTexture3D,
@@ -130,6 +132,25 @@ describe("lite-gl texture registry", () => {
             { name: "deleteTexture", args: [external.handle] },
             { name: "deleteTexture", args: [removed.handle] },
         ]);
+    });
+
+    it("never deletes a borrowed handle (ownsHandle = false) but leaves its slot unknown so an unbind is issued", () => {
+        const { mock, engine, gl } = setup();
+        const borrowed = createTextureFromHandle(engine, {} as WebGLTexture, 1, 1, undefined, false);
+        bindTexture(borrowed, 2);
+        expect(engine._state.boundTextures[2]).toBe(borrowed.handle);
+        mock.clear();
+        disposeTexture(borrowed);
+        disposeTexture(borrowed);
+        expect(mock.log).toEqual([]);
+        expect(borrowed._disposed).toBe(true);
+        // The owner may still hold the handle bound on that unit, so the slot is
+        // unknown (not "unbound") and the next unbind must reach GL.
+        expect(engine._state.boundTextures[2]).toBeUndefined();
+        expect(engine._textures.has(borrowed)).toBe(false);
+        unbindTexture(engine, 2);
+        unbindTexture(engine, 2);
+        expect(mock.log).toEqual([{ name: "bindTexture", args: [gl.TEXTURE_2D, null] }]);
     });
 
     it("can dispose every mixed 2D/3D texture while traversing the live registry", () => {

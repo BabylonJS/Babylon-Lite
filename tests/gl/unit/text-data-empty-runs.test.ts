@@ -4,6 +4,9 @@ import type { GLGlyphCurves } from "../../../packages/babylon-lite-gl/src/text/g
 import { createGlyphStorage } from "../../../packages/babylon-lite-gl/src/text/glyph-storage";
 import type { GLGlyphRun } from "../../../packages/babylon-lite-gl/src/text/text-data";
 import { createTextData, updateTextData } from "../../../packages/babylon-lite-gl/src/text/text-data";
+import { createGLEngine, createHostOwnedGLEngine } from "../../../packages/babylon-lite-gl/src/context";
+import { ensureTextDataGpu } from "../../../packages/babylon-lite-gl/src/text/_gpu/text-instances";
+import { createMockCanvas, createMockGL } from "./_lite-gl-mock";
 
 function makeGlyph(glyphId: number): GLGlyphCurves {
     return {
@@ -30,6 +33,26 @@ function run(curveSet: string, glyphIds: number[]): GLGlyphRun {
 }
 
 describe("lite-gl text data: groups referenced by empty runs", () => {
+    it.each([false, true])("GPU capacity tracking does not depend on retained restoration data (host-owned=%s)", (hostOwned) => {
+        const mock = createMockGL();
+        const canvas = createMockCanvas(mock);
+        const engine = hostOwned ? createHostOwnedGLEngine(canvas) : createGLEngine(canvas);
+        const data = createTextData(makeStorage(), [run("f", [1])]);
+        const gpu = ensureTextDataGpu(engine, data);
+        const buffer = gpu._instanceBuf;
+        mock.clear();
+        ensureTextDataGpu(engine, data);
+        expect(mock.log).toEqual([]);
+        expect(gpu._instanceBuf).toBe(buffer);
+        updateTextData(data, { update: "addRun", run: run("f", new Array<number>(100).fill(1)) });
+        mock.clear();
+        ensureTextDataGpu(engine, data);
+        expect(mock.count("createBuffer")).toBe(1);
+        expect(mock.count("deleteBuffer")).toBe(1);
+        expect(gpu._instanceBuf).not.toBe(buffer);
+        expect(gpu._instanceBuf.byteLength).toBe(data._instances.byteLength);
+    });
+
     it("keeps a group alive while an empty run still references it, then retires it with the last run", () => {
         const empty = run("f", []);
         const drawable = run("f", [1]);

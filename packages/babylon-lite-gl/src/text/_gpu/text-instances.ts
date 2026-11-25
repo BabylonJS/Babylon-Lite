@@ -27,7 +27,7 @@ export function ensureTextDataGpu(engine: GLEngineContext, data: GLTextData): Te
             disposeBuffer(buffer);
             throw error;
         }
-    } else if (gpu._instanceBuf._data !== data._instances) {
+    } else if (gpu._instanceBuf.byteLength !== data._instances.byteLength) {
         // Retain the live CPU pool, including partial edits, for context restoration.
         const buffer = createVertexBuffer(engine, data._instances, true);
         disposeBuffer(gpu._instanceBuf);

@@ -178,7 +178,7 @@ that native raw uploads take RGBA8 bytes.
 
 ### 2.5 `GLOps<F extends GLFamily>`
 
-`GLOps` has one `readonly` function-typed property for each of the 134
+`GLOps` has one `readonly` function-typed property for each of the 137
 backend-neutral operations of the web barrel (§3 of `00-lite-gl.md`). Each
 member has the semantics of the identically named export and the exact web
 signature with these substitutions, applied wherever the web type appears:
@@ -198,16 +198,16 @@ signature with these substitutions, applied wherever the web type appears:
 
 `GLOpName` is `keyof GLOps<GLFamily>`.
 
-The 134 members, grouped as in the web barrel:
+The 137 members, grouped as in the web barrel:
 
-- **Engine (22)** — `resizeGLEngine`, `setGLEngineSize`, `wipeGLStateCache`,
+- **Engine (23)** — `resizeGLEngine`, `setGLEngineSize`, `wipeGLStateCache`,
   `getRenderWidth`, `getRenderHeight`, `getTextureCount`,
   `getCurrentRenderTarget`, `getHardwareScalingLevel`,
   `setHardwareScalingLevel`, `onContextLost`, `offContextLost`,
   `onContextRestored`, `offContextRestored`, `getAlphaToCoverage`,
   `getCurrentSampleCount`, `setAlphaToCoverage`, `runRenderLoop`,
   `stopRenderLoop`, `beginFrame`, `endFrame`, `captureGPUFrameTime`,
-  `getGPUFrameTimeCounter`.
+  `getGPUFrameTimeCounter`, `setFramebufferValidation`.
 - **Effects (29)** — `createEffect`, `useEffect`, `isEffectReady`,
   `getEffectCompilationError`, `executeWhenCompiled`, `disposeEffect`,
   `setEffectFloat`, `setEffectFloat2`, `setEffectFloat3`, `setEffectFloat4`,
@@ -229,9 +229,9 @@ The 134 members, grouped as in the web barrel:
   `bindRenderTarget`, `restoreDefaultFramebuffer`, `presentRenderTarget`,
   `generateRenderTargetMipMaps`, `resizeRenderTarget`,
   `readRenderTargetPixels`, `disposeRenderTarget`.
-- **Meshes (12)** — `createVertexBuffer`, `updateVertexBuffer`,
-  `createIndexBuffer`, `disposeBuffer`, `bindIndexBuffer`, `bindAttributes`,
-  `unbindInstanceAttributes`, `drawIndexed`, `createMeshVao`, `bindMeshVao`,
+- **Meshes (15)** — `createVertexBuffer`, `updateVertexBuffer`,
+  `createIndexBuffer`, `disposeBuffer`, `bindIndexBuffer`, `bindAttributes`, `bindAttributesCached`,
+  `disableAttributeByIndex`, `unbindAllAttributes`, `unbindInstanceAttributes`, `drawIndexed`, `createMeshVao`, `bindMeshVao`,
   `drawMesh`, `disposeMeshVao`.
 - **State (12)** — `setBlendMode`, `setBlendState`, `disableBlend`,
   `setDepthState`, `setCullState`, `setStencilState`, `setStencilOpSeparate`,
@@ -267,7 +267,7 @@ Each backend lists them in a host-ops interface whose members are the
 
 | Interface         | Members                                                                                                                                                                                                                                                        |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WebGLHostOps`    | `createGLEngine`, `disposeGLEngine`, `getRenderingCanvas`, `createTextureFromHandle`, `createTextureFromSource`, `updateDynamicTexture`, `clearDynamicTextureSource`, `createHtmlElementTexture`, `updateHtmlElementTexture`, `readRenderTargetPixelsToBuffer` |
+| `WebGLHostOps`    | `createGLEngine`, `createHostOwnedGLEngine`, `disposeGLEngine`, `getRenderingCanvas`, `createTextureFromHandle`, `createTextureFromSource`, `updateDynamicTexture`, `clearDynamicTextureSource`, `createHtmlElementTexture`, `updateHtmlElementTexture`, `readRenderTargetPixelsToBuffer` |
 | `NativeGLHostOps` | `createNativeEngine`, `disposeNativeEngine`, `wrapNativeTexture`, `updateWrappedNativeTexture`                                                                                                                                                                 |
 
 `clearDynamicTextureSource` and `updateHtmlElementTexture` take only a
@@ -277,7 +277,7 @@ it.
 
 Every callable export of a backend entry is exactly one of: a `GLOps` member
 implemented with the family signature, or a host-ops member. The web barrel
-implements all 134 `GLOps` members; the native entry implements the 39 members
+implements all 137 `GLOps` members; the native entry implements the 39 members
 it exports. A backend that does not implement an operation does not export it.
 
 ### 2.7 Kits and the family marker
