@@ -434,18 +434,22 @@ export function bindAttributesCached(vb: GLVertexBuffer, descriptors: readonly G
  * Leaves its divisor unchanged, like ThinEngine's `disableAttributeByIndex`;
  * use {@link unbindInstanceAttributes} for divisor cleanup. Named VAOs are
  * untouched. No-op on a lost/disposed engine. The enable cache is cleared on
- * context loss or cache reset, so subsequent binds replay their enables.
+ * context loss or cache reset, so subsequent binds replay their enables. After
+ * a plain `wipeGLStateCache`, a location lite-gl has not confirmed
+ * disabled is treated as unknown (the host may have enabled it) and is disabled.
  *
  * @param engine - The engine.
  * @param location - The attribute location to disable.
  */
 export function disableAttributeByIndex(engine: GLEngineContext, location: number): void {
-    if (engine._isLost || engine._disposed || !engine._state.enabledAttribs[location]) {
+    const s = engine._state;
+    const enabled = s.enabledAttribs[location];
+    if (engine._isLost || engine._disposed || (s._unknownAttribs ? enabled === null : !enabled)) {
         return;
     }
     bindDefaultVao(engine);
     engine.gl.disableVertexAttribArray(location);
-    engine._state.enabledAttribs[location] = null;
+    s.enabledAttribs[location] = null;
 }
 
 /**
@@ -453,7 +457,9 @@ export function disableAttributeByIndex(engine: GLEngineContext, location: numbe
  * Cached across frames and allocation-free; named VAOs and instance divisors
  * are unchanged (ThinEngine's `unbindAllAttributes` semantics). No-op on a
  * lost/disposed engine. Context loss/cache reset clears the enable cache;
- * subsequent {@link bindAttributes} calls replay their enables.
+ * subsequent {@link bindAttributes} calls replay their enables. The first call
+ * after a plain `wipeGLStateCache` disables every location up to
+ * `MAX_VERTEX_ATTRIBS` once, since the host may have enabled any of them.
  *
  * @param engine - The engine.
  */
@@ -461,12 +467,12 @@ export function unbindAllAttributes(engine: GLEngineContext): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
-    const enabled = engine._state.enabledAttribs;
-    for (let location = 0; location < enabled.length; location++) {
-        if (enabled[location]) {
-            disableAttributeByIndex(engine, location);
-        }
+    const s = engine._state;
+    const count = s._unknownAttribs ? (engine.gl.getParameter(engine.gl.MAX_VERTEX_ATTRIBS) as number) : s.enabledAttribs.length;
+    for (let location = 0; location < count; location++) {
+        disableAttributeByIndex(engine, location);
     }
+    s._unknownAttribs = false;
 }
 
 /**

@@ -24,6 +24,7 @@
 import type { GLEngineContext } from "./context.js";
 import type { GLClearOptions } from "./family.js";
 import type { GLRenderTarget } from "./render-target.js";
+import { validateFramebuffer } from "./framebuffer-validation.js";
 import { applyGLStates } from "./apply-states.js";
 import {
     RS_CLEAR_A,
@@ -584,8 +585,8 @@ function flushColorMask(engine: GLEngineContext): void {
  *  `generateDepthBuffer: true`. When `false` the attachment is stencil-only
  *  (`STENCIL_INDEX8` on `STENCIL_ATTACHMENT`).
  * @throws If a renderbuffer handle could not be allocated, or the framebuffer is
- *  incomplete after attaching when `setFramebufferValidation(engine, true)` is
- *  enabled. Completeness queries are disabled by default.
+ *  incomplete after attaching (unless `setFramebufferValidation(engine, false)`
+ *  opted out of completeness checks).
  */
 export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { depth?: boolean }): void {
     const engine = rt._engine;
@@ -600,8 +601,8 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
         const gl = e.gl;
         // Capture the caller's draw target so this helper is STATE-NEUTRAL: it must
         // not silently redirect subsequent draws to `rt` (during an internal
-        // rebuild `prevFb` is `rt._framebuffer`, which the core validates next
-        // only when debug validation is enabled).
+        // rebuild `prevFb` is `rt._framebuffer`, which the core re-checks next
+        // unless validation was opted out).
         // An unknown (wiped) binding is restored as the canvas.
         const prevFb = e._state.boundFramebuffer ?? null;
         const newRb = gl.createRenderbuffer();
@@ -616,8 +617,8 @@ export function generateRenderTargetStencil(rt: GLRenderTarget, options?: { dept
             gl.renderbufferStorage(RENDERBUFFER, format, rt.width, rt.height);
             gl.framebufferRenderbuffer(FRAMEBUFFER, attachment, RENDERBUFFER, newRb);
             gl.bindRenderbuffer(RENDERBUFFER, null);
-            e._validateFramebuffer?.(gl, true);
-            // Commit only after attachment succeeds (and debug validation passes): release the buffer we
+            validateFramebuffer(e, true);
+            // Commit only after a complete attachment: release the buffer we
             // replaced (the core depth-only one, or our own from a prior rebuild).
             if (rt._depthStencil !== null) {
                 gl.deleteRenderbuffer(rt._depthStencil);

@@ -230,10 +230,11 @@ export interface GLEngineContext {
     /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
      * @internal */
     _gpuFrameTime?: GLPerfCounter;
-    /** Optional debug validation installed by `setFramebufferValidation`.
-     * Configuration, not cached GL state: retained across cache wipes/restores.
+    /** Set by `setFramebufferValidation(engine, false)` to skip framebuffer
+     * completeness checks. Configuration, not cached GL state: retained across
+     * cache wipes/restores.
      * @internal */
-    _validateFramebuffer?: (gl: WebGL2RenderingContext, stencil: boolean) => void;
+    _skipFramebufferValidation?: boolean;
     /** Sample count of the canvas drawing buffer, queried lazily by `presentRenderTarget`.
      * @internal */
     _canvasSamples?: number;
@@ -483,6 +484,9 @@ export function wipeGLStateCache(engine: GLEngineContext, bruteForce = false): v
     }
     const s = engine._state;
     resetGLStateCache(s);
+    // Brute force disables every attribute array below; a plain wipe leaves
+    // host-enabled arrays unknown (ThinEngine's `_mustWipeVertexAttributes`).
+    s._unknownAttribs = !bruteForce;
     const invalidators = engine._stateCacheInvalidators;
     if (invalidators) {
         for (const invalidate of invalidators) {

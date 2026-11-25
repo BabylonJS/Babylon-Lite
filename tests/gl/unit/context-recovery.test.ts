@@ -7,7 +7,7 @@ import { createTexture3DFromPixels } from "../../../packages/babylon-lite-gl/src
 import { createTextureFromSource } from "../../../packages/babylon-lite-gl/src/texture-source";
 import { createDynamicTexture, updateDynamicTexture } from "../../../packages/babylon-lite-gl/src/dynamic-texture";
 import { createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
-import { createRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
+import { createRenderTarget, resizeRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createSpriteRenderer, renderSprites } from "../../../packages/babylon-lite-gl/src/sprites";
 import { runRenderLoop } from "../../../packages/babylon-lite-gl/src/render-loop";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -226,6 +226,44 @@ describe("lite-gl: host-owned recovery", () => {
         expect(mock.log.find((call) => call.name === "texImage2D")?.args.at(-1)).toBe(source);
     });
 
+    it("dynamic uploads forget their source even when the upload throws", () => {
+        const { engine } = setup(true);
+        const dynamic = createDynamicTexture(engine, 1, 1);
+        const failure = new Error("upload failed");
+        const upload = vi.spyOn(engine.gl, "texImage2D").mockImplementation(() => {
+            throw failure;
+        });
+        try {
+            expect(() => updateDynamicTexture(dynamic, { width: 2, height: 2 } as HTMLCanvasElement)).toThrow(failure);
+        } finally {
+            upload.mockRestore();
+        }
+        expect(dynamic._dynSource).toBeNull();
+    });
+
+    it("a populated caller-owned raw texture resized during loss replays its contents, then re-specifies at the new size", () => {
+        const { mock, canvas, engine } = setup();
+        const pixels = new Uint8Array(4 * 4 * 4);
+        const raw = createRawTexture(engine, pixels, 4, 4);
+        const rt = createRenderTarget(engine, 4, 4, { colorTexture: raw });
+        fireLost(canvas);
+        resizeRenderTarget(rt, 8, 6);
+        mock.clear();
+        fireRestored(canvas);
+        const specs = mock.log.filter((call) => call.name === "texImage2D").map((call) => [call.args[3], call.args[4], call.args.at(-1)]);
+        expect(specs).toEqual([
+            [4, 4, pixels],
+            [8, 6, null],
+        ]);
+        expect([raw.width, raw.height]).toEqual([8, 6]);
+        expect(mock.log.some((call) => call.name === "framebufferTexture2D" && call.args[3] === raw.handle)).toBe(true);
+        expect(rt.isReady).toBe(true);
+        // Later replays re-specify the empty texture at the new size.
+        mock.clear();
+        raw._upload(engine);
+        expect(mock.log.filter((call) => call.name === "texImage2D").map((call) => [call.args[3], call.args[4], call.args.at(-1)])).toEqual([[8, 6, null]]);
+    });
+
     it.each([false, true])("async image bitmaps are closed after upload only with opt-out=%s", async (optOut) => {
         const { engine } = setup(optOut);
         const close = vi.fn();
@@ -249,17 +287,22 @@ describe("lite-gl: host-owned recovery", () => {
         });
         fireLost(canvas);
         mock.clear();
+        if (optOut) {
+            // A host-owned engine recreates its resources, so the load fails
+            // instead of reporting a texture that will never become ready.
+            await expect(loaded).rejects.toThrow("lite-gl: context lost while loading test.png");
+            expect(mock.log).toEqual([]);
+            expect(close).toHaveBeenCalledTimes(1);
+            fireRestored(canvas);
+            expect(mock.log).toEqual([]);
+            return;
+        }
         const tex = await loaded;
         expect(mock.log).toEqual([]);
         expect(tex.isReady).toBe(false);
-        expect(close).toHaveBeenCalledTimes(optOut ? 1 : 0);
+        expect(close).not.toHaveBeenCalled();
         fireRestored(canvas);
-        if (optOut) {
-            expect(mock.log).toEqual([]);
-            expect(tex.isReady).toBe(false);
-        } else {
-            expect(tex.isReady).toBe(true);
-            expect(mock.log.find((call) => call.name === "texImage2D")?.args.at(-1)).toBe(bitmap);
-        }
+        expect(tex.isReady).toBe(true);
+        expect(mock.log.find((call) => call.name === "texImage2D")?.args.at(-1)).toBe(bitmap);
     });
 });

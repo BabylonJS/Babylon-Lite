@@ -182,10 +182,15 @@ export interface GLState {
      * Per-location vertex-attribute bindings for the DEFAULT (null) VAO —
      * the mesh / instancing path (mirrors Babylon's `_vertexAttribArraysEnabled`).
      * A buffer handle means enabled with that pointer; true means enabled with
-     * an invalidated pointer; null/undefined means disabled. Index is the
+     * an invalidated pointer; null means confirmed disabled; undefined means
+     * disabled — or unknown while `_unknownAttribs` is set. Index is the
      * attribute location. Cleared on context loss or cache wipe.
      */
     enabledAttribs: (WebGLBuffer | true | null)[];
+    /** Set by a plain (non-brute-force) cache wipe: unrecorded default-VAO
+     *  attribute slots may have been enabled by the host, so disables must not
+     *  elide them until `unbindAllAttributes` normalizes every slot. @internal */
+    _unknownAttribs?: boolean;
     /**
      * Attribute locations currently configured with a non-default vertex divisor
      * (instanced attributes), mirroring Babylon's `_currentInstanceLocations`.

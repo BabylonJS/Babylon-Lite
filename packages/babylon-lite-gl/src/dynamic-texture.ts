@@ -126,9 +126,14 @@ export function updateDynamicTexture(tex: GLTexture, source: TexImageSource, opt
     tex._dynSource = source;
     tex._invertY = options?.invertY;
     tex._premultiplyAlpha = options?.premultiplyAlpha;
-    tex._upload(engine);
-    if (engine._noRestore) {
-        tex._dynSource = null;
+    try {
+        tex._upload(engine);
+    } finally {
+        // Also on a throwing upload (e.g. a cross-origin source): a host-owned
+        // engine never replays, so it must not keep the source alive.
+        if (engine._noRestore) {
+            tex._dynSource = null;
+        }
     }
 }
 

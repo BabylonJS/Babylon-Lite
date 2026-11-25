@@ -123,7 +123,7 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect(waiting).toContain("new Promise");
     });
 
-    it("keeps synchronous framebuffer queries out of non-debug bundles", async () => {
+    it("fails fast on incomplete framebuffers by default", async () => {
         const bundle = async (exports: string) =>
             (
                 await build({
@@ -140,9 +140,8 @@ describe("babylon-lite-gl bundle size ceilings", () => {
                 })
             ).outputFiles[0]!.text;
         const defaults = await bundle("createGLEngine, createRenderTarget, generateRenderTargetStencil");
-        expect(defaults).not.toContain("checkFramebufferStatus");
-        expect(defaults).not.toContain("framebuffer incomplete");
-        expect(await bundle("setFramebufferValidation")).toContain("checkFramebufferStatus");
+        expect(defaults).toContain("checkFramebufferStatus");
+        expect(defaults).toContain("framebuffer incomplete");
     });
 
     it("keeps decoded-source creation out of raw-texture-only bundles", async () => {

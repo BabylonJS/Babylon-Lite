@@ -406,8 +406,8 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         expect(store).toHaveLength(1);
         expect(store[0]?.args[1]).toBe(gl.DEPTH24_STENCIL8);
         expect(callsNamed(mock, "framebufferRenderbuffer")[0]?.args[1]).toBe(gl.DEPTH_STENCIL_ATTACHMENT);
-        // The default path does not synchronize to query completeness.
-        expect(mock.count("checkFramebufferStatus")).toBe(0);
+        // The default path validates the stencil attachment once.
+        expect(mock.count("checkFramebufferStatus")).toBe(1);
         expect(rt._depthStencil).not.toBeNull();
         expect(rt._depthStencil).not.toBe(depthOnly);
     });
@@ -493,7 +493,6 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
 
     it("deletes the new renderbuffer and restores the binding when the framebuffer is incomplete", () => {
         const { mock, engine } = makeRTEngine();
-        setFramebufferValidation(engine, true);
         const gl = engine.gl;
         const rt = createRenderTarget(engine, 64, 64); // no depth/stencil yet
         expect(rt._depthStencil).toBeNull();
@@ -518,7 +517,6 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
 
     it("rolls back to the core depth buffer when a with-depth attach is incomplete", () => {
         const { mock, engine } = makeRTEngine();
-        setFramebufferValidation(engine, true);
         const gl = engine.gl;
         const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         const coreDepth = rt._depthStencil;
@@ -574,7 +572,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         expect(callsNamed(mock, "deleteRenderbuffer").some((call) => call.args[0] === rt._depthStencil)).toBe(false);
     });
 
-    it("still rolls back an attachment exception without debug validation", () => {
+    it("rolls back an attachment exception raised before validation", () => {
         const { mock, engine } = makeRTEngine();
         const rt = createRenderTarget(engine, 32, 32, { generateDepthBuffer: true });
         const oldDepth = rt._depthStencil;
@@ -594,12 +592,11 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         }
     });
 
-    it("debug restore cleans up the live packed buffer exactly once when the final core validation fails", () => {
+    it("restore cleans up the live packed buffer exactly once when the final core validation fails", () => {
         const { mock, canvas, engine } = makeRTEngine();
         const gl = engine.gl;
         const rt = createRenderTarget(engine, 32, 32, { generateDepthBuffer: true });
         generateRenderTargetStencil(rt);
-        setFramebufferValidation(engine, true);
         fireLost(canvas);
         mock.clear();
         const check = vi.spyOn(gl, "checkFramebufferStatus").mockReturnValueOnce(gl.FRAMEBUFFER_COMPLETE).mockReturnValueOnce(0x8cdd);

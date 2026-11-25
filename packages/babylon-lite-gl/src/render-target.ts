@@ -28,6 +28,7 @@
  */
 import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
+import { validateFramebuffer } from "./framebuffer-validation.js";
 
 /**
  * Presents a retained composition target to the whole canvas without disturbing
@@ -236,8 +237,8 @@ export interface GLRenderTarget {
  * @returns The new {@link GLRenderTarget}.
  * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
  *  positive integers, a GL handle could not be allocated, or the resulting
- *  framebuffer is not complete when `setFramebufferValidation(engine, true)` is
- *  enabled. Completeness queries are disabled by default. On failure every partial GPU object (including
+ *  framebuffer is not complete (unless `setFramebufferValidation(engine, false)`
+ *  opted out of completeness checks). On failure every partial GPU object (including
  *  an owned color texture) is released first.
  */
 export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
@@ -607,6 +608,12 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         rt._restore = (target: GLEngineContext): void => {
             // Resilient: a restore failure must not break the engine's restore loop.
             try {
+                const tex = rt.texture;
+                // A BYO raw texture replays its last upload; apply a resize made
+                // during loss before reattaching it (contents discarded, as in resize).
+                if (!config.ownsColorTexture && (tex.width !== rt.width || tex.height !== rt.height)) {
+                    tex._updateRaw?.(target, null, rt.width, rt.height, 4);
+                }
                 allocateRenderTargetGpu(target, rt);
             } catch (err) {
                 console.error("lite-gl: render target restore failed", err);
@@ -641,7 +648,7 @@ function validateSize(width: number, height: number): void {
 
 /**
  * (Re)allocate the color texture (iff owned), framebuffer and depth/stencil
- * renderbuffer into fresh handles, attach them, and optionally validate completeness.
+ * renderbuffer into fresh handles, attach them, and validate completeness (unless opted out).
  * Shared by create / resize / context-restore. No-op on a lost/disposed context.
  *
  * ATOMIC: captures the previously-bound framebuffer and restores it in a
@@ -710,7 +717,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         // A helper-attached stencil replaces/augments the depth-only buffer.
         rt._rebuildDepthStencil?.(engine);
 
-        engine._validateFramebuffer?.(gl, false);
+        validateFramebuffer(engine, false);
         rt.isReady = true;
     } catch (e) {
         // Free whatever depth/stencil renderbuffer is currently attached. After a

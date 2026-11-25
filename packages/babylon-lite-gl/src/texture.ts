@@ -312,12 +312,18 @@ export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView 
 
     // Mutable upload state — `updateRawTexture` mutates these and re-runs
     // `upload`, so the context-restore replay (which calls the same `upload`)
-    // always reproduces the latest contents.
+    // always reproduces the latest contents. The replayed dimensions stay
+    // paired with the replayed pixels: `tex.width` / `height` may run ahead of
+    // them (a render-target resize during loss, applied by its restore).
     let curData = data;
+    let curWidth = width;
+    let curHeight = height;
     let curAlign = opts.unpackAlignment ?? 4;
 
-    const upload = (target: GLEngineContext, pixels = curData, w = tex.width, h = tex.height, alignment = curAlign): void => {
+    const upload = (target: GLEngineContext, pixels = curData, w = curWidth, h = curHeight, alignment = curAlign): void => {
         curData = target._noRestore ? null : pixels;
+        curWidth = w;
+        curHeight = h;
         curAlign = alignment;
         tex.width = w;
         tex.height = h;
@@ -593,8 +599,9 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
  *  transparent placeholder); `isReady` flips true once the image has been
  *  decoded and uploaded. The decoded `ImageBitmap` is retained on the texture
  *  for offline-safe `webglcontextrestored` replay by default; on a host-owned
- *  engine (`createHostOwnedGLEngine`), it is closed/released after the upload (also when
- *  decoding finishes during loss). `invertY` and
+ *  engine (`createHostOwnedGLEngine`), it is closed/released after the upload,
+ *  and a decode finishing while that engine is lost closes the bitmap and
+ *  reports a context-loss error through `onError` instead of `onLoad`. `invertY` and
  *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
  *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
  *  ignored for `ImageBitmap` sources. */
@@ -670,16 +677,20 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
                 return;
             }
             bitmap = bm;
-            // Default recovery defers an in-flight image until restore; an
-            // opted-out host recreates resources instead.
             if (!engine._isLost) {
                 // Through `tex._upload` so a retained mip chain is rebuilt.
                 tex._upload(engine);
                 tex.isReady = true;
             }
+            // Default recovery defers an in-flight image until restore; an
+            // opted-out host releases the bitmap, and a load finishing during
+            // loss fails because the host recreates resources instead.
             if (engine._noRestore) {
                 bitmap = null;
                 bm.close();
+                if (engine._isLost) {
+                    throw new Error(`lite-gl: context lost while loading ${url}`);
+                }
             }
             tex._wasReady = true;
             if (onLoad !== undefined) {
@@ -781,7 +792,9 @@ export function disposeTexture(tex: GLTexture): void {
     const bound = engine._state.boundTextures;
     for (let u = 0; u < bound.length; u++) {
         if (bound[u] === tex.handle) {
-            bound[u] = null;
+            // A deleted handle leaves the unit unbound; a borrowed one is still
+            // bound in GL, so the slot becomes unknown and the next unbind is issued.
+            bound[u] = tex._borrowed ? undefined : null;
         }
     }
 }

@@ -260,35 +260,36 @@ export function onContextRestored(engine: GLEngineContext, cb: () => void): void
 export function offContextRestored(engine: GLEngineContext, cb: () => void): void;
 ```
 
-#### 3.1.1 Framebuffer validation (optional debugging)
+#### 3.1.1 Framebuffer validation
 
 ```ts
 export function setFramebufferValidation(engine: GLEngineContext, enabled: boolean): void;
 ```
 
-Framebuffer completeness queries are **off by default**, matching ThinEngine's
-render-target creation path. `checkFramebufferStatus` synchronizes with the GPU
-process; neither initial allocation, stencil attachment, resize nor restore
-performs that query unless validation is explicitly enabled.
+Framebuffer completeness checks are **on by default**: initial allocation,
+stencil attachment, resize and restore query `checkFramebufferStatus` and
+throw on an incomplete framebuffer (for example a size above
+`MAX_TEXTURE_SIZE`, which WebGL rejects without throwing), so a bad target
+fails at creation instead of silently rendering nothing.
 
-`setFramebufferValidation(engine, true)` installs an optional engine-owned
-validator; `false` removes it. It affects subsequent allocations/attachments,
-not already-built targets or draws, and is a no-op on a lost/disposed engine.
-The installed hook survives state-cache wipes and context restoration because
-this is configuration, not cached GL state. No numeric `rs` slot is needed.
-The validator and error formatting live entirely in the side-effect-free
-`framebuffer-validation.ts` module; the allocation sites contain only an
-optional hook call. Non-debug consumers tree-shake the query code out, and
+Each check synchronizes with the GPU process. `setFramebufferValidation(engine,
+false)` skips them, matching ThinEngine's render-target creation path, for
+hosts that already guarantee valid attachments; `true` re-enables them. It
+affects subsequent allocations/attachments, not already-built targets or
+draws, and is a no-op on a lost/disposed engine. The `_skipFramebufferValidation`
+flag survives state-cache wipes and context restoration because it is
+configuration, not cached GL state. No numeric `rs` slot is needed. The
+validator lives in the side-effect-free `framebuffer-validation.ts` module,
+imported only by the render-target and stencil allocation sites, so
 non-render-target consumers retain no extra runtime code.
 
-In debug mode, the existing incomplete-status errors and cleanup are preserved:
-core allocation deletes its partial owned GPU set and restores the previous
-framebuffer; stencil replacement validates before releasing the old buffer or
-committing the resize/restore hook, and rolls back on failure. With validation
-off, the same ordering applies without the query: successful attachment calls
-precede release/commit. Allocation failures and JavaScript GL exceptions still
-follow the existing rollback paths in both modes. Restore failures remain
-logged and local to the failing render target.
+On an incomplete status, core allocation deletes its partial owned GPU set and
+restores the previous framebuffer; stencil replacement validates before
+releasing the old buffer or committing the resize/restore hook, and rolls back
+on failure. With validation off, the same ordering applies without the query:
+successful attachment calls precede release/commit. Allocation failures and
+JavaScript GL exceptions follow the same rollback paths in both modes. Restore
+failures remain logged and local to the failing render target.
 
 ### 3.2 Render loop
 
@@ -458,7 +459,13 @@ null/unset slots.
 `disableAttributeByIndex` skips null/unset slots; otherwise it binds the
 default VAO through the existing binding cache, disables the array and sets
 the slot null. `unbindAllAttributes` visits enabled locations in ascending
-order and disables them through the same helper. Both skip all work on a
+order and disables them through the same helper.
+After a plain `wipeGLStateCache` (not brute force), the driver may still hold
+enables that external GL code set, so the engine flags attribute state as
+unknown (like ThinEngine's `_mustWipeVertexAttributes`): only a confirmed
+null slot is skipped, and the next `unbindAllAttributes` disables every
+location up to `MAX_VERTEX_ATTRIBS`, then clears the flag. A brute-force wipe
+has already disabled all locations, so it leaves the flag clear. Both skip all work on a
 lost/disposed engine, elide repeated disables across frames, and allocate
 nothing per call. No additional `rs` slot or named state field is needed.
 
@@ -1195,7 +1202,7 @@ export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGL
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
   (+ optional depth). It is failure-atomic: on a bad size, a null GL handle, or an
-  incomplete framebuffer (when debug validation is enabled) it frees the color texture and any partial FBO/renderbuffer
+  incomplete framebuffer (unless validation is opted out) it frees the color texture and any partial FBO/renderbuffer
   (and restores the previously-bound framebuffer) before throwing, so a failed create
   leaks nothing.
 - **`bindRenderTarget`** is the cached framebuffer bind — the analogue of Babylon's
@@ -2434,7 +2441,7 @@ packages/babylon-lite-gl/
         family.ts           type-only backend contract: GLFamily, GLOps, GLKit (04-backend-family.md)
         web-family.ts       WebGLFamily + WebGLHostOps
         context.ts          createGLEngine/disposeGLEngine/resizeGLEngine, lost/restored handlers, registries
-        framebuffer-validation.ts optional debug validator installed by setFramebufferValidation
+        framebuffer-validation.ts framebuffer completeness validator + setFramebufferValidation opt-out
         state.ts            GLState types
         render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation

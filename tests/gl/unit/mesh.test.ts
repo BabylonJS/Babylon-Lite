@@ -705,6 +705,52 @@ describe("lite-gl mesh: cached attribute disabling", () => {
         expect(engine._state.instanceLocations).toBe(instances);
     });
 
+    it("treats unrecorded locations as unknown after a plain wipe: a single disable is issued once", () => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        bindAttributes(vb, [{ index: 2, size: 2 }], effect);
+        wipeGLStateCache(engine);
+        mock.clear();
+        disableAttributeByIndex(engine, 2);
+        disableAttributeByIndex(engine, 2);
+        // A location the host may have enabled during its scope is disabled too.
+        disableAttributeByIndex(engine, 7);
+        expect(mock.log).toEqual([
+            { name: "bindVertexArray", args: [null] },
+            { name: "disableVertexAttribArray", args: [2] },
+            { name: "disableVertexAttribArray", args: [7] },
+        ]);
+    });
+
+    it("normalizes every location once on the first bulk disable after a plain wipe, then elides", () => {
+        const { mock, engine } = makeEngine();
+        const effect = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        bindAttributes(vb, [{ index: 1, size: 2 }], effect);
+        wipeGLStateCache(engine);
+        bindAttributes(vb, [{ index: 3, size: 2 }], effect);
+        disableAttributeByIndex(engine, 5);
+        mock.clear();
+        unbindAllAttributes(engine);
+        const max = engine.gl.getParameter(engine.gl.MAX_VERTEX_ATTRIBS) as number;
+        // Location 5 is confirmed disabled; every other location is disabled once.
+        expect(callsNamed(mock, "disableVertexAttribArray").map((c) => c.args[0])).toEqual(Array.from({ length: max }, (_, i) => i).filter((i) => i !== 5));
+        mock.clear();
+        unbindAllAttributes(engine);
+        disableAttributeByIndex(engine, 9);
+        expect(mock.log).toEqual([]);
+    });
+
+    it("a brute-force wipe leaves every location known-disabled, so disables are elided", () => {
+        const { mock, engine } = makeEngine();
+        wipeGLStateCache(engine, true);
+        mock.clear();
+        disableAttributeByIndex(engine, 2);
+        unbindAllAttributes(engine);
+        expect(mock.log).toEqual([]);
+    });
+
     it.each(["lost", "disposed"] as const)("both disable APIs and bindAttributes are no-ops on a %s engine", (state) => {
         const { mock, canvas, engine } = makeEngine();
         const effect = makeReadyEffect(engine);

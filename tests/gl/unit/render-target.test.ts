@@ -168,7 +168,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
         expect(mock.count("disable") + mock.count("enable")).toBe(0);
         disposeGLEngine(engine);
     });
-    it("creates one FBO, attaches the color texture without a synchronous completeness query, and registers in _renderTargets", () => {
+    it("creates one FBO, attaches the color texture, validates completeness once, and registers in _renderTargets", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
         const rt = createRenderTarget(engine, 256, 128);
@@ -180,7 +180,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
         expect(attach[0]?.args[2]).toBe(gl.TEXTURE_2D);
         expect(attach[0]?.args[3]).toBe(rt.texture.handle);
         expect(attach[0]?.args[4]).toBe(0);
-        expect(mock.count("checkFramebufferStatus")).toBe(0);
+        expect(mock.count("checkFramebufferStatus")).toBe(1);
         // Default has no depth/stencil renderbuffer.
         expect(mock.count("createRenderbuffer")).toBe(0);
         expect(mock.count("renderbufferStorage")).toBe(0);
@@ -721,7 +721,7 @@ describe("lite-gl render-target: context lost / restore", () => {
         expect(mock.count("createFramebuffer")).toBe(1);
         const attach = lastCall(mock, "framebufferTexture2D");
         expect(attach?.args[3]).toBe(rt.texture.handle);
-        expect(mock.count("checkFramebufferStatus")).toBe(0);
+        expect(mock.count("checkFramebufferStatus")).toBe(1);
     });
 
     it("can bind + draw into the target again after restore", () => {
@@ -806,7 +806,6 @@ describe("lite-gl render-target: atomic failure cleanup", () => {
 
     it("deletes the partial FBO + depth renderbuffer and the owned color texture, and restores the previous binding, when the framebuffer is incomplete", () => {
         const { mock, engine } = setup();
-        setFramebufferValidation(engine, true);
         // Bind a sentinel target first so there is a NON-default previous
         // framebuffer the failed build must restore to.
         const sentinel = createRenderTarget(engine, 16, 16);
@@ -849,7 +848,7 @@ describe("lite-gl render-target: atomic failure cleanup", () => {
     });
 });
 
-describe("lite-gl render-target: opt-in framebuffer validation", () => {
+describe("lite-gl render-target: framebuffer validation", () => {
     it.each([false, true])("validation enabled=%s is retained through cache wipes, resize and context restoration", (enabled) => {
         const { mock, canvas, engine, gl } = setup();
         setFramebufferValidation(engine, enabled);
@@ -872,22 +871,21 @@ describe("lite-gl render-target: opt-in framebuffer validation", () => {
         expect(rt.isReady).toBe(true);
     });
 
-    it("ignores incomplete statuses by default, checks only when enabled, and can disable validation again", () => {
+    it("rejects incomplete statuses by default, skips the check when disabled, and can enable validation again", () => {
         const { engine, gl } = setup();
         const check = vi.spyOn(gl, "checkFramebufferStatus").mockReturnValue(0x8cdd);
-        expect(createRenderTarget(engine, 16, 16).isReady).toBe(true);
-        expect(check).not.toHaveBeenCalled();
-        setFramebufferValidation(engine, true);
         expect(() => createRenderTarget(engine, 16, 16)).toThrow("lite-gl: render target framebuffer incomplete (status 0x8cdd)");
         expect(check).toHaveBeenCalledExactlyOnceWith(gl.FRAMEBUFFER);
         setFramebufferValidation(engine, false);
         expect(createRenderTarget(engine, 16, 16).isReady).toBe(true);
         expect(check).toHaveBeenCalledTimes(1);
+        setFramebufferValidation(engine, true);
+        expect(() => createRenderTarget(engine, 16, 16)).toThrow(/incomplete/);
+        expect(check).toHaveBeenCalledTimes(2);
     });
 
-    it("debug restore failures clean up the partial target and do not stop subsequent targets from rebuilding", () => {
+    it("restore failures clean up the partial target and do not stop subsequent targets from rebuilding", () => {
         const { mock, canvas, engine, gl } = setup();
-        setFramebufferValidation(engine, true);
         const failing = createRenderTarget(engine, 16, 16, { generateDepthBuffer: true });
         const surviving = createRenderTarget(engine, 32, 32);
         fireLost(canvas);
@@ -914,16 +912,15 @@ describe("lite-gl render-target: opt-in framebuffer validation", () => {
 
     it.each(["lost", "disposed"] as const)("configuration is a no-op on a %s engine", (state) => {
         const { mock, canvas, engine } = setup();
-        setFramebufferValidation(engine, true);
-        const validator = engine._validateFramebuffer;
+        setFramebufferValidation(engine, false);
         if (state === "lost") {
             fireLost(canvas);
         } else {
             disposeGLEngine(engine);
         }
         mock.clear();
-        setFramebufferValidation(engine, false);
-        expect(engine._validateFramebuffer).toBe(validator);
+        setFramebufferValidation(engine, true);
+        expect(engine._skipFramebufferValidation).toBe(true);
         expect(mock.log).toEqual([]);
     });
 });
