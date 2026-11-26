@@ -35,16 +35,6 @@ import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
-    GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-    GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_SRC: number; COPY_DST: number };
-};
-
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
-
 function makeIdentityMatrix(z = 0): Mat4 {
     const matrix = new Float32Array(16);
     matrix[0] = 1;

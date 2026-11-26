@@ -12,13 +12,6 @@ import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
-    GPUBufferUsage?: { STORAGE: number; COPY_DST: number };
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-};
-gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 1, FRAGMENT: 2 } as unknown as GPUShaderStage;
-
 function makeEngine(): { engine: EngineContext; rawBuffer: GPUBuffer & { destroy: ReturnType<typeof vi.fn> }; deviceDestroy: ReturnType<typeof vi.fn> } {
     const rawBuffer = {
         destroy: vi.fn(),

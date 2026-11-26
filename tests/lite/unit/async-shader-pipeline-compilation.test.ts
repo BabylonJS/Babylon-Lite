@@ -28,11 +28,6 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage"> & {
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-};
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
-
 function makeEngine(createAsync?: (descriptor: GPURenderPipelineDescriptor) => Promise<GPURenderPipeline>) {
     const createBindGroupLayout = vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout);
     const createPipelineLayout = vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout);

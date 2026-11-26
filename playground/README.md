@@ -64,6 +64,8 @@ flowchart LR
   `error` / `stats` (FPS) / `ran` back over `postMessage`.
 - **Engine** (`vite.engine.config.ts` → `src/engine-entry.ts`) — builds the workspace
   engine source into a self-contained ESM under `public/engine/dev/` ("nightly"). The
+  eagerly loaded engine is one `engine` chunk behind `index.js`; lazy features stay in
+  separate dynamic chunks (guarded by `tests/lite/build/playground-engine-chunks.test.ts`). The
   version selector can instead load any published release on demand from the active
   ESM CDN (esm.sh, or its jsDelivr fallback) — no redeploy needed.
 - **Resizable layout** (`src/split.ts`) — a draggable divider between the editor and

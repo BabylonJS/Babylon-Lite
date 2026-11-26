@@ -19,9 +19,6 @@ import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-
 const FAR = 100_000;
 
 function makeEngine(useFloatingOrigin: boolean): { engine: EngineContext; uploads: Float32Array[] } {

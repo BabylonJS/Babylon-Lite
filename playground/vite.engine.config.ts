@@ -106,9 +106,18 @@ export default defineConfig({
         },
         rollupOptions: {
             output: {
-                // Keep dynamic-import chunks separate so lazy/wasm features only
-                // load when a snippet actually uses them.
-                inlineDynamicImports: false,
+                // Dynamic-import chunks stay separate, so lazy/wasm features only
+                // load when a snippet uses them. Everything the entry loads eagerly
+                // goes into one `engine` chunk. Without this group, Rolldown splits
+                // the eager graph into ~160 small chunks: many modules are both
+                // statically exported and lazily imported, and lib mode's strict
+                // entry signature stops Rolldown from merging those shared chunks
+                // back into the entry. An empty snippet then made ~160 requests
+                // (https://forum.babylonjs.com/t/64889). Guarded by
+                // tests/lite/build/playground-engine-chunks.test.ts.
+                codeSplitting: {
+                    groups: [{ name: "engine", test: /[\\/]playground[\\/]src[\\/]engine-entry\.ts$/ }],
+                },
                 chunkFileNames: "_chunks/[name]-[hash].js",
             },
         },
