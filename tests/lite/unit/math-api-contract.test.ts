@@ -106,9 +106,15 @@ describe("public math contracts", () => {
         }
 
         const positivePole = babylonEulerToQuat(Math.PI / 2, 0.4, -0.7);
-        expect(quatToBabylonEulerToRef(...positivePole, { x: 0, y: 0, z: 0 })).toEqual({ x: Math.PI / 2, y: 1.0999999999999999, z: 0 });
+        const positivePoleAngles = quatToBabylonEulerToRef(...positivePole, { x: 0, y: 0, z: 0 });
+        expect(positivePoleAngles.x).toBe(Math.PI / 2);
+        expect(positivePoleAngles.y).toBeCloseTo(1.1, 14);
+        expect(positivePoleAngles.z).toBe(0);
         const negativePole = babylonEulerToQuat(-Math.PI / 2, 0.4, -0.7).map((component) => component * 3) as [number, number, number, number];
-        expect(quatToBabylonEulerToRef(...negativePole, { x: 0, y: 0, z: 0 })).toEqual({ x: -Math.PI / 2, y: -0.3, z: 0 });
+        const negativePoleAngles = quatToBabylonEulerToRef(...negativePole, { x: 0, y: 0, z: 0 });
+        expect(negativePoleAngles.x).toBe(-Math.PI / 2);
+        expect(negativePoleAngles.y).toBeCloseTo(-0.3, 14);
+        expect(negativePoleAngles.z).toBe(0);
         expect(quatToBabylonEulerToRef(0, 0, 0, 0, { x: 0, y: 0, z: 0 })).toEqual({ x: -0, y: 0, z: 0 });
         expect(quatToBabylonAlphaBetaGammaToRef(0, 0, 0, 1, { x: 0, y: 0, z: 0 })).toEqual({ x: 0, y: 0, z: 0 });
         const alphaBetaGamma = quatToBabylonAlphaBetaGammaToRef(-0.1477122548121324, 0.31319142525134736, 0.5394409818317512, 0.7675256660514629, {

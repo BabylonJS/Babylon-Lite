@@ -143,6 +143,11 @@ describe("compat engine startup ordering", () => {
         expect(thinEngine.isNDCHalfZRange).toBe(true);
         await thinEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+
+        const optionsThinEngine = new ThinEngine(canvas, { msaaSamples: 1, useNDCHalfZRange: false });
+        expect(optionsThinEngine.isNDCHalfZRange).toBe(true);
+        await optionsThinEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
     it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {

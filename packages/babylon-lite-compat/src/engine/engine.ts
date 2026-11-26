@@ -740,14 +740,20 @@ export abstract class AbstractEngine {
  * name and inheritance chain.
  */
 export class ThinEngine extends AbstractEngine {
-    public constructor(canvas: RenderCanvas, antialias?: boolean, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+    public constructor(canvas: RenderCanvas, options?: EngineOptions);
+    public constructor(canvas: RenderCanvas, antialias?: boolean, options?: EngineOptions, adaptToDeviceRatio?: boolean);
+    public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+        if (typeof antialiasOrOptions === "object") {
+            super(canvas, antialiasOrOptions);
+            return;
+        }
         if (!options && adaptToDeviceRatio === undefined) {
-            super(canvas, antialias);
+            super(canvas, antialiasOrOptions);
             return;
         }
         super(canvas, {
             ...options,
-            antialias: antialias ?? options?.antialias,
+            antialias: antialiasOrOptions ?? options?.antialias,
             ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
         });
     }
