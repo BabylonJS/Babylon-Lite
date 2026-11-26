@@ -246,12 +246,15 @@ describe("createSceneSsaoPipeline", () => {
             expect(attachment).toMatchObject({ depthLoadOp: "clear", depthStoreOp: "store" });
             expect(pass.setPipeline.mock.calls[0]![0]).toMatchObject({ depthStencil: { format } });
             detachSceneSsaoPipeline(pipeline);
-            return format;
+            return { format, target: ao.depthTexture, texture: view.texture };
         };
 
-        const format = resolveOnce();
+        const first = resolveOnce();
+        const second = resolveOnce();
         // A reattach allocates a fresh resolve target in the same format.
-        expect(resolveOnce()).toBe(format);
+        expect(second.target).not.toBe(first.target);
+        expect(second.texture).not.toBe(first.texture);
+        expect(second.format).toBe(first.format);
     });
 
     it("keeps sampling the scene depth without MSAA whatever depthResolveFormat is", () => {
