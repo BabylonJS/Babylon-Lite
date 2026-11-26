@@ -9,11 +9,6 @@ import { enableCsmStaticCache } from "../../../packages/babylon-lite/src/shadow/
 import { enableMorphTargetShadows } from "../../../packages/babylon-lite/src/shadow/enable-morph-target-shadows";
 import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUTextureUsage"> & {
-    GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_DST: number };
-};
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
-
 function makeGenerator(type: ShadowGenerator["_shadowType"] = "csm") {
     const oldTexture = { destroy: vi.fn() };
     const generator = {

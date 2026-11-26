@@ -13,11 +13,6 @@ import {
 } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
-    GPUBufferUsage?: { VERTEX: number; COPY_DST: number; STORAGE: number; INDIRECT: number };
-};
-gpuGlobals.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x8, STORAGE: 0x80, INDIRECT: 0x100 } as unknown as GPUBufferUsage;
-
 function makeThinInstances(count: number): ThinInstanceData {
     return {
         matrices: new Float32Array(count * 16),

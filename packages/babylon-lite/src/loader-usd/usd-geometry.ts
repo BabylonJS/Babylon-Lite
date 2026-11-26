@@ -104,7 +104,7 @@ export function usdReverseIndices(indices: Uint32Array): Uint32Array {
 /** @internal Upload one shared geometry, releasing allocations if an upload fails. */
 export function uploadUsdGeometry(engine: EngineContext, geometry: UsdGeometry): MeshGPU {
     const buffers: GPUBuffer[] = [];
-    const upload = (values: ArrayBufferView, usage = BU.VERTEX): GPUBuffer => {
+    const upload = (values: ArrayBufferView, usage: GPUBufferUsageFlags = BU.VERTEX): GPUBuffer => {
         const buffer = createMappedBuffer(engine, values, usage);
         buffers.push(buffer);
         return buffer;

@@ -7,11 +7,6 @@ import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/re
 import { getUniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
 import type { DrawBinding, DrawUpdateBatch, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
-    GPUBufferUsage?: { COPY_SRC: number; COPY_DST: number };
-};
-gpuGlobals.GPUBufferUsage ??= { COPY_SRC: 0x4, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-
 function makeDevice(maxBufferSize = Number.MAX_SAFE_INTEGER, maxUniformBufferBindingSize = Number.MAX_SAFE_INTEGER) {
     const buffers: GPUBuffer[] = [];
     const device = {

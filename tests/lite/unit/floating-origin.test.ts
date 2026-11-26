@@ -8,16 +8,6 @@ import { getFloatingOriginOffset } from "../../../packages/babylon-lite/src/larg
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
-const gpuGlobals = globalThis as typeof globalThis & {
-    GPUShaderStage?: unknown;
-    GPUBufferUsage?: unknown;
-    GPUTextureUsage?: unknown;
-};
-
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 } as unknown as GPUTextureUsage;
-
 function makeMockEngine(hpm = false, useFO = false): EngineContext {
     const device = {
         createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout,

@@ -11,11 +11,6 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import type { MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
-    GPUBufferUsage?: { VERTEX: number; COPY_DST: number; STORAGE: number; INDIRECT: number };
-};
-gpuGlobals.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x8, STORAGE: 0x80, INDIRECT: 0x100 } as unknown as GPUBufferUsage;
-
 function makeThinInstances(): ThinInstanceData {
     return {
         matrices: new Float32Array(16),

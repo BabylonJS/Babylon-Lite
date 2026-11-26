@@ -7,14 +7,6 @@ import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/
 import { align } from "../../../packages/babylon-lite/src/resource/gpu-buffers.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUMapMode"> & {
-    GPUBufferUsage?: { STORAGE: number; COPY_SRC: number; COPY_DST: number; MAP_READ: number };
-    GPUMapMode?: { READ: number };
-};
-gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_SRC: 0x4, COPY_DST: 0x8, MAP_READ: 0x1 } as unknown as GPUBufferUsage;
-Object.assign(gpuGlobals.GPUBufferUsage, { COPY_SRC: 0x4, COPY_DST: 0x8, MAP_READ: 0x1, STORAGE: 0x80 });
-gpuGlobals.GPUMapMode ??= { READ: 0x1 } as unknown as GPUMapMode;
-
 function makeEngine(maxBufferSize = 256 * 1024 * 1024) {
     const mapped = new ArrayBuffer(16);
     const rawBuffer = {
