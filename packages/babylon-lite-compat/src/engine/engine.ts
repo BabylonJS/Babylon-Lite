@@ -162,12 +162,18 @@ export interface AbstractEngineOptions extends LiteEngineOptions {
 }
 
 /** Babylon.js `EngineOptions` subset accepted by the compat engine. */
-export interface EngineOptions extends AbstractEngineOptions {}
+export interface EngineOptions extends AbstractEngineOptions {
+    useNDCHalfZRange?: boolean;
+}
 
 /** Babylon.js `WebGPUEngineOptions` subset accepted by the compat engine. */
 export interface WebGPUEngineOptions extends AbstractEngineOptions {
     canvasToneMapping?: GPUCanvasToneMapping;
     canvasColorSpace?: PredefinedColorSpace;
+}
+
+interface CompatEngineOptions extends WebGPUEngineOptions {
+    useNDCHalfZRange?: boolean;
 }
 
 /**
@@ -295,7 +301,7 @@ export abstract class AbstractEngine {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        const opts: CompatEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
         this.useReverseDepthBuffer = opts?.useReverseDepthBuffer ?? false;
         if (opts) {
             if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
@@ -309,6 +315,7 @@ export abstract class AbstractEngine {
             delete opts.canvasToneMapping;
             delete opts.canvasColorSpace;
             delete opts.useReverseDepthBuffer;
+            delete opts.useNDCHalfZRange;
             if (antialias === false) {
                 opts.msaaSamples = 1;
             }

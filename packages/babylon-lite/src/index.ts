@@ -970,6 +970,7 @@ export type { Vec2, Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat 
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "./math/quat-euler.js";
+export { quatToBabylonEulerTuple, quatToBabylonAlphaBetaGammaTuple } from "./math/quat-babylon-euler.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────

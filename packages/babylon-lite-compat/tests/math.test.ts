@@ -362,6 +362,29 @@ describe("Quaternion", () => {
         expect(e.z).toBeCloseTo(0.5, 5);
     });
 
+    it("keeps Euler round-trips accurate close to a 90 degree pitch", () => {
+        for (const pitch of [1.5, 1.57, 1.5707, -1.5707]) {
+            const source = Quaternion.FromEulerAngles(pitch, -0.4, 0.5);
+            const result = new Vector3();
+            expect(source.toEulerAnglesToRef(result)).toBe(result);
+            const roundTrip = Quaternion.FromEulerVector(result);
+            const dot = Math.abs(source.x * roundTrip.x + source.y * roundTrip.y + source.z * roundTrip.z + source.w * roundTrip.w);
+            expect(dot).toBeCloseTo(1, 10);
+        }
+    });
+
+    it("writes alpha/beta/gamma angles to the provided result", () => {
+        const result = new Vector3(1, 2, 3);
+        expect(Quaternion.Identity().toAlphaBetaGammaToRef(result)).toBe(result);
+        expect(result.asArray()).toEqual([0, 0, 0]);
+
+        const nontrivial = new Quaternion(-0.1477122548121324, 0.31319142525134736, 0.5394409818317512, 0.7675256660514629);
+        expect(nontrivial.toAlphaBetaGammaToRef(result)).toBe(result);
+        expect(result.x).toBeCloseTo(-1.3988725439669016, 12);
+        expect(result.y).toBeCloseTo(0.7071993743850375, 12);
+        expect(result.z).toBeCloseTo(2.624119683291794, 12);
+    });
+
     it("stays normalized after composition", () => {
         const q = Quaternion.RotationYawPitchRoll(0.5, 0.5, 0.5).multiply(Quaternion.RotationYawPitchRoll(-0.2, 0.1, 0.3));
         expect(q.length()).toBeGreaterThan(0);

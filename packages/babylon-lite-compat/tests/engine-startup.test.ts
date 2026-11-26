@@ -131,6 +131,15 @@ describe("compat engine startup ordering", () => {
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
     });
 
+    it("accepts the WebGL-only useNDCHalfZRange option while retaining Lite's WebGPU depth range", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+        const engine = new Engine(canvas, true, { useNDCHalfZRange: false });
+
+        expect(engine.isNDCHalfZRange).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
     it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {
         const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
         const engine = new WebGPUEngine(canvas, { useReverseDepthBuffer: true });

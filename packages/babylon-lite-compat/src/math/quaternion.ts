@@ -11,6 +11,8 @@ import {
     writeMat4FromLookDirectionLHIntoBuffer,
     writeMat4FromLookDirectionRHIntoBuffer,
     writeQuatFromRotationMat4IntoRef,
+    quatToBabylonAlphaBetaGammaTuple,
+    quatToBabylonEulerTuple,
 } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
@@ -109,35 +111,19 @@ export class Quaternion {
     }
 
     public toEulerAngles(): Vector3 {
-        const result = new Vector3();
-        const qz = this.z;
-        const qx = this.x;
-        const qy = this.y;
-        const qw = this.w;
+        return this.toEulerAnglesToRef(new Vector3());
+    }
 
-        const sqw = qw * qw;
-        const sqz = qz * qz;
-        const sqx = qx * qx;
-        const sqy = qy * qy;
+    /** Babylon.js `Quaternion.toEulerAnglesToRef(result)`. */
+    public toEulerAnglesToRef<T extends Vector3>(result: T): T {
+        const [x, y, z] = quatToBabylonEulerTuple(this.x, this.y, this.z, this.w);
+        return result.set(x, y, z);
+    }
 
-        const zAxisY = qy * qz - qx * qw;
-        const limit = 0.4999999;
-
-        if (zAxisY < -limit) {
-            result.y = 2 * Math.atan2(qy, qw);
-            result.x = Math.PI / 2;
-            result.z = 0;
-        } else if (zAxisY > limit) {
-            result.y = 2 * Math.atan2(qy, qw);
-            result.x = -Math.PI / 2;
-            result.z = 0;
-        } else {
-            result.z = Math.atan2(2 * (qx * qy + qz * qw), -sqz - sqx + sqy + sqw);
-            result.x = Math.asin(-2 * (qz * qy - qx * qw));
-            result.y = Math.atan2(2 * (qz * qx + qy * qw), sqz - sqx - sqy + sqw);
-        }
-
-        return result;
+    /** Babylon.js `Quaternion.toAlphaBetaGammaToRef(result)`. */
+    public toAlphaBetaGammaToRef<T extends Vector3>(result: T): T {
+        const [alpha, beta, gamma] = quatToBabylonAlphaBetaGammaTuple(this.x, this.y, this.z, this.w);
+        return result.set(alpha, beta, gamma);
     }
 
     public static Identity(): Quaternion {

@@ -7,12 +7,31 @@ import { normalizeVec3InPlace, normalizeVec3ToRef } from "../../../packages/baby
 import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "../../../packages/babylon-lite/src/math/create-mat4-from-quat";
 import { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "../../../packages/babylon-lite/src/math/quat-euler";
+import { quatToBabylonAlphaBetaGammaTuple, quatToBabylonEulerTuple } from "../../../packages/babylon-lite/src/math/quat-babylon-euler";
 import { maximizeMat4InPlace } from "../../../packages/babylon-lite/src/math/maximize-mat4-in-place";
 import { scaleBoundsFromCenterToRef } from "../../../packages/babylon-lite/src/math/scale-bounds-from-center-to-ref";
 import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 
 afterEach(() => _resetMatrixAllocatorForTests());
+
+function babylonEulerToQuat(pitch: number, yaw: number, roll: number): [number, number, number, number] {
+    const halfRoll = roll * 0.5;
+    const halfPitch = pitch * 0.5;
+    const halfYaw = yaw * 0.5;
+    const sinRoll = Math.sin(halfRoll);
+    const cosRoll = Math.cos(halfRoll);
+    const sinPitch = Math.sin(halfPitch);
+    const cosPitch = Math.cos(halfPitch);
+    const sinYaw = Math.sin(halfYaw);
+    const cosYaw = Math.cos(halfYaw);
+    return [
+        cosYaw * sinPitch * cosRoll + sinYaw * cosPitch * sinRoll,
+        sinYaw * cosPitch * cosRoll - cosYaw * sinPitch * sinRoll,
+        cosYaw * cosPitch * sinRoll - sinYaw * sinPitch * cosRoll,
+        cosYaw * cosPitch * cosRoll + sinYaw * sinPitch * sinRoll,
+    ];
+}
 
 describe("public math contracts", () => {
     it("exposes explicit representations without legacy aliases", () => {
@@ -44,6 +63,8 @@ describe("public math contracts", () => {
         expectTypeOf<Parameters<typeof Lite.createMat4FromQuat>>().toEqualTypeOf<[qx: number, qy: number, qz: number, qw: number]>();
         expectTypeOf<ReturnType<typeof Lite.eulerXYZToQuatTuple>>().toEqualTypeOf<[number, number, number, number]>();
         expectTypeOf<ReturnType<typeof Lite.quatToEulerXYZTuple>>().toEqualTypeOf<[number, number, number]>();
+        expectTypeOf<ReturnType<typeof Lite.quatToBabylonEulerTuple>>().toEqualTypeOf<[number, number, number]>();
+        expectTypeOf<ReturnType<typeof Lite.quatToBabylonAlphaBetaGammaTuple>>().toEqualTypeOf<[number, number, number]>();
         expectTypeOf<ReturnType<typeof Lite.scaleBoundsFromCenterToRef>>().toEqualTypeOf<void>();
     });
 
@@ -73,6 +94,24 @@ describe("public math contracts", () => {
         const storage = new Float32Array(16);
         expect(writeMat4FromQuatIntoBuffer(storage, ...quat)).toBe(storage);
         expect([...storage]).toEqual(Array.from(matrix));
+    });
+
+    it("matches Babylon.js quaternion Euler semantics close to gimbal lock", () => {
+        for (const pitch of [1.5, 1.57, 1.5707, -1.5707]) {
+            const source = babylonEulerToQuat(pitch, -0.4, 0.5);
+            const angles = quatToBabylonEulerTuple(...source);
+            const roundTrip = babylonEulerToQuat(...angles);
+            const dot = Math.abs(source.reduce((sum, component, index) => sum + component * roundTrip[index]!, 0));
+            expect(dot).toBeCloseTo(1, 10);
+        }
+
+        expect(quatToBabylonEulerTuple(Math.SQRT1_2, 0, 0, Math.SQRT1_2)).toEqual([Math.PI / 2, 0, 0]);
+        expect(quatToBabylonEulerTuple(0, 0, 0, 0)).toEqual([-0, 0, 0]);
+        expect(quatToBabylonAlphaBetaGammaTuple(0, 0, 0, 1)).toEqual([0, 0, 0]);
+        const alphaBetaGamma = quatToBabylonAlphaBetaGammaTuple(-0.1477122548121324, 0.31319142525134736, 0.5394409818317512, 0.7675256660514629);
+        expect(alphaBetaGamma[0]).toBeCloseTo(-1.3988725439669016, 12);
+        expect(alphaBetaGamma[1]).toBeCloseTo(0.7071993743850375, 12);
+        expect(alphaBetaGamma[2]).toBeCloseTo(2.624119683291794, 12);
     });
 
     it("maximizes allocator-owned matrices without losing F64 precision or allocating a result", () => {
