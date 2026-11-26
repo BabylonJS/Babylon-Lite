@@ -28,7 +28,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import type { EngineContext } from "babylon-lite";
-import { Engine, WebGPUEngine } from "../src/engine/engine";
+import { Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
 
 interface TestEngine {
     _startupComplete: boolean;
@@ -137,6 +137,11 @@ describe("compat engine startup ordering", () => {
 
         expect(engine.isNDCHalfZRange).toBe(true);
         await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+
+        const thinEngine = new ThinEngine(canvas, true, { useNDCHalfZRange: false });
+        expect(thinEngine.isNDCHalfZRange).toBe(true);
+        await thinEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
     });
 

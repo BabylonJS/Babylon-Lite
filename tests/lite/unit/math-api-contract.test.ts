@@ -7,7 +7,7 @@ import { normalizeVec3InPlace, normalizeVec3ToRef } from "../../../packages/baby
 import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "../../../packages/babylon-lite/src/math/create-mat4-from-quat";
 import { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "../../../packages/babylon-lite/src/math/quat-euler";
-import { quatToBabylonAlphaBetaGammaTuple, quatToBabylonEulerTuple } from "../../../packages/babylon-lite/src/math/quat-babylon-euler";
+import { quatToBabylonAlphaBetaGammaToRef, quatToBabylonEulerToRef } from "../../../packages/babylon-lite/src/math/quat-babylon-euler";
 import { maximizeMat4InPlace } from "../../../packages/babylon-lite/src/math/maximize-mat4-in-place";
 import { scaleBoundsFromCenterToRef } from "../../../packages/babylon-lite/src/math/scale-bounds-from-center-to-ref";
 import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
@@ -63,8 +63,8 @@ describe("public math contracts", () => {
         expectTypeOf<Parameters<typeof Lite.createMat4FromQuat>>().toEqualTypeOf<[qx: number, qy: number, qz: number, qw: number]>();
         expectTypeOf<ReturnType<typeof Lite.eulerXYZToQuatTuple>>().toEqualTypeOf<[number, number, number, number]>();
         expectTypeOf<ReturnType<typeof Lite.quatToEulerXYZTuple>>().toEqualTypeOf<[number, number, number]>();
-        expectTypeOf<ReturnType<typeof Lite.quatToBabylonEulerTuple>>().toEqualTypeOf<[number, number, number]>();
-        expectTypeOf<ReturnType<typeof Lite.quatToBabylonAlphaBetaGammaTuple>>().toEqualTypeOf<[number, number, number]>();
+        expectTypeOf<ReturnType<typeof Lite.quatToBabylonEulerToRef<Vec3>>>().toEqualTypeOf<Vec3>();
+        expectTypeOf<ReturnType<typeof Lite.quatToBabylonAlphaBetaGammaToRef<Vec3>>>().toEqualTypeOf<Vec3>();
         expectTypeOf<ReturnType<typeof Lite.scaleBoundsFromCenterToRef>>().toEqualTypeOf<void>();
     });
 
@@ -99,19 +99,26 @@ describe("public math contracts", () => {
     it("matches Babylon.js quaternion Euler semantics close to gimbal lock", () => {
         for (const pitch of [1.5, 1.57, 1.5707, -1.5707]) {
             const source = babylonEulerToQuat(pitch, -0.4, 0.5);
-            const angles = quatToBabylonEulerTuple(...source);
-            const roundTrip = babylonEulerToQuat(...angles);
+            const angles = quatToBabylonEulerToRef(...source, { x: 0, y: 0, z: 0 });
+            const roundTrip = babylonEulerToQuat(angles.x, angles.y, angles.z);
             const dot = Math.abs(source.reduce((sum, component, index) => sum + component * roundTrip[index]!, 0));
             expect(dot).toBeCloseTo(1, 10);
         }
 
-        expect(quatToBabylonEulerTuple(Math.SQRT1_2, 0, 0, Math.SQRT1_2)).toEqual([Math.PI / 2, 0, 0]);
-        expect(quatToBabylonEulerTuple(0, 0, 0, 0)).toEqual([-0, 0, 0]);
-        expect(quatToBabylonAlphaBetaGammaTuple(0, 0, 0, 1)).toEqual([0, 0, 0]);
-        const alphaBetaGamma = quatToBabylonAlphaBetaGammaTuple(-0.1477122548121324, 0.31319142525134736, 0.5394409818317512, 0.7675256660514629);
-        expect(alphaBetaGamma[0]).toBeCloseTo(-1.3988725439669016, 12);
-        expect(alphaBetaGamma[1]).toBeCloseTo(0.7071993743850375, 12);
-        expect(alphaBetaGamma[2]).toBeCloseTo(2.624119683291794, 12);
+        const positivePole = babylonEulerToQuat(Math.PI / 2, 0.4, -0.7);
+        expect(quatToBabylonEulerToRef(...positivePole, { x: 0, y: 0, z: 0 })).toEqual({ x: Math.PI / 2, y: 1.0999999999999999, z: 0 });
+        const negativePole = babylonEulerToQuat(-Math.PI / 2, 0.4, -0.7).map((component) => component * 3) as [number, number, number, number];
+        expect(quatToBabylonEulerToRef(...negativePole, { x: 0, y: 0, z: 0 })).toEqual({ x: -Math.PI / 2, y: -0.3, z: 0 });
+        expect(quatToBabylonEulerToRef(0, 0, 0, 0, { x: 0, y: 0, z: 0 })).toEqual({ x: -0, y: 0, z: 0 });
+        expect(quatToBabylonAlphaBetaGammaToRef(0, 0, 0, 1, { x: 0, y: 0, z: 0 })).toEqual({ x: 0, y: 0, z: 0 });
+        const alphaBetaGamma = quatToBabylonAlphaBetaGammaToRef(-0.1477122548121324, 0.31319142525134736, 0.5394409818317512, 0.7675256660514629, {
+            x: 0,
+            y: 0,
+            z: 0,
+        });
+        expect(alphaBetaGamma.x).toBeCloseTo(-1.3988725439669016, 12);
+        expect(alphaBetaGamma.y).toBeCloseTo(0.7071993743850375, 12);
+        expect(alphaBetaGamma.z).toBeCloseTo(2.624119683291794, 12);
     });
 
     it("maximizes allocator-owned matrices without losing F64 precision or allocating a result", () => {

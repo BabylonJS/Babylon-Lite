@@ -739,7 +739,19 @@ export abstract class AbstractEngine {
  * (everything is WebGPU-backed), so this exists purely to reproduce the class
  * name and inheritance chain.
  */
-export class ThinEngine extends AbstractEngine {}
+export class ThinEngine extends AbstractEngine {
+    public constructor(canvas: RenderCanvas, antialias?: boolean, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+        if (!options && adaptToDeviceRatio === undefined) {
+            super(canvas, antialias);
+            return;
+        }
+        super(canvas, {
+            ...options,
+            antialias: antialias ?? options?.antialias,
+            ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
+        });
+    }
+}
 
 /**
  * Babylon.js's full WebGL engine. In Babylon.js `Engine extends ThinEngine`
@@ -750,18 +762,10 @@ export class ThinEngine extends AbstractEngine {}
 export class Engine extends ThinEngine {
     public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
         if (typeof antialiasOrOptions === "object") {
-            super(canvas, antialiasOrOptions);
+            super(canvas, antialiasOrOptions.antialias, antialiasOrOptions, antialiasOrOptions.adaptToDeviceRatio);
             return;
         }
-        if (!options && adaptToDeviceRatio === undefined) {
-            super(canvas, antialiasOrOptions);
-            return;
-        }
-        super(canvas, {
-            ...options,
-            antialias: antialiasOrOptions ?? options?.antialias,
-            ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
-        });
+        super(canvas, antialiasOrOptions, options, adaptToDeviceRatio);
     }
 }
 

@@ -11,8 +11,8 @@ import {
     writeMat4FromLookDirectionLHIntoBuffer,
     writeMat4FromLookDirectionRHIntoBuffer,
     writeQuatFromRotationMat4IntoRef,
-    quatToBabylonAlphaBetaGammaTuple,
-    quatToBabylonEulerTuple,
+    quatToBabylonAlphaBetaGammaToRef,
+    quatToBabylonEulerToRef,
 } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
@@ -116,14 +116,12 @@ export class Quaternion {
 
     /** Babylon.js `Quaternion.toEulerAnglesToRef(result)`. */
     public toEulerAnglesToRef<T extends Vector3>(result: T): T {
-        const [x, y, z] = quatToBabylonEulerTuple(this.x, this.y, this.z, this.w);
-        return result.set(x, y, z);
+        return quatToBabylonEulerToRef(this.x, this.y, this.z, this.w, result);
     }
 
     /** Babylon.js `Quaternion.toAlphaBetaGammaToRef(result)`. */
     public toAlphaBetaGammaToRef<T extends Vector3>(result: T): T {
-        const [alpha, beta, gamma] = quatToBabylonAlphaBetaGammaTuple(this.x, this.y, this.z, this.w);
-        return result.set(alpha, beta, gamma);
+        return quatToBabylonAlphaBetaGammaToRef(this.x, this.y, this.z, this.w, result);
     }
 
     public static Identity(): Quaternion {

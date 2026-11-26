@@ -12,15 +12,16 @@ scene path or bundle.
 ## Public API Surface
 
 ```ts
-quatToBabylonEulerTuple(qx: number, qy: number, qz: number, qw: number): [number, number, number]
-quatToBabylonAlphaBetaGammaTuple(qx: number, qy: number, qz: number, qw: number): [number, number, number]
+quatToBabylonEulerToRef<T extends Vec3>(qx: number, qy: number, qz: number, qw: number, out: T): T
+quatToBabylonAlphaBetaGammaToRef<T extends Vec3>(qx: number, qy: number, qz: number, qw: number, out: T): T
 ```
 
 ## Internal Architecture
 
-Both functions are allocation-free except for their returned tuple and depend
-only on scalar `Math` operations. They keep the quaternion's scale in the pole
-test so non-normalized and zero quaternions follow Babylon.js behavior.
+Both functions are allocation-free and write directly into caller-owned
+storage. They depend only on scalar `Math` operations and keep the quaternion's
+scale in the pole test so non-normalized and zero quaternions follow Babylon.js
+behavior.
 
 ## Pipeline Configuration
 
@@ -36,9 +37,9 @@ None. The helpers are pure functions with no module-level state or side effects.
 
 ## Babylon.js Equivalence Map
 
-- `quatToBabylonEulerTuple` mirrors `Quaternion.toEulerAnglesToRef`, including
+- `quatToBabylonEulerToRef` mirrors `Quaternion.toEulerAnglesToRef`, including
   the precision-preserving `atan2` pitch calculation and exact-pole threshold.
-- `quatToBabylonAlphaBetaGammaTuple` mirrors
+- `quatToBabylonAlphaBetaGammaToRef` mirrors
   `Quaternion.toAlphaBetaGammaToRef`.
 
 ## Dependencies
@@ -49,7 +50,8 @@ None.
 
 - Round-trip yaw/pitch/roll values close to positive and negative 90-degree
   pitch and verify the represented quaternion rotation.
-- Verify the exact-pole result and zero-quaternion behavior.
+- Verify both exact-pole results with nonzero yaw and roll, including a scaled
+  non-unit quaternion, plus zero-quaternion behavior.
 - Verify alpha/beta/gamma conversion against fixed values.
 
 ## File Manifest
