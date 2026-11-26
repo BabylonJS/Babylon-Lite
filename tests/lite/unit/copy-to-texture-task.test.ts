@@ -9,16 +9,6 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { createTexture2DArray } from "../../../packages/babylon-lite/src/texture/texture-array";
 import { createTextureRenderTarget } from "../../../packages/babylon-lite/src/texture/texture-render-target";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
-    GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-    GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_SRC: number; COPY_DST: number };
-};
-
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as typeof GPUShaderStage;
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as typeof GPUTextureUsage;
-
 interface BeginPassCapture {
     descriptors: GPURenderPassDescriptor[];
     viewports: Array<{ x: number; y: number; w: number; h: number }>;

@@ -13,11 +13,6 @@ import { syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
-    GPUBufferUsage?: { VERTEX: number; COPY_DST: number; STORAGE: number; INDIRECT: number };
-};
-gpuGlobals.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x8, STORAGE: 0x80, INDIRECT: 0x100 } as unknown as typeof GPUBufferUsage;
-
 /** Let the retirement flush's deferred work settle.
  *
  *  `flushGpuResourceRetirements` defers via `queueMicrotask`, and only inside that callback does it

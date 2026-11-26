@@ -1,13 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGpuFrameTimer, gpuFrameTimerBegin, gpuFrameTimerEnd, gpuFrameTimerResolve } from "../../../packages/babylon-lite/src/engine/gpu-timer";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUMapMode"> & {
-    GPUBufferUsage?: { COPY_DST: number; COPY_SRC: number; MAP_READ: number; QUERY_RESOLVE: number };
-    GPUMapMode?: { READ: number; WRITE: number };
-};
-gpuGlobals.GPUBufferUsage ??= { COPY_DST: 8, COPY_SRC: 4, MAP_READ: 1, QUERY_RESOLVE: 512 } as unknown as typeof GPUBufferUsage;
-gpuGlobals.GPUMapMode ??= { READ: 1, WRITE: 2 } as unknown as typeof GPUMapMode;
-
 function fixture() {
     const calls: unknown[] = [];
     const querySet = {} as GPUQuerySet;

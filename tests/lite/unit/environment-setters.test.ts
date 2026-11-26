@@ -15,9 +15,6 @@ import { SCENE_UBO_WGSL } from "../../../packages/babylon-lite/src/shader/scene-
 import ddsSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-dds.fragment.wgsl?raw";
 import hdrSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-hdr.fragment.wgsl?raw";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
-
 function makeIdentityMatrix(): Mat4 {
     const matrix = new Float32Array(16);
     matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;

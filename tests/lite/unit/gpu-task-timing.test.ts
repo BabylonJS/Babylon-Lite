@@ -9,13 +9,6 @@ import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph
 import type { Pass } from "../../../packages/babylon-lite/src/frame-graph/pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUMapMode"> & {
-    GPUBufferUsage?: { COPY_DST: number; COPY_SRC: number; MAP_READ: number; QUERY_RESOLVE: number };
-    GPUMapMode?: { READ: number; WRITE: number };
-};
-gpuGlobals.GPUBufferUsage ??= { COPY_DST: 0x0008, COPY_SRC: 0x0004, MAP_READ: 0x0001, QUERY_RESOLVE: 0x0200 } as unknown as typeof GPUBufferUsage;
-gpuGlobals.GPUMapMode ??= { READ: 0x1, WRITE: 0x2 } as unknown as typeof GPUMapMode;
-
 function makeEngineWithFeatures(features: Iterable<GPUFeatureName>): EngineContext {
     return {
         _device: { features: new Set(features) },

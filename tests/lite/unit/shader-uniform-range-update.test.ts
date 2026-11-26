@@ -12,13 +12,6 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage"> & {
-    GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-};
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 1, FRAGMENT: 2 } as unknown as typeof GPUShaderStage;
-
 interface FakeBuffer extends GPUBuffer {
     _label?: string;
 }
