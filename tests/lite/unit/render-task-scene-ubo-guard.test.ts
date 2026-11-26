@@ -10,7 +10,7 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
 
 function makeIdentityMatrix(): Mat4 {
     const m = new Float32Array(16);

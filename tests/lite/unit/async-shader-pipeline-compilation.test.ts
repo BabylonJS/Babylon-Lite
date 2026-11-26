@@ -31,7 +31,7 @@ import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
 };
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
+gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as typeof GPUShaderStage;
 
 function makeEngine(createAsync?: (descriptor: GPURenderPipelineDescriptor) => Promise<GPURenderPipeline>) {
     const createBindGroupLayout = vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout);

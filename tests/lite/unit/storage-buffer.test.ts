@@ -11,9 +11,9 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPU
     GPUBufferUsage?: { STORAGE: number; COPY_SRC: number; COPY_DST: number; MAP_READ: number };
     GPUMapMode?: { READ: number };
 };
-gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_SRC: 0x4, COPY_DST: 0x8, MAP_READ: 0x1 } as unknown as GPUBufferUsage;
+gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_SRC: 0x4, COPY_DST: 0x8, MAP_READ: 0x1 } as unknown as typeof GPUBufferUsage;
 Object.assign(gpuGlobals.GPUBufferUsage, { COPY_SRC: 0x4, COPY_DST: 0x8, MAP_READ: 0x1, STORAGE: 0x80 });
-gpuGlobals.GPUMapMode ??= { READ: 0x1 } as unknown as GPUMapMode;
+gpuGlobals.GPUMapMode ??= { READ: 0x1 } as unknown as typeof GPUMapMode;
 
 function makeEngine(maxBufferSize = 256 * 1024 * 1024) {
     const mapped = new ArrayBuffer(16);

@@ -10,7 +10,7 @@ import type { DrawBinding, DrawUpdateBatch, Renderable } from "../../../packages
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
     GPUBufferUsage?: { COPY_SRC: number; COPY_DST: number };
 };
-gpuGlobals.GPUBufferUsage ??= { COPY_SRC: 0x4, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
+gpuGlobals.GPUBufferUsage ??= { COPY_SRC: 0x4, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
 
 function makeDevice(maxBufferSize = Number.MAX_SAFE_INTEGER, maxUniformBufferBindingSize = Number.MAX_SAFE_INTEGER) {
     const buffers: GPUBuffer[] = [];

@@ -12,7 +12,7 @@ import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUTextureUsage"> & {
     GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_DST: number };
 };
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
+gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_DST: 0x2 } as unknown as typeof GPUTextureUsage;
 
 function makeGenerator(type: ShadowGenerator["_shadowType"] = "csm") {
     const oldTexture = { destroy: vi.fn() };

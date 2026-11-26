@@ -8,7 +8,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
 
 /** Mock engine whose `queue.writeBuffer` increments `writeCount.n`, so a test can observe
  *  exactly when the scene UBO is re-packed. Mirrors `render-task-scene-ubo-guard.test.ts`. */

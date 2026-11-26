@@ -16,8 +16,8 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
     GPUBufferUsage?: { STORAGE: number; COPY_DST: number };
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
 };
-gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 1, FRAGMENT: 2 } as unknown as GPUShaderStage;
+gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
+gpuGlobals.GPUShaderStage ??= { VERTEX: 1, FRAGMENT: 2 } as unknown as typeof GPUShaderStage;
 
 function makeEngine(): { engine: EngineContext; rawBuffer: GPUBuffer & { destroy: ReturnType<typeof vi.fn> }; deviceDestroy: ReturnType<typeof vi.fn> } {
     const rawBuffer = {

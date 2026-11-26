@@ -16,7 +16,7 @@ import ddsSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-dds
 import hdrSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-hdr.fragment.wgsl?raw";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as typeof GPUBufferUsage;
 
 function makeIdentityMatrix(): Mat4 {
     const matrix = new Float32Array(16);
