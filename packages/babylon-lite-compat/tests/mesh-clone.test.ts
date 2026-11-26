@@ -10,7 +10,7 @@ import type * as Lite from "babylon-lite";
  * functions and assert the pure forwarding/translation contract.
  */
 vi.mock("babylon-lite", async (importOriginal) => {
-    const { getMeshOpacity, createTransformNode } = await importOriginal<typeof Lite>();
+    const { getMeshOpacity, createTransformNode, quatToBabylonAlphaBetaGammaToRef, quatToBabylonEulerToRef } = await importOriginal<typeof Lite>();
     // Keep the GPU calls mocked while using real CPU-only observable transforms.
     // This models the quaternion version and independent rotation values required
     // by cloned Lite scene nodes, without weakening production assertions.
@@ -73,6 +73,8 @@ vi.mock("babylon-lite", async (importOriginal) => {
         createGroundFromHeightMap: vi.fn(),
         computeAabb: vi.fn(),
         getMeshOpacity,
+        quatToBabylonAlphaBetaGammaToRef,
+        quatToBabylonEulerToRef,
     };
 });
 

@@ -28,7 +28,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import type { EngineContext } from "babylon-lite";
-import { Engine, WebGPUEngine } from "../src/engine/engine";
+import { Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
 
 interface TestEngine {
     _startupComplete: boolean;
@@ -129,6 +129,25 @@ describe("compat engine startup ordering", () => {
         expect(engine.useReverseDepthBuffer).toBe(true);
         await engine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
+    it("accepts the WebGL-only useNDCHalfZRange option while retaining Lite's WebGPU depth range", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+        const engine = new Engine(canvas, true, { useNDCHalfZRange: false });
+
+        expect(engine.isNDCHalfZRange).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+
+        const thinEngine = new ThinEngine(canvas, true, { useNDCHalfZRange: false });
+        expect(thinEngine.isNDCHalfZRange).toBe(true);
+        await thinEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+
+        const optionsThinEngine = new ThinEngine(canvas, { msaaSamples: 1, useNDCHalfZRange: false });
+        expect(optionsThinEngine.isNDCHalfZRange).toBe(true);
+        await optionsThinEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
     it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {

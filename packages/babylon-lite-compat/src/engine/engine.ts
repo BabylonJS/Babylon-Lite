@@ -162,12 +162,18 @@ export interface AbstractEngineOptions extends LiteEngineOptions {
 }
 
 /** Babylon.js `EngineOptions` subset accepted by the compat engine. */
-export interface EngineOptions extends AbstractEngineOptions {}
+export interface EngineOptions extends AbstractEngineOptions {
+    useNDCHalfZRange?: boolean;
+}
 
 /** Babylon.js `WebGPUEngineOptions` subset accepted by the compat engine. */
 export interface WebGPUEngineOptions extends AbstractEngineOptions {
     canvasToneMapping?: GPUCanvasToneMapping;
     canvasColorSpace?: PredefinedColorSpace;
+}
+
+interface CompatEngineOptions extends WebGPUEngineOptions {
+    useNDCHalfZRange?: boolean;
 }
 
 /**
@@ -295,7 +301,7 @@ export abstract class AbstractEngine {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        const opts: CompatEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
         this.useReverseDepthBuffer = opts?.useReverseDepthBuffer ?? false;
         if (opts) {
             if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
@@ -309,6 +315,7 @@ export abstract class AbstractEngine {
             delete opts.canvasToneMapping;
             delete opts.canvasColorSpace;
             delete opts.useReverseDepthBuffer;
+            delete opts.useNDCHalfZRange;
             if (antialias === false) {
                 opts.msaaSamples = 1;
             }
@@ -732,15 +739,9 @@ export abstract class AbstractEngine {
  * (everything is WebGPU-backed), so this exists purely to reproduce the class
  * name and inheritance chain.
  */
-export class ThinEngine extends AbstractEngine {}
-
-/**
- * Babylon.js's full WebGL engine. In Babylon.js `Engine extends ThinEngine`
- * (sibling to {@link WebGPUEngine}, both rooted at {@link AbstractEngine}).
- * Babylon Lite is WebGPU-only, so a compat `Engine` is still backed by the same
- * Lite WebGPU context; this class exists to mirror Babylon.js's name + hierarchy.
- */
-export class Engine extends ThinEngine {
+export class ThinEngine extends AbstractEngine {
+    public constructor(canvas: RenderCanvas, options?: EngineOptions);
+    public constructor(canvas: RenderCanvas, antialias?: boolean, options?: EngineOptions, adaptToDeviceRatio?: boolean);
     public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
         if (typeof antialiasOrOptions === "object") {
             super(canvas, antialiasOrOptions);
@@ -755,6 +756,22 @@ export class Engine extends ThinEngine {
             antialias: antialiasOrOptions ?? options?.antialias,
             ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
         });
+    }
+}
+
+/**
+ * Babylon.js's full WebGL engine. In Babylon.js `Engine extends ThinEngine`
+ * (sibling to {@link WebGPUEngine}, both rooted at {@link AbstractEngine}).
+ * Babylon Lite is WebGPU-only, so a compat `Engine` is still backed by the same
+ * Lite WebGPU context; this class exists to mirror Babylon.js's name + hierarchy.
+ */
+export class Engine extends ThinEngine {
+    public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+        if (typeof antialiasOrOptions === "object") {
+            super(canvas, antialiasOrOptions.antialias, antialiasOrOptions, antialiasOrOptions.adaptToDeviceRatio);
+            return;
+        }
+        super(canvas, antialiasOrOptions, options, adaptToDeviceRatio);
     }
 }
 
