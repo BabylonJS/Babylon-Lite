@@ -323,6 +323,44 @@ describe("GlowPostProcessTask", () => {
         expect(color.destroy).not.toHaveBeenCalled();
     });
 
+    it("composes into a reassigned destination from its next record, recreating the merge pipeline only for a new format or sample count", async () => {
+        const f = fixture(4);
+        const emitter = createStandardMaterial();
+        emitter.emissiveColor = [1, 0.2, 0];
+        f.mesh(emitter);
+        const task = createGlowPostProcessTask({ targetTexture: f.target, resolveTexture: f.screen }, f.engine, f.scene);
+        await task._preload!();
+        task.record();
+        const mergeAttachment = (): GPURenderPassColorAttachment => {
+            const descriptor = f.begin.mock.calls.at(-1)![0];
+            expect(descriptor.label).toBe("glow-merge");
+            return [...descriptor.colorAttachments][0]!;
+        };
+        const mergePipelines = (): GPURenderPipelineDescriptor[] =>
+            f.device.createRenderPipeline.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => descriptor.label === "glow-merge");
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: f.screen._colorView });
+        const other = createRenderTarget({ format: "bgra8unorm", samples: 1, size: f.size });
+        buildRenderTarget(other, f.engine);
+        task.resolveTexture = other;
+        task.execute!();
+        expect(mergeAttachment().resolveTarget).toBe(f.screen._colorView);
+        task.record();
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: other._colorView });
+        expect(mergePipelines()).toHaveLength(1);
+        task.outputTexture = other;
+        task.resolveTexture = undefined;
+        task.record();
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: other._colorView, resolveTarget: undefined });
+        expect(mergePipelines().map((descriptor) => descriptor.multisample?.count)).toEqual([4, 1]);
+        task.resolveTexture = f.target;
+        expect(() => task.record()).toThrow("resolveTexture requires");
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
     it("can remove and re-add the same scene mesh without retaining a disposed draw", () => {
         const f = fixture();
         const mesh = f.mesh(createStandardMaterial());

@@ -84,6 +84,8 @@ To add gizmos, allocate the final MSAA color target, pass it as `targetTexture`,
 
 Compat `UtilityLayerRenderer(scene, targets)` and `GizmoManager(scene, targets)` also require explicit native `{ rt, rst? }` destinations (breaking change). They never infer a target from the scene or a pipeline. The compat SSAO constructor accepts the same destinations as its optional seventh argument, a Lite-specific extension. Target references are not serialized; callers must supply them again when recreating the pipeline. Automatic utility-layer retargeting on SSAO attach/detach is not supported; recreate layers when the output chain changes. Babylon.js compatibility is best-effort, not a reason to add task scans or swapchain copies.
 
+A compat `GlowLayer` without explicit destinations is part of the scene stage rather than a later consumer: it composes into `scene.defaultRenderTask`'s current destination, follows the retargeting this controller applies on attach and restores on detach, and stays immediately before the AO chain, so AO darkens the glow as in Babylon.js (see `glow-post-process.md`). With explicit destinations it is rewired by its owner, like the utility layers.
+
 ```ts
 const rt = engine.msaaSamples > 1 ? createRenderTarget({ format: engine.format, samples: engine.msaaSamples, size: engine }) : engine.scRT;
 const targets = { rt, rst: engine.msaaSamples > 1 ? engine.scRT : undefined };
