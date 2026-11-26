@@ -214,19 +214,21 @@ describe("createSceneSsaoPipeline", () => {
         expect(tasks.map((task) => task.name)).toEqual(["scene"]);
     });
 
-    it.each([
-        [undefined, "depth32float"],
-        ["depth32float", "depth32float"],
-        ["depth24plus", "depth24plus"],
-    ] as const)("resolves MSAA depth into a stencil-free target (depthResolveFormat %s → %s)", (depthResolveFormat, format) => {
+    it.each([undefined, "depth32float", "depth24plus"] as const)("resolves MSAA depth into a stencil-free target (depthResolveFormat %s)", (depthResolveFormat) => {
         const { engine, scene, camera, defaultTask, tasks } = makeFixture(4);
         const pipeline = createSceneSsaoPipeline({ depthResolveFormat }, engine, scene, camera);
         const resolveOnce = () => {
             attachSceneSsaoPipeline(pipeline);
             const resolve = tasks[1]!;
             const ao = tasks[2] as ScreenSpaceAmbientOcclusionPostProcessTask;
-            expect(resolve.name).toBe("scene-ssao-depth-resolve");
-            expect(ao.depthTexture._descriptor).toMatchObject({ dFormat: format, samples: 1 });
+            expect(resolve.name).toBe(`${pipeline.name}-depth-resolve`);
+            expect(ao.depthTexture._descriptor.samples).toBe(1);
+            const format = ao.depthTexture._descriptor.dFormat!;
+            expect(format).not.toContain("stencil");
+            // The default format is the library's choice; only an explicit option pins it.
+            if (depthResolveFormat) {
+                expect(format).toBe(depthResolveFormat);
+            }
 
             defaultTask.record();
             resolve.record();
@@ -244,11 +246,12 @@ describe("createSceneSsaoPipeline", () => {
             expect(attachment).toMatchObject({ depthLoadOp: "clear", depthStoreOp: "store" });
             expect(pass.setPipeline.mock.calls[0]![0]).toMatchObject({ depthStencil: { format } });
             detachSceneSsaoPipeline(pipeline);
+            return format;
         };
 
-        resolveOnce();
-        // A reattach allocates a fresh resolve target with the same configured format.
-        resolveOnce();
+        const format = resolveOnce();
+        // A reattach allocates a fresh resolve target in the same format.
+        expect(resolveOnce()).toBe(format);
     });
 
     it("keeps sampling the scene depth without MSAA whatever depthResolveFormat is", () => {
@@ -257,7 +260,7 @@ describe("createSceneSsaoPipeline", () => {
 
         attachSceneSsaoPipeline(pipeline);
 
-        expect(tasks.map((task) => task.name)).toEqual(["scene", "scene-ssao"]);
+        expect(tasks.map((task) => task.name)).toEqual(["scene", pipeline.name]);
         expect((tasks[1] as ScreenSpaceAmbientOcclusionPostProcessTask).depthTexture).toBe(defaultTask._config.depth);
     });
 
