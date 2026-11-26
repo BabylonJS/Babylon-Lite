@@ -214,6 +214,68 @@ describe("createSceneSsaoPipeline", () => {
         expect(tasks.map((task) => task.name)).toEqual(["scene"]);
     });
 
+    it.each([undefined, "depth32float", "depth24plus"] as const)("resolves MSAA depth into a stencil-free target (depthResolveFormat %s)", (depthResolveFormat) => {
+        const { engine, scene, camera, defaultTask, tasks } = makeFixture(4);
+        const pipeline = createSceneSsaoPipeline({ depthResolveFormat }, engine, scene, camera);
+        const resolveOnce = () => {
+            attachSceneSsaoPipeline(pipeline);
+            const resolve = tasks[1]!;
+            const ao = tasks[2] as ScreenSpaceAmbientOcclusionPostProcessTask;
+            expect(resolve.name).toBe(`${pipeline.name}-depth-resolve`);
+            expect(ao.depthTexture._descriptor.samples).toBe(1);
+            const format = ao.depthTexture._descriptor.dFormat!;
+            expect(format).not.toContain("stencil");
+            // The default format is the library's choice; only an explicit option pins it.
+            if (depthResolveFormat) {
+                expect(format).toBe(depthResolveFormat);
+            }
+
+            defaultTask.record();
+            resolve.record();
+            const pass = { setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn(), end: vi.fn() };
+            const beginRenderPass = vi.fn((_descriptor: GPURenderPassDescriptor) => pass);
+            (engine as unknown as { _currentEncoder: unknown })._currentEncoder = { beginRenderPass };
+            resolve.execute!();
+
+            // WebGPU rejects the whole command buffer when a depth-stencil attachment has a stencil aspect
+            // but no stencilLoadOp/stencilStoreOp; a depth-only target needs neither.
+            const attachment = beginRenderPass.mock.calls[0]![0].depthStencilAttachment!;
+            const view = attachment.view as unknown as { texture: GPUTexture };
+            expect(view.texture).toBe(ao.depthTexture._depthTexture);
+            expect(view.texture.format).toBe(format);
+            expect(attachment).toMatchObject({ depthLoadOp: "clear", depthStoreOp: "store" });
+            expect(pass.setPipeline.mock.calls[0]![0]).toMatchObject({ depthStencil: { format } });
+            detachSceneSsaoPipeline(pipeline);
+            return { format, target: ao.depthTexture, texture: view.texture };
+        };
+
+        const first = resolveOnce();
+        const second = resolveOnce();
+        // A reattach allocates a fresh resolve target in the same format.
+        expect(second.target).not.toBe(first.target);
+        expect(second.texture).not.toBe(first.texture);
+        expect(second.format).toBe(first.format);
+    });
+
+    it("keeps sampling the scene depth without MSAA whatever depthResolveFormat is", () => {
+        const { engine, scene, camera, defaultTask, tasks } = makeFixture(1);
+        const pipeline = createSceneSsaoPipeline({ depthResolveFormat: "depth24plus" }, engine, scene, camera);
+
+        attachSceneSsaoPipeline(pipeline);
+
+        expect(tasks.map((task) => task.name)).toEqual(["scene", pipeline.name]);
+        expect((tasks[1] as ScreenSpaceAmbientOcclusionPostProcessTask).depthTexture).toBe(defaultTask._config.depth);
+    });
+
+    it("rejects an unsupported depthResolveFormat", () => {
+        const { engine, scene, camera, tasks } = makeFixture(4);
+
+        expect(() => createSceneSsaoPipeline({ depthResolveFormat: "depth24plus-stencil8" as "depth24plus" }, engine, scene, camera)).toThrow(
+            'SceneSsaoPipeline depthResolveFormat must be "depth24plus" or "depth32float".'
+        );
+        expect(tasks.map((task) => task.name)).toEqual(["scene"]);
+    });
+
     it("pauses the owned chain while another camera is active", () => {
         const { engine, scene, camera, defaultTask, tasks } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
