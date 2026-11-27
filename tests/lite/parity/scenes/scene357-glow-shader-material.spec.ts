@@ -23,6 +23,7 @@ test("Scene 357 — ShaderMaterial and PBR glow match Babylon.js GlowLayer", asy
 
     await page.goto("/scene357.html");
     await waitForCanvasReady(page, { timeout: 60_000, label: "Scene 357 Lite" });
+    await page.locator("#loader-overlay").waitFor({ state: "detached", timeout: 10_000 });
 
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");
     await page.locator("canvas").screenshot({ path: screenshotPath });

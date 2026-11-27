@@ -339,6 +339,32 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual([removed]);
     });
 
+    it("treats properties that only drop their readonly modifier as additive", () => {
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@ -5288,10 +5288,8 @@ export interface GlowPostProcessTask extends Task {",
+            "     neutralColor: GlowColor;",
+            "-    // (undocumented)",
+            "-    readonly outputTexture: RenderTarget;",
+            "-    // (undocumented)",
+            "-    readonly resolveTexture: RenderTarget | undefined;",
+            "+    outputTexture: RenderTarget;",
+            "+    resolveTexture: RenderTarget | undefined;",
+            " }",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([]);
+        expect(breakingApiLines(apiDiff("static readonly DefaultSize: number;", "static DefaultSize: number;"))).toEqual([]);
+    });
+
+    it("still flags a relaxed readonly property whose type changes, and a readonly array parameter becoming mutable", () => {
+        expect(breakingApiLines(apiDiff("readonly outputTexture: RenderTarget;", "outputTexture: RenderTarget | null;"))).toEqual(["readonly outputTexture: RenderTarget;"]);
+        const parameter = "export declare function setValues(values: readonly number[]): void;";
+        expect(breakingApiLines(apiDiff(parameter, "export declare function setValues(values: number[]): void;"))).toEqual([parameter]);
+    });
+
     it("treats overloads collapsed into one widened union signature as additive", () => {
         const diff = [
             "diff --git a/target.api.md b/current.api.md",

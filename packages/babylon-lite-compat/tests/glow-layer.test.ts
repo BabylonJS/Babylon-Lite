@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Lite from "babylon-lite";
-import type { GlowPostProcessTask, GlowPostProcessTaskConfig, Mesh as LiteMesh, RenderTask, SceneContext, RenderTarget } from "babylon-lite";
+import type { GlowPostProcessTask, GlowPostProcessTaskConfig, Mesh as LiteMesh, RenderTask, SceneContext, RenderTarget, Task } from "babylon-lite";
 
 const hooks = vi.hoisted(() => ({
     create: vi.fn<(options: GlowPostProcessTaskConfig, engine: Lite.EngineContext, scene: SceneContext) => GlowPostProcessTask>(),
@@ -41,6 +41,7 @@ function fixture(headless = false) {
     const producer: RenderTask = Object.assign({} as RenderTask, { name: "scene", config: { rt: target, rst: resolve }, _passes: [] });
     graph._tasks.push(producer);
     const native: SceneContext = Object.assign({} as SceneContext, { _frameGraph: graph, defaultRenderTask: producer, meshes: [], camera: null });
+    const flushes = new Set<() => void>();
     const scene: Scene = Object.assign(Object.create(Scene.prototype), {
         _lite: native,
         _engine: engine,
@@ -48,6 +49,7 @@ function fixture(headless = false) {
         _meshes: [],
         _materials: [],
         _loadedMaterialCache: new Map(),
+        _beforeRenderFlushCallbacks: flushes,
         onDisposeObservable: new Observable<Scene>(),
     });
     const mesh = (material: StandardMaterial | PBRMaterial | NodeMaterial = new StandardMaterial("surface", scene), isLed = false): Mesh => {
@@ -64,7 +66,12 @@ function fixture(headless = false) {
         native.meshes.push(lite);
         return value;
     };
-    return { scene, native, engine, graph, producer, target, resolve, late, mesh };
+    const flush = (): void => {
+        for (const callback of flushes) {
+            callback();
+        }
+    };
+    return { scene, native, engine, graph, producer, target, resolve, late, mesh, flushes, flush };
 }
 
 function task(): GlowPostProcessTask {
@@ -282,7 +289,7 @@ describe("GlowLayer adapter", () => {
         glow.dispose();
     });
 
-    it("rejects a stale producer output rather than guessing a new target after preparation", async () => {
+    it("starts from the producer's current destination when it changes during preparation", async () => {
         const f = fixture();
         let resume!: () => void;
         hooks.prepare.mockImplementationOnce(
@@ -294,12 +301,43 @@ describe("GlowLayer adapter", () => {
         const glow = new GlowLayer("glow", f.scene);
         const initializing = f.late[0]!();
         await Promise.resolve();
-        f.producer.config.rt = {} as RenderTarget;
+        const retargeted = {} as RenderTarget;
+        f.producer.config.rt = retargeted;
         resume();
-        await expect(initializing).rejects.toThrow("output changed");
-        expect(f.graph._tasks).toEqual([f.producer]);
-        expect(task().dispose).toHaveBeenCalledOnce();
+        await initializing;
+        expect(task()).toMatchObject({ outputTexture: retargeted, resolveTexture: f.resolve });
+        expect(f.graph._tasks).toEqual([f.producer, task()]);
         glow.dispose();
+    });
+
+    it("follows its producer through a scene-output attach and detach, staying ahead of the inserted chain", async () => {
+        const f = fixture();
+        const glow = new GlowLayer("glow", f.scene);
+        await f.late[0]!();
+        const glowTask = task();
+        hooks.build.mockClear();
+        f.flush();
+        expect(hooks.build).not.toHaveBeenCalled();
+        // As SSAO does: its chain is inserted right after the producer, whose resolve now feeds that chain.
+        const ssao = { name: "ssao", _passes: [] } as unknown as Task;
+        const source = {} as RenderTarget;
+        f.graph._tasks.splice(1, 0, ssao);
+        f.producer.config.rst = source;
+        f.flush();
+        expect(glowTask).toMatchObject({ outputTexture: f.target, resolveTexture: source });
+        expect(f.graph._tasks).toEqual([f.producer, glowTask, ssao]);
+        expect(hooks.build).toHaveBeenCalledOnce();
+        expect(hooks.build).toHaveBeenCalledWith(f.graph, glowTask);
+        f.flush();
+        expect(hooks.build).toHaveBeenCalledOnce();
+        f.graph._tasks.splice(f.graph._tasks.indexOf(ssao), 1);
+        f.producer.config.rst = f.resolve;
+        f.flush();
+        expect(glowTask.resolveTexture).toBe(f.resolve);
+        expect(f.graph._tasks).toEqual([f.producer, glowTask]);
+        expect(hooks.build).toHaveBeenCalledTimes(2);
+        glow.dispose();
+        expect(f.flushes.size).toBe(0);
     });
 
     it("forwards explicitly supplied custom-chain targets and anchor", async () => {
@@ -310,6 +348,8 @@ describe("GlowLayer adapter", () => {
         await f.late[0]!();
         expect(task().outputTexture).toBe(target);
         expect(task().resolveTexture).toBeUndefined();
+        // Its owner rewires an explicit placement.
+        expect(f.flushes.size).toBe(0);
         glow.dispose();
     });
 

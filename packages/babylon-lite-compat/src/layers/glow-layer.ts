@@ -51,6 +51,7 @@ export class GlowLayer {
     private readonly _color = new Color4(0, 0, 0, 1);
     private readonly _disposeObserver = (): void => this.dispose();
     private _task: GlowPostProcessTask | null = null;
+    private _unfollow: (() => void) | null = null;
     private _disposed = false;
     private _enabled = true;
     private _intensity = 1;
@@ -219,6 +220,8 @@ export class GlowLayer {
         }
         this._disposed = true;
         this._scene.onDisposeObservable.remove(this._disposeObserver);
+        this._unfollow?.();
+        this._unfollow = null;
         const task = this._task;
         this._task = null;
         if (task) {
@@ -298,6 +301,23 @@ export class GlowLayer {
 
     private readonly _textureBridge = (): Texture2D | null => this._selectedTexture;
 
+    // The default placement follows its producer's current destination, which scene-output chains such as SSAO
+    // retarget on attach and detach, and stays right after that producer, so those chains consume the glow as
+    // Babylon.js post-processes consume the scene. The owner of an explicit placement rewires it instead.
+    private readonly _follow = (): void => {
+        const task = this._task!;
+        const scene = this._scene._lite;
+        const producer = scene.defaultRenderTask!;
+        const { rt, rst } = producer.config;
+        if (task.outputTexture !== rt || task.resolveTexture !== rst) {
+            task.outputTexture = rt;
+            task.resolveTexture = rst;
+            removeTask(scene, task);
+            addTaskAfter(scene, task, producer);
+            buildFrameGraphTask(getFrameGraph(scene), task);
+        }
+    };
+
     private async _initialize(): Promise<void> {
         await Promise.resolve();
         if (this._disposed || this._task) {
@@ -334,8 +354,11 @@ export class GlowLayer {
                 task.dispose();
                 return;
             }
-            if (!this._options.targetTexture && (producer!.config.rt !== target || producer!.config.rst !== resolve)) {
-                throw new Error("GlowLayer output changed during initialization. Configure the output pipeline first or supply explicit destinations.");
+            const follow = !this._options.targetTexture;
+            if (follow) {
+                // Preparation is asynchronous: start from the producer's current destination.
+                task.outputTexture = producer!.config.rt;
+                task.resolveTexture = producer!.config.rst;
             }
             task.intensity = this._intensity;
             task.blurKernelSize = this._kernel;
@@ -348,6 +371,9 @@ export class GlowLayer {
             buildFrameGraphTask(getFrameGraph(scene), task);
             this._task = task;
             this._syncMembership();
+            if (follow) {
+                this._unfollow = this._scene._registerBeforeRenderFlush(this._follow);
+            }
         } catch (error) {
             removeTask(scene, task);
             task.dispose();

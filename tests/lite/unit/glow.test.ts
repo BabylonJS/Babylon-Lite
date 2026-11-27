@@ -323,6 +323,49 @@ describe("GlowPostProcessTask", () => {
         expect(color.destroy).not.toHaveBeenCalled();
     });
 
+    it("composes into a reassigned destination from its next record, keeping its intermediates and recreating only a mismatched merge pipeline", async () => {
+        const f = fixture(4);
+        const emitter = createStandardMaterial();
+        emitter.emissiveColor = [1, 0.2, 0];
+        f.mesh(emitter);
+        const task = createGlowPostProcessTask({ targetTexture: f.target, resolveTexture: f.screen }, f.engine, f.scene);
+        await task._preload!();
+        task.record();
+        const mergeAttachment = (): GPURenderPassColorAttachment => {
+            const descriptor = f.begin.mock.calls.at(-1)![0];
+            expect(descriptor.label).toBe("glow-merge");
+            return [...descriptor.colorAttachments][0]!;
+        };
+        const pipelines = (): string[] => f.device.createRenderPipeline.mock.calls.map(([descriptor]) => descriptor.label ?? "");
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: f.screen._colorView });
+        const other = createRenderTarget({ format: "bgra8unorm", samples: 1, size: f.size });
+        buildRenderTarget(other, f.engine);
+        const textures = f.device.createTexture.mock.calls.length;
+        const recorded = pipelines();
+        const emissive = task.emissiveTexture._colorTexture;
+        task.resolveTexture = other;
+        task.execute!();
+        expect(mergeAttachment().resolveTarget).toBe(f.screen._colorView);
+        task.record();
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: other._colorView });
+        task.outputTexture = other;
+        task.resolveTexture = undefined;
+        task.record();
+        task.execute!();
+        expect(mergeAttachment()).toMatchObject({ view: other._colorView, resolveTarget: undefined });
+        // Same-size retargets reallocate no intermediate and rebuild no blur; only the sample-count change adds a merge pipeline.
+        expect(f.device.createTexture).toHaveBeenCalledTimes(textures);
+        expect(task.emissiveTexture._colorTexture).toBe(emissive);
+        expect(pipelines()).toEqual([...recorded, "glow-merge"]);
+        expect(f.device.createRenderPipeline.mock.calls.at(-1)![0].multisample?.count).toBe(1);
+        task.resolveTexture = f.target;
+        expect(() => task.record()).toThrow("resolveTexture requires");
+        task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
     it("can remove and re-add the same scene mesh without retaining a disposed draw", () => {
         const f = fixture();
         const mesh = f.mesh(createStandardMaterial());
