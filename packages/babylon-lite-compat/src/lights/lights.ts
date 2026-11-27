@@ -204,6 +204,7 @@ export abstract class Light extends Node {
         } else {
             this._liteIntensity = value;
         }
+        this._syncClusteredIntensity();
     }
 
     /** @internal Materialize local and inherited enabled state in Babylon Lite. */
@@ -217,6 +218,12 @@ export abstract class Light extends Node {
             this._liteIntensity = this._disabledIntensity;
             this._disabledIntensity = null;
         }
+        this._syncClusteredIntensity();
+    }
+
+    /** @internal Forward effective intensity to a clustered-light adapter, when present. */
+    private _syncClusteredIntensity(): void {
+        (this._clusteredContainer as { _syncLightIntensity?(light: Light): void } | null)?._syncLightIntensity?.(this);
     }
 
     private _excludedMeshes: AbstractMesh[] = this._subscribeMeshList([]);
@@ -393,6 +400,7 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
+        (this._clusteredContainer as { _retireLight?(light: Light): void } | null)?._retireLight?.(this);
         this._meshListSceneRelease?.();
         this._meshListSceneRelease = null;
         this._releaseMeshLists();

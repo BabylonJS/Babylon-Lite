@@ -345,6 +345,11 @@ export {
     MultiMaterial,
     ShaderMaterial,
     BackgroundMaterial,
+    TextureDome,
+    PhotoDome,
+    VideoDome,
+    VideoTexture,
+    RegisterVideoTexture,
     OpenPBRMaterial,
     OpenPBRMaterialDefines,
     RegisterOpenpbrMaterial,
@@ -441,7 +446,13 @@ export {
     BakedVertexAnimationManager,
     VertexAnimationBaker,
 } from "./unsupported/unsupported-apis.js";
-export type { IBakedVertexAnimationManager, IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
+export type {
+    IBakedVertexAnimationManager,
+    IKTX2EncoderOptions,
+    KTX2EncoderUsage,
+    VideoTextureSettings,
+    WebGPURenderPassCommandStreamDisableReason,
+} from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";

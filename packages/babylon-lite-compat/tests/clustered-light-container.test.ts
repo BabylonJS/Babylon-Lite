@@ -9,8 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * contract while the clustering data functions stay real.
  */
 
-const { addClusteredSpy, removeFromSceneSpy, addToSceneSpy, createEsmDirectionalShadowGeneratorSpy } = vi.hoisted(() => ({
+const { addClusteredSpy, markClusteredDirtySpy, removeFromSceneSpy, addToSceneSpy, createEsmDirectionalShadowGeneratorSpy } = vi.hoisted(() => ({
     addClusteredSpy: vi.fn(),
+    markClusteredDirtySpy: vi.fn(),
     removeFromSceneSpy: vi.fn(),
     addToSceneSpy: vi.fn(),
     createEsmDirectionalShadowGeneratorSpy: vi.fn(() => ({ kind: "esm" })),
@@ -21,6 +22,7 @@ vi.mock("babylon-lite", async (importActual) => {
     return {
         ...actual,
         addClusteredLightContainer: addClusteredSpy,
+        markClusteredLightContainerDirty: markClusteredDirtySpy,
         removeFromScene: removeFromSceneSpy,
         addToScene: addToSceneSpy,
         createEsmDirectionalShadowGenerator: createEsmDirectionalShadowGeneratorSpy,
@@ -34,6 +36,7 @@ import { Vector3 } from "../src/math/vector";
 import { Color3 } from "../src/math/color";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
+import { TransformNode } from "../src/meshes/meshes";
 import type { ClusteredLightContainer as LiteClusteredLightContainer } from "babylon-lite";
 function liteContainer(c: InstanceType<typeof ClusteredLightContainer>): LiteClusteredLightContainer {
     return (c as unknown as { _lite: LiteClusteredLightContainer })._lite;
@@ -59,6 +62,7 @@ function makeFakeScene(headless: boolean, id = "fake-scene"): { scene: Scene; re
 
 beforeEach(() => {
     addClusteredSpy.mockClear();
+    markClusteredDirtySpy.mockClear();
     removeFromSceneSpy.mockClear();
     addToSceneSpy.mockClear();
     createEsmDirectionalShadowGeneratorSpy.mockClear();
@@ -159,6 +163,50 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(first.range).toBe(7);
         expect(first.intensity).toBe(2);
     });
+
+    it("forwards child enabled state and logical intensity", () => {
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point.intensity = 2;
+        const c = new ClusteredLightContainer("clust", [point]);
+        const clustered = liteContainer(c).pointLights[0]!;
+
+        point.setEnabled(false);
+        expect(clustered.intensity).toBe(0);
+
+        point.intensity = 3;
+        expect(clustered.intensity).toBe(0);
+
+        point.setEnabled(true);
+        expect(clustered.intensity).toBe(3);
+    });
+
+    it("does not dirty a built container when effective intensity is unchanged", () => {
+        const { scene } = makeFakeScene(false);
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point.intensity = 2;
+        const c = new ClusteredLightContainer("clust", [point], scene);
+        c._build();
+
+        point.intensity = 2;
+        expect(markClusteredDirtySpy).not.toHaveBeenCalled();
+
+        point.setEnabled(false);
+        expect(markClusteredDirtySpy).toHaveBeenCalledTimes(1);
+        point.intensity = 3;
+        expect(markClusteredDirtySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("snapshots an initially disabled child as zero intensity", () => {
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point.intensity = 2;
+        point.setEnabled(false);
+
+        const c = new ClusteredLightContainer("clust", [point]);
+        expect(liteContainer(c).pointLights[0]!.intensity).toBe(0);
+
+        point.setEnabled(true);
+        expect(liteContainer(c).pointLights[0]!.intensity).toBe(2);
+    });
     it("ignores unsupported light types and double-adds", () => {
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         const point = new PointLight("p", new Vector3(0, 0, 0));
@@ -190,6 +238,30 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(addToSceneSpy).toHaveBeenCalledWith(scene._lite, point._lite);
 
         expect(c.removeLight(point)).toBe(-1);
+    });
+
+    it("retires a disposed child under a disabled parent without reviving it", () => {
+        const { scene, registered } = makeFakeScene(false);
+        const parent = new TransformNode("parent");
+        const point = new PointLight("p", new Vector3(0, 0, 0), scene);
+        point.intensity = 2;
+        point.parent = parent;
+        parent.setEnabled(false);
+        const c = new ClusteredLightContainer("clust", [point], scene);
+        c._build();
+        registered.length = 0;
+        addToSceneSpy.mockClear();
+        markClusteredDirtySpy.mockClear();
+
+        point.dispose();
+
+        expect(point.isDisposed()).toBe(true);
+        expect(point._clusteredContainer).toBeNull();
+        expect(c.lights).toEqual([]);
+        expect(liteContainer(c).pointLights).toEqual([]);
+        expect(registered).not.toContain(point);
+        expect(addToSceneSpy).not.toHaveBeenCalled();
+        expect(markClusteredDirtySpy).toHaveBeenCalledTimes(1);
     });
 
     it("throws before mutating when a light is added after GPU state is built", () => {

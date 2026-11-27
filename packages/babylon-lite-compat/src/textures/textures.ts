@@ -36,6 +36,9 @@ import type { Scene } from "../scene/scene.js";
 /** Compression suffix → `loadKtxTexture2D` token, recognised in a pre-resolved KTX URL. */
 const KTX_SUFFIX_RE = /(-astc|-dxt|-etc2|-pvrtc)\.ktx(\?.*)?$/i;
 
+/** @internal Constructor token for named throwing subclasses that must extend `Texture`. */
+export const _TextureStubSource = Symbol("TextureStubSource");
+
 /**
  * @internal Recognise a pre-resolved compressed KTX URL and split it into the
  * `{ baseUrl, suffix }` pair Babylon Lite's `loadKtxTexture2D` expects (which
@@ -341,6 +344,8 @@ export class Texture extends BaseTexture {
     /** @internal Upload flip actually passed to Lite; engine-only loads use Lite's default. */
     private readonly _effectiveInvertY: boolean;
 
+    /** @internal Creates an inert shell for a named throwing texture subclass. */
+    public constructor(source: typeof _TextureStubSource);
     public constructor(
         url: string,
         sceneOrEngine: Scene | { _lite: import("babylon-lite").EngineContext },
@@ -348,8 +353,32 @@ export class Texture extends BaseTexture {
         invertY?: boolean,
         _samplingMode?: number,
         onLoad?: (() => void) | null
+    );
+    public constructor(
+        url: string | typeof _TextureStubSource,
+        sceneOrEngine?: Scene | { _lite: import("babylon-lite").EngineContext },
+        noMipmapOrOptions?: unknown,
+        invertY?: boolean,
+        _samplingMode?: number,
+        onLoad?: (() => void) | null
     ) {
         super();
+        if (url === _TextureStubSource) {
+            this.name = "";
+            this._url = "";
+            this._invertY = true;
+            this._noMipmap = false;
+            this.samplingMode = Texture.BILINEAR_SAMPLINGMODE;
+            this._source = undefined as never;
+            this._engine = undefined as never;
+            this._scene = undefined;
+            this._effectiveInvertY = true;
+            this._ready = Promise.resolve();
+            return;
+        }
+        if (sceneOrEngine === undefined) {
+            throw new TypeError("Texture requires a scene or engine.");
+        }
         this.name = url;
         this._url = url;
         // Babylon.js `Texture(url, scene, noMipmapOrOptions?, invertY?, samplingMode?)`.
