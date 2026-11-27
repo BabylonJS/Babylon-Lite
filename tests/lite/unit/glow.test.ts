@@ -323,7 +323,7 @@ describe("GlowPostProcessTask", () => {
         expect(color.destroy).not.toHaveBeenCalled();
     });
 
-    it("composes into a reassigned destination from its next record, recreating the merge pipeline only for a new format or sample count", async () => {
+    it("composes into a reassigned destination from its next record, keeping its intermediates and recreating only a mismatched merge pipeline", async () => {
         const f = fixture(4);
         const emitter = createStandardMaterial();
         emitter.emissiveColor = [1, 0.2, 0];
@@ -336,25 +336,30 @@ describe("GlowPostProcessTask", () => {
             expect(descriptor.label).toBe("glow-merge");
             return [...descriptor.colorAttachments][0]!;
         };
-        const mergePipelines = (): GPURenderPipelineDescriptor[] =>
-            f.device.createRenderPipeline.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => descriptor.label === "glow-merge");
+        const pipelines = (): string[] => f.device.createRenderPipeline.mock.calls.map(([descriptor]) => descriptor.label ?? "");
         task.execute!();
         expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: f.screen._colorView });
         const other = createRenderTarget({ format: "bgra8unorm", samples: 1, size: f.size });
         buildRenderTarget(other, f.engine);
+        const textures = f.device.createTexture.mock.calls.length;
+        const recorded = pipelines();
+        const emissive = task.emissiveTexture._colorTexture;
         task.resolveTexture = other;
         task.execute!();
         expect(mergeAttachment().resolveTarget).toBe(f.screen._colorView);
         task.record();
         task.execute!();
         expect(mergeAttachment()).toMatchObject({ view: f.target._colorView, resolveTarget: other._colorView });
-        expect(mergePipelines()).toHaveLength(1);
         task.outputTexture = other;
         task.resolveTexture = undefined;
         task.record();
         task.execute!();
         expect(mergeAttachment()).toMatchObject({ view: other._colorView, resolveTarget: undefined });
-        expect(mergePipelines().map((descriptor) => descriptor.multisample?.count)).toEqual([4, 1]);
+        // Same-size retargets reallocate no intermediate and rebuild no blur; only the sample-count change adds a merge pipeline.
+        expect(f.device.createTexture).toHaveBeenCalledTimes(textures);
+        expect(task.emissiveTexture._colorTexture).toBe(emissive);
+        expect(pipelines()).toEqual([...recorded, "glow-merge"]);
+        expect(f.device.createRenderPipeline.mock.calls.at(-1)![0].multisample?.count).toBe(1);
         task.resolveTexture = f.target;
         expect(() => task.record()).toThrow("resolveTexture requires");
         task.dispose();

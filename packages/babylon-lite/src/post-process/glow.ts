@@ -286,10 +286,14 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             }
             // The map is sampled in destination screen space, so it is projected with the destination aspect even when fixed-size.
             aspect = dimensions.width / dimensions.height;
-            mapSize.width = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.width * ratio));
-            mapSize.height = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.height * ratio));
-            smallSize.width = Math.max(1, mapSize.width >> 1);
-            smallSize.height = Math.max(1, mapSize.height >> 1);
+            const width = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.width * ratio));
+            const height = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.height * ratio));
+            // Owned targets and blur pipelines depend only on the device and map size: a retarget keeps them.
+            const rebuild = device !== engine._device || width !== mapSize.width || height !== mapSize.height;
+            mapSize.width = width;
+            mapSize.height = height;
+            smallSize.width = Math.max(1, width >> 1);
+            smallSize.height = Math.max(1, height >> 1);
             if (device !== engine._device) {
                 for (const draw of draws.values()) {
                     disposeGlowDraw(context, draw);
@@ -309,12 +313,14 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             // The scene group binds these lights, or task-owned ones, on the next execution.
             sceneLights = ensureSceneLightState(engine, scene)._buffer;
             boundLights = null;
-            buildRenderTarget(emissive, engine);
-            context.targetTexture = emissive._colorTexture;
-            color.view = emissive._colorView!;
-            depth.view = emissive._depthView!;
-            for (const blur of blurs) {
-                blur.record();
+            if (rebuild) {
+                buildRenderTarget(emissive, engine);
+                context.targetTexture = emissive._colorTexture;
+                color.view = emissive._colorView!;
+                depth.view = emissive._depthView!;
+                for (const blur of blurs) {
+                    blur.record();
+                }
             }
             merge.record(target, resolve);
             epoch++;
