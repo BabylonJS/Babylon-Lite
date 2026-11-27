@@ -526,7 +526,7 @@ behavioural cross-check of the API surface above, not a separate contract.
 > nothing to run through the compat layer; `/compat/sceneN.html` reports them as
 > skipped. The counts below are out of the **249** scenes that have a BJS oracle.
 
-### ✅ Working (123 scenes, within configured MAD threshold)
+### ✅ Working (122 scenes, within configured MAD threshold)
 
 `1`, `2`, `4`, `5`, `6`, `9`, `10`, `11`, `13`, `14`, `15`, `16`, `18`, `19`, `22`, `24`, `25`, `27`, `28`,
 `29`, `30`, `31`, `32`, `33`, `34`, `35`, `36`, `37`, `38`, `39`, `40`, `50`, `51`, `52`, `53`,
@@ -535,7 +535,7 @@ behavioural cross-check of the API surface above, not a separate contract.
 `82`, `83`, `85`, `86`, `87`, `88`, `89`, `90`, `91`, `92`, `93`, `94`, `95`, `96`, `103`, `112`, `120`, `121`,
 `122`, `123`, `124`, `125`, `129`, `150`, `151`, `152`, `153`, `154`, `155`, `156`, `157`,
 `158`, `170`, `171`, `172`, `173`, `174`, `175`, `200`, `201`, `202`, `203`, `204`, `205`, `207`, `210`, `211`, `213`, `216`, `218`,
-`219`, `221`, `222`, `223`, `224`, `225`, `262`, `263`, `264`, `276`, `277`, `278`, `279`, `280`, `281`, `348`, `356`
+`219`, `221`, `222`, `223`, `224`, `225`, `262`, `263`, `264`, `276`, `277`, `278`, `279`, `280`, `281`, `356`
 
 Covers: StandardMaterial + PBR (factor + IBL, clearcoat, `.dds` environment),
 glTF / `.babylon` model loading (+ loaded animation groups with `goToFrame`
@@ -557,14 +557,11 @@ back-to-front rendering + view-dependent SH) through a `GaussianSplattingMesh`
 wrapper over Lite's `loadSplat` / `loadSOG` / `loadSPZ` (incl. `updateData` with
 `flipY` parity, `bakeCurrentTransformIntoVertices`, GPU picking, and opt-in
 Gaussian Point Splatting).
-Scene 348's native XeGTAO and compat `SSAO2RenderingPipeline` use different AO
-algorithms, so it passes its deliberate exceptional threshold (MAD 6.577 ≤ 7)
-rather than the ≈0 threshold used by the other working scenes.
-
 ### ❌ Not working — grouped by blocker
 
 | Blocker | Scenes | Notes |
 | ----------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | --- |
+| Compat/native SSAO parity | 348 | Lite's MSAA depth resolve now lets the compat route render, but the measured MAD 6.577 was compat versus native Lite while the scene's ceiling of 7 applies native Lite versus the Babylon.js golden. Keep the scene out of the Working list until a reproducible three-way comparison isolates the expected AO-algorithm difference and validates the compat route itself. |
 | Rectangular area lights | 316, 317, 318, 319, 320 | Lite now backs solid and textured rectangular emitters, and compat exposes `AreaLight` / `RectAreaLight` / `AreaLightTextureTools`. These scenes remain outside the Working list until the required browser MAD comparison verifies the new adapter against their native Lite ports. |
 | Newly wrapped bent normals | 230 | Lite now backs bent normals and compat forwards the required BJS material/container surfaces. It remains outside the Working list because this runner could not restore pnpm/browser dependencies (`registry.npmjs.org` DNS failure), so the required `/compat` vs `/lite` MAD capture could not be performed. |
 | Additive-blend billboards (`ALPHA_ONEONE` premultiplied) | 98, 205 | Re-checked 2026-08-19: Lite's new exact `(one,one)` blend and Node Particle Editor → `SpriteRenderer` bridge target the pure-2D Sprite2D path. These oracle scenes use compat's world-space camera-facing billboard path, so the new exports do not clear the blocker. 98's BJS oracle premultiplies color for `(one,one)` but the world-space Lite additive path is `(src-alpha,one)`; 205 layers LWR on top |

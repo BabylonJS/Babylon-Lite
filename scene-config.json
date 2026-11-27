@@ -3160,7 +3160,6 @@
         "name": "Scene 348 — Screen-Space Ambient Occlusion (Kitchen)",
         "maxMad": 7,
         "maxRawKB": 177,
-        "compatParity": true,
         "description": "The Diligent Kitchen (Apache-2.0, hosted in BabylonJS/Assets) lit by the environment only, with temporally filtered XeGTAO (Half pipeline, medium quality) applied to PBR diffuse environment lighting and frozen 128 frames after an explicit history reset, compared against Babylon.js SSAO2RenderingPipeline. The AO algorithms differ, so the MAD ceiling is deliberately wide.",
         "tags": ["pbr", "ssao", "post-process", "ibl", "gltf", "frame-graph", "temporal"],
         "skipPerf": true

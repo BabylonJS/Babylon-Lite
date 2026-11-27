@@ -400,6 +400,7 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
+        (this._clusteredContainer as { _retireLight?(light: Light): void } | null)?._retireLight?.(this);
         this._meshListSceneRelease?.();
         this._meshListSceneRelease = null;
         this._releaseMeshLists();

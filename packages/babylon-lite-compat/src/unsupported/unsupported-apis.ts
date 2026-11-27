@@ -26,7 +26,7 @@ import type { AbstractMesh, Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
 import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
-import { Texture } from "../textures/textures.js";
+import { Texture, _TextureStubSource } from "../textures/textures.js";
 import type { ExternalTexture } from "../textures/external-texture.js";
 import type { Vector3 } from "../math/vector.js";
 import type { Vector4 } from "../math/vector.js";
@@ -992,7 +992,7 @@ export class VideoTexture extends Texture {
         _onError?: ((message?: string, exception?: unknown) => void) | null,
         _format?: number
     ) {
-        super();
+        super(_TextureStubSource);
         this.name = name ?? "";
         unsupported("VideoTexture", TEXTURE_DOME_UNSUPPORTED);
     }
@@ -1026,7 +1026,7 @@ export class VideoTexture extends Texture {
     }
 
     public static CreateFromStreamAsync(_scene: Scene, _stream: MediaStream, _constraints: unknown, _invertY = true): Promise<VideoTexture> {
-        return unsupported("VideoTexture.CreateFromStreamAsync", TEXTURE_DOME_UNSUPPORTED);
+        return Promise.resolve().then(() => unsupported("VideoTexture.CreateFromStreamAsync", TEXTURE_DOME_UNSUPPORTED));
     }
 
     public static CreateFromWebCamAsync(
@@ -1035,7 +1035,7 @@ export class VideoTexture extends Texture {
         _audioConstraints?: boolean | MediaTrackConstraints,
         _invertY = true
     ): Promise<VideoTexture> {
-        return unsupported("VideoTexture.CreateFromWebCamAsync", TEXTURE_DOME_UNSUPPORTED);
+        return Promise.resolve().then(() => unsupported("VideoTexture.CreateFromWebCamAsync", TEXTURE_DOME_UNSUPPORTED));
     }
 
     public static CreateFromWebCam(

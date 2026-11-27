@@ -264,6 +264,36 @@ describe("Unsupported API stubs throw on construction", () => {
             expect(() => new PhotoDome("photo", "/photo.jpg", {}, {} as Scene)).toThrow(/panoramic media-texture lifecycle/);
             expect(() => new VideoDome("video", "/video.mp4", {}, {} as Scene)).toThrow(/stereoscopic camera remapping/);
         });
+
+        it("does not expose the internal texture shell through ordinary construction", () => {
+            const constructWithoutSource = Texture as unknown as new () => Texture;
+            expect(() => new constructWithoutSource()).toThrow(/Texture requires a scene or engine/);
+        });
+
+        it("rejects the asynchronous video factories instead of throwing synchronously", async () => {
+            const streamFactory = () => VideoTexture.CreateFromStreamAsync({} as Scene, {} as MediaStream, {});
+            const webcamFactory = () =>
+                VideoTexture.CreateFromWebCamAsync({} as Scene, {
+                    minWidth: 1,
+                    maxWidth: 1,
+                    minHeight: 1,
+                    maxHeight: 1,
+                    deviceId: "camera",
+                });
+
+            let streamPromise!: Promise<VideoTexture>;
+            let webcamPromise!: Promise<VideoTexture>;
+            expect(() => {
+                streamPromise = streamFactory();
+            }).not.toThrow();
+            expect(() => {
+                webcamPromise = webcamFactory();
+            }).not.toThrow();
+            await Promise.all([
+                expect(streamPromise).rejects.toThrow(/VideoTexture\.CreateFromStreamAsync/),
+                expect(webcamPromise).rejects.toThrow(/VideoTexture\.CreateFromWebCamAsync/),
+            ]);
+        });
     });
 
     it("exposes the Gaussian Point Splatting blit and renderer member shapes", () => {

@@ -59,8 +59,8 @@ export class ClusteredLightContainer extends Light {
 
     /** @internal Point lights added to this container (Babylon.js `container.lights`). */
     private readonly _childLights: PointLight[] = [];
-    /** @internal Lite clustered point lights, parallel to {@link _childLights}. */
-    private readonly _liteLights: LiteClusteredPointLight[] = [];
+    /** @internal Constant-time lookup from compat children to their Lite clustered records. */
+    private readonly _liteLights = new Map<PointLight, LiteClusteredPointLight>();
     /** @internal Whether the container has been registered on the Lite scene (engine start). */
     private _built = false;
     private _maxRange = 16383;
@@ -173,7 +173,7 @@ export class ClusteredLightContainer extends Light {
             intensity: light.isEnabled() ? light.intensity : 0,
         });
         this._childLights.push(light);
-        this._liteLights.push(liteLight);
+        this._liteLights.set(light, liteLight);
         // Exclude the light from the ordinary per-mesh light path (Babylon.js
         // removes it from scene.lights when it joins a cluster). The detach targets
         // the light's OWN scene, never the container's: a light built against a
@@ -193,12 +193,22 @@ export class ClusteredLightContainer extends Light {
      * in the container's light list, or `-1` if it was not present.
      */
     public removeLight(light: Light): number {
+        return this._removeLight(light, true);
+    }
+
+    /** @internal Retire a disposed child without returning it to the ordinary scene-light path. */
+    public _retireLight(light: Light): void {
+        this._removeLight(light, false);
+    }
+
+    private _removeLight(light: Light, restoreToScene: boolean): number {
         const index = this._childLights.findIndex((child) => child === light);
         if (index === -1) {
             return -1;
         }
         this._childLights.splice(index, 1);
-        const liteLight = this._liteLights.splice(index, 1)[0];
+        const liteLight = this._liteLights.get(light as PointLight);
+        this._liteLights.delete(light as PointLight);
         const j = liteLight ? this._container.pointLights.indexOf(liteLight) : -1;
         if (j !== -1) {
             this._container.pointLights.splice(j, 1);
@@ -206,8 +216,8 @@ export class ClusteredLightContainer extends Light {
         light._clusteredContainer = null;
         // Return the light to the ordinary per-mesh light path of its own scene —
         // the mirror of the detach performed by {@link addLight}.
-        const lightScene = light.getScene();
-        if (lightScene) {
+        const lightScene = restoreToScene ? light.getScene() : undefined;
+        if (lightScene && !light.isDisposed()) {
             lightScene._registerLight(light);
             addToScene(lightScene._lite, light._lite);
         }
@@ -217,11 +227,15 @@ export class ClusteredLightContainer extends Light {
 
     /** @internal Forward a child light's effective intensity into Lite's clustered record. */
     public _syncLightIntensity(light: Light): void {
-        const index = this._childLights.indexOf(light as PointLight);
-        if (index === -1) {
+        const liteLight = this._liteLights.get(light as PointLight);
+        if (!liteLight) {
             return;
         }
-        this._liteLights[index]!.intensity = light.isEnabled() ? light.intensity : 0;
+        const intensity = light.isEnabled() ? light.intensity : 0;
+        if (liteLight.intensity === intensity) {
+            return;
+        }
+        liteLight.intensity = intensity;
         this._markDirty();
     }
 
