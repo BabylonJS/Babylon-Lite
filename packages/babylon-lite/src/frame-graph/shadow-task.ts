@@ -105,7 +105,9 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
  */
 async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
     shadowGenerator._preloadPending = casterMeshes;
-    await shadowGenerator._preloadShadowTask?.(casterMeshes);
+    const ready = shadowGenerator._preloadShadowTask?.(casterMeshes);
+    shadowGenerator._preloadReady = ready;
+    await ready;
     if (shadowGenerator._preloadPending === casterMeshes) {
         shadowGenerator._preloadPending = undefined;
     }

@@ -40,6 +40,24 @@ sampling, and skips shadow-map rendering. Re-enabling restores the configured da
 the existing generator before the scene pass. The feature state is installed only when this setter
 is imported and called.
 
+### Readiness (`shadow-ready.ts`)
+
+```typescript
+export function isShadowGeneratorReady(shadowGenerator: ShadowGenerator): boolean;
+export function whenShadowGeneratorReady(shadowGenerator: ShadowGenerator): Promise<void>;
+```
+
+Supplying a caster set (at registration or through `setShadowTaskCasterMeshes()`) parks it in
+`_preloadPending` while the no-colour material views of its caster families are imported, and the
+shadow task skips a parked generator, so its map is not rendered meanwhile. `preloadShadowTaskInput`
+stores the import promise in `_preloadReady`. `isShadowGeneratorReady()` is `!_preloadPending`; an
+on-demand renderer can skip frames while it is `false` instead of showing receivers with a stale or
+empty map. `whenShadowGeneratorReady()` resolves once the park is lifted: when a newer set
+supersedes the awaited one, it waits for the newer set (a superseded set's failure is ignored); when
+the latest set's import fails, it rejects with that error and the generator stays not ready. A
+generator without a pending set is ready. Both functions live in their own module, so applications
+that don't import them carry only the `_preloadReady` assignment.
+
 ### Shared Base (`shadow-base.ts`)
 
 ```typescript
