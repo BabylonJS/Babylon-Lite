@@ -249,6 +249,7 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
             }
             await Promise.all(pending);
         },
+        inFlight: () => (state.tail ? [...state.active, state.tail] : [...state.active]),
         _e: (clear = true) => {
             if (state.error) {
                 const error = state.error;

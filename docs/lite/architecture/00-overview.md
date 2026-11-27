@@ -323,6 +323,7 @@ createEngine(canvas: HTMLCanvasElement): Promise<Engine>
 createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
+whenSceneBuildsComplete(scene: SceneContext): Promise<void>
 setEnvironmentRotation(scene: SceneContext, rotation: number): void
 setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void
 setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void

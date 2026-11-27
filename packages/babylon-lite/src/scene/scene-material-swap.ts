@@ -89,15 +89,17 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         scene._materialEpoch++; // material UBOs were rebuilt (CSM no longer reads this; it follows each caster's _renderableGen)
     }
     q.length = 0;
+    // Asynchronous drains are recorded for `whenSceneBuildsComplete`: the runtime build module only tracks
+    // the builds once its dynamic import has landed.
     if (!firstBuilds) {
-        return pending;
+        return pending && (scene._swapDrain = pending);
     }
     // Dynamically imported (like `mesh/thin-instance.ts`) so scenes that never introduce a material
     // family at runtime keep `scene-runtime-mesh-build.ts` — and, transitively, `scene-rebuild.ts` —
     // out of their bundle. The build is asynchronous (module fetch, then shader compilation and a
     // full group build), so the mesh becomes visible some frames later rather than in this one.
     const builds = firstBuilds;
-    return import("./scene-runtime-mesh-build.js").then(
+    return (scene._swapDrain = import("./scene-runtime-mesh-build.js").then(
         ({ C }) => C(scene, builds, pending),
         (error: unknown) => {
             // The chunk itself failed to load. Route it the same way a build failure goes — the whole
@@ -110,5 +112,5 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
                 console.error(error);
             }
         }
-    );
+    ));
 }
