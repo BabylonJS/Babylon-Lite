@@ -12,7 +12,8 @@
  * Scope (⚡ partial): Babylon Lite's clustered spot payload cannot represent
  * Babylon.js exponent / inner-cone falloff, so only point lights are accepted.
  * Each added point light is snapshotted into a Lite clustered light at add time;
- * later in-place mutation of the source light does not propagate. `maxRange` is a
+ * enabled-state and intensity changes continue to forward, while other later
+ * in-place mutations of the source light do not propagate. `maxRange` is a
  * clustering optimisation Babylon Lite manages internally, so the property is
  * stored for shape parity but does not re-bin lights.
  */
@@ -169,7 +170,7 @@ export class ClusteredLightContainer extends Light {
             position: [position.x, position.y, position.z],
             diffuse: [diffuse.r, diffuse.g, diffuse.b],
             range: light.range,
-            intensity: light.intensity,
+            intensity: light.isEnabled() ? light.intensity : 0,
         });
         this._childLights.push(light);
         this._liteLights.push(liteLight);
@@ -212,6 +213,16 @@ export class ClusteredLightContainer extends Light {
         }
         this._markDirty();
         return index;
+    }
+
+    /** @internal Forward a child light's effective intensity into Lite's clustered record. */
+    public _syncLightIntensity(light: Light): void {
+        const index = this._childLights.indexOf(light as PointLight);
+        if (index === -1) {
+            return;
+        }
+        this._liteLights[index]!.intensity = light.isEnabled() ? light.intensity : 0;
+        this._markDirty();
     }
 
     /**

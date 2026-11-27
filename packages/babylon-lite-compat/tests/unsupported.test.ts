@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { AbstractEngine } from "../src/engine/engine";
 import { LiteCompatError, unsupported } from "../src/error";
 import { ParticleSystem } from "../src/particles/particle-system";
+import { Texture } from "../src/textures/textures";
 import {
     MultiMaterial,
     ShaderMaterial,
@@ -12,6 +13,10 @@ import {
     OpenPBRMaterialDefines,
     RegisterOpenpbrMaterial,
     OpenPBRMaterialLoadingAdapter,
+    PhotoDome,
+    TextureDome,
+    VideoDome,
+    VideoTexture,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
@@ -199,6 +204,9 @@ describe("Unsupported API stubs throw on construction", () => {
         ["GaussianPointSplattingBlitMaterial", () => new GaussianPointSplattingBlitMaterial("blit", {} as Scene)],
         ["GaussianPointSplattingDepthBlitMaterial", () => new GaussianPointSplattingDepthBlitMaterial("depth-blit", {} as Scene)],
         ["ShaderMaterial", () => new ShaderMaterial()],
+        ["PhotoDome", () => new PhotoDome("photo", "/photo.jpg", {}, {} as Scene)],
+        ["VideoDome", () => new VideoDome("video", "/video.mp4", {}, {} as Scene)],
+        ["VideoTexture", () => new VideoTexture("video", "/video.mp4", {} as Scene)],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
         ["ParticleSystem", () => new ParticleSystem()],
@@ -236,6 +244,26 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+
+    describe("texture dome unsupported exports", () => {
+        it("preserves the Babylon.js stereo mode constants", () => {
+            expect(TextureDome.MODE_MONOSCOPIC).toBe(0);
+            expect(TextureDome.MODE_TOPBOTTOM).toBe(1);
+            expect(TextureDome.MODE_SIDEBYSIDE).toBe(2);
+            expect(PhotoDome.MODE_TOPBOTTOM).toBe(1);
+            expect(VideoDome.MODE_SIDEBYSIDE).toBe(2);
+            expectTypeOf<VideoDome["videoTexture"]>().toEqualTypeOf<InstanceType<typeof VideoTexture>>();
+            expect(VideoTexture.prototype).toBeInstanceOf(Texture);
+            expect(VideoTexture.prototype.getClassName).toBeTypeOf("function");
+            expect(VideoTexture.prototype.update).toBeTypeOf("function");
+            expect(VideoTexture.prototype.dispose).toBeTypeOf("function");
+        });
+
+        it("names the panoramic media lifecycle blocker", () => {
+            expect(() => new PhotoDome("photo", "/photo.jpg", {}, {} as Scene)).toThrow(/panoramic media-texture lifecycle/);
+            expect(() => new VideoDome("video", "/video.mp4", {}, {} as Scene)).toThrow(/stereoscopic camera remapping/);
+        });
     });
 
     it("exposes the Gaussian Point Splatting blit and renderer member shapes", () => {

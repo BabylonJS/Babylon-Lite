@@ -21,11 +21,13 @@ import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
+import { TransformNode } from "../meshes/meshes.js";
 import type { AbstractMesh, Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
 import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
-import type { TransformNode } from "../meshes/meshes.js";
+import { Texture } from "../textures/textures.js";
+import type { ExternalTexture } from "../textures/external-texture.js";
 import type { Vector3 } from "../math/vector.js";
 import type { Vector4 } from "../math/vector.js";
 import type { Color3 } from "../math/color.js";
@@ -48,6 +50,8 @@ const SUBMESH_INDIRECT_DRAW_UNSUPPORTED =
     "Lite can bind one indexed-indirect source to an entire mesh, but Babylon.js binds application-owned draw arguments per submesh and render-pass id. Supporting that requires changing Lite's existing material renderable and pass-recording hot paths, so it cannot be added as an independent tree-shakeable adapter.";
 const BAKED_VERTEX_ANIMATION_UNSUPPORTED =
     "Lite's loaded skeleton handles do not expose synchronous per-frame transform-matrix sampling, and its mesh/material pipelines have no baked-animation texture binding contract. Supporting Babylon.js VAT requires loader-owned pose sampling plus renderer hot-path and resource-lifecycle design.";
+const TEXTURE_DOME_UNSUPPORTED =
+    "Babylon.js texture domes require a panoramic media-texture lifecycle, inverted dome material/mesh ownership, stereoscopic camera remapping, and half-dome masking. Babylon Lite exposes no panoramic-media subsystem or lifecycle contract to adapt without new maintainer-owned design.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -958,6 +962,215 @@ export class GaussianPointSplattingDepthBlitMaterial extends ShaderMaterial {
 export class BackgroundMaterial {
     public constructor() {
         unsupported("BackgroundMaterial", "Standalone BackgroundMaterial is not wrapped. Use the compat `Scene` environment helpers / native `loadEnvironment` instead.");
+    }
+}
+
+export interface VideoTextureSettings {
+    autoPlay?: boolean;
+    muted?: boolean;
+    loop?: boolean;
+    autoUpdateTexture: boolean;
+    poster?: string;
+    format?: number;
+    independentVideoSource?: boolean;
+}
+
+export class VideoTexture extends Texture {
+    declare public readonly autoUpdateTexture: boolean;
+    declare public readonly video: HTMLVideoElement;
+    public readonly isVideo = true;
+    declare public readonly onUserActionRequestedObservable: Observable<Texture>;
+
+    public constructor(
+        name: string | null,
+        _src: string | string[] | HTMLVideoElement,
+        _scene: Scene | null,
+        _generateMipMaps?: boolean,
+        _invertY?: boolean,
+        _samplingMode?: number,
+        _settings?: Partial<VideoTextureSettings>,
+        _onError?: ((message?: string, exception?: unknown) => void) | null,
+        _format?: number
+    ) {
+        super();
+        this.name = name ?? "";
+        unsupported("VideoTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public override getClassName(): string {
+        return "VideoTexture";
+    }
+
+    public update(): void {
+        unsupported("VideoTexture.update", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public updateTexture(_isVisible: boolean): void {
+        unsupported("VideoTexture.updateTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public updateURL(_url: string): void {
+        unsupported("VideoTexture.updateURL", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public override clone(): VideoTexture {
+        return unsupported("VideoTexture.clone", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public override dispose(): void {
+        unsupported("VideoTexture.dispose", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public get externalTexture(): ExternalTexture | null {
+        return unsupported("VideoTexture.externalTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public static CreateFromStreamAsync(_scene: Scene, _stream: MediaStream, _constraints: unknown, _invertY = true): Promise<VideoTexture> {
+        return unsupported("VideoTexture.CreateFromStreamAsync", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public static CreateFromWebCamAsync(
+        _scene: Scene,
+        _constraints: { minWidth: number; maxWidth: number; minHeight: number; maxHeight: number; deviceId: string } & MediaTrackConstraints,
+        _audioConstraints?: boolean | MediaTrackConstraints,
+        _invertY = true
+    ): Promise<VideoTexture> {
+        return unsupported("VideoTexture.CreateFromWebCamAsync", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public static CreateFromWebCam(
+        _scene: Scene,
+        _onReady: (videoTexture: VideoTexture) => void,
+        _constraints: { minWidth: number; maxWidth: number; minHeight: number; maxHeight: number; deviceId: string } & MediaTrackConstraints,
+        _audioConstraints?: boolean | MediaTrackConstraints,
+        _invertY = true
+    ): void {
+        unsupported("VideoTexture.CreateFromWebCam", TEXTURE_DOME_UNSUPPORTED);
+    }
+}
+
+export function RegisterVideoTexture(): void {
+    // Compat exports the named throwing surface directly; no side-effect registration is needed.
+}
+
+export abstract class TextureDome<T extends Texture> extends TransformNode {
+    public static readonly MODE_MONOSCOPIC = 0;
+    public static readonly MODE_TOPBOTTOM = 1;
+    public static readonly MODE_SIDEBYSIDE = 2;
+    declare public readonly onLoadErrorObservable: Observable<string>;
+    declare public readonly onLoadObservable: Observable<void>;
+
+    public constructor(
+        name: string,
+        _textureUrlOrElement: string | string[] | HTMLVideoElement,
+        _options: {
+            resolution?: number;
+            clickToPlay?: boolean;
+            autoPlay?: boolean;
+            loop?: boolean;
+            size?: number;
+            poster?: string;
+            faceForward?: boolean;
+            useDirectMapping?: boolean;
+            halfDomeMode?: boolean;
+            crossEyeMode?: boolean;
+            generateMipMaps?: boolean;
+            mesh?: Mesh;
+        },
+        _scene: Scene,
+        _onError?: ((message?: string, exception?: unknown) => void) | null
+    ) {
+        super(name);
+        unsupported(new.target.name, TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public get texture(): T {
+        return unsupported("TextureDome.texture", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set texture(_value: T) {
+        unsupported("TextureDome.texture", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get mesh(): Mesh {
+        return unsupported("TextureDome.mesh", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get fovMultiplier(): number {
+        return unsupported("TextureDome.fovMultiplier", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set fovMultiplier(_value: number) {
+        unsupported("TextureDome.fovMultiplier", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get textureMode(): number {
+        return unsupported("TextureDome.textureMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set textureMode(_value: number) {
+        unsupported("TextureDome.textureMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get halfDome(): boolean {
+        return unsupported("TextureDome.halfDome", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set halfDome(_value: boolean) {
+        unsupported("TextureDome.halfDome", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get crossEye(): boolean {
+        return unsupported("TextureDome.crossEye", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set crossEye(_value: boolean) {
+        unsupported("TextureDome.crossEye", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get material(): BackgroundMaterial {
+        return unsupported("TextureDome.material", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    protected abstract _initTexture(urlsOrElement: string | string[] | HTMLElement, scene: Scene, options: unknown): T;
+
+    protected _changeTextureMode(_value: number): void {
+        unsupported("TextureDome._changeTextureMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    public override dispose(_doNotRecurse = false, _disposeMaterialAndTextures = false): void {
+        unsupported("TextureDome.dispose", TEXTURE_DOME_UNSUPPORTED);
+    }
+}
+
+export class PhotoDome extends TextureDome<Texture> {
+    public static readonly MODE_MONOSCOPIC = 0;
+    public static readonly MODE_TOPBOTTOM = 1;
+    public static readonly MODE_SIDEBYSIDE = 2;
+    public get photoTexture(): Texture {
+        return unsupported("PhotoDome.photoTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set photoTexture(_value: Texture) {
+        unsupported("PhotoDome.photoTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get imageMode(): number {
+        return unsupported("PhotoDome.imageMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set imageMode(_value: number) {
+        unsupported("PhotoDome.imageMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    protected _initTexture(_urlsOrElement: string, _scene: Scene, _options: unknown): Texture {
+        return unsupported("PhotoDome", TEXTURE_DOME_UNSUPPORTED);
+    }
+}
+
+export class VideoDome extends TextureDome<VideoTexture> {
+    public static readonly MODE_MONOSCOPIC = 0;
+    public static readonly MODE_TOPBOTTOM = 1;
+    public static readonly MODE_SIDEBYSIDE = 2;
+
+    public get videoTexture(): VideoTexture {
+        return unsupported("VideoDome.videoTexture", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public get videoMode(): number {
+        return unsupported("VideoDome.videoMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+    public set videoMode(_value: number) {
+        unsupported("VideoDome.videoMode", TEXTURE_DOME_UNSUPPORTED);
+    }
+
+    protected _initTexture(_urlsOrElement: string | string[] | HTMLVideoElement, _scene: Scene, _options: unknown): VideoTexture {
+        return unsupported("VideoDome", TEXTURE_DOME_UNSUPPORTED);
     }
 }
 

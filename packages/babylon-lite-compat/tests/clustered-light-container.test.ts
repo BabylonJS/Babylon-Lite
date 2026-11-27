@@ -159,6 +159,34 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(first.range).toBe(7);
         expect(first.intensity).toBe(2);
     });
+
+    it("forwards child enabled state and logical intensity", () => {
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point.intensity = 2;
+        const c = new ClusteredLightContainer("clust", [point]);
+        const clustered = liteContainer(c).pointLights[0]!;
+
+        point.setEnabled(false);
+        expect(clustered.intensity).toBe(0);
+
+        point.intensity = 3;
+        expect(clustered.intensity).toBe(0);
+
+        point.setEnabled(true);
+        expect(clustered.intensity).toBe(3);
+    });
+
+    it("snapshots an initially disabled child as zero intensity", () => {
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point.intensity = 2;
+        point.setEnabled(false);
+
+        const c = new ClusteredLightContainer("clust", [point]);
+        expect(liteContainer(c).pointLights[0]!.intensity).toBe(0);
+
+        point.setEnabled(true);
+        expect(liteContainer(c).pointLights[0]!.intensity).toBe(2);
+    });
     it("ignores unsupported light types and double-adds", () => {
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         const point = new PointLight("p", new Vector3(0, 0, 0));

@@ -341,6 +341,8 @@ export class Texture extends BaseTexture {
     /** @internal Upload flip actually passed to Lite; engine-only loads use Lite's default. */
     private readonly _effectiveInvertY: boolean;
 
+    /** @internal Creates an inert shell for named throwing texture subclasses. */
+    public constructor();
     public constructor(
         url: string,
         sceneOrEngine: Scene | { _lite: import("babylon-lite").EngineContext },
@@ -348,8 +350,29 @@ export class Texture extends BaseTexture {
         invertY?: boolean,
         _samplingMode?: number,
         onLoad?: (() => void) | null
+    );
+    public constructor(
+        url?: string,
+        sceneOrEngine?: Scene | { _lite: import("babylon-lite").EngineContext },
+        noMipmapOrOptions?: unknown,
+        invertY?: boolean,
+        _samplingMode?: number,
+        onLoad?: (() => void) | null
     ) {
         super();
+        if (url === undefined || sceneOrEngine === undefined) {
+            this.name = "";
+            this._url = "";
+            this._invertY = true;
+            this._noMipmap = false;
+            this.samplingMode = Texture.BILINEAR_SAMPLINGMODE;
+            this._source = undefined as never;
+            this._engine = undefined as never;
+            this._scene = undefined;
+            this._effectiveInvertY = true;
+            this._ready = Promise.resolve();
+            return;
+        }
         this.name = url;
         this._url = url;
         // Babylon.js `Texture(url, scene, noMipmapOrOptions?, invertY?, samplingMode?)`.
