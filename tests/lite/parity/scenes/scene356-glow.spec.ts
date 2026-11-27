@@ -24,6 +24,7 @@ test("Scene 356 — selective glow matches Babylon.js GlowLayer", async ({ page 
 
     await page.goto("/scene356.html");
     await waitForCanvasReady(page, { timeout: 60_000, label: "Scene 356 Lite" });
+    await page.locator("#loader-overlay").waitFor({ state: "detached", timeout: 10_000 });
 
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");
     await page.locator("canvas").screenshot({ path: screenshotPath });

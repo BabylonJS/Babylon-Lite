@@ -407,6 +407,20 @@ function isNonBreakingMultilineOptionalParameterExpansion(removedLine: string, a
     return appendedParameter !== undefined && isOptionalParameter(appendedParameter);
 }
 
+const READONLY_MEMBER_PREFIX = /^((?:(?:public|protected|static) )*)readonly /;
+
+/**
+ * Treat a property that only drops its leading `readonly` modifier as non-breaking — e.g.
+ * `readonly outputTexture: RenderTarget;` → `outputTexture: RenderTarget;`. Reads still
+ * type-check and TypeScript ignores `readonly` in assignability, so existing values and
+ * implementations stay compatible. Only the member modifier qualifies: a `readonly T[]`
+ * parameter type becoming mutable narrows what callers may pass and stays breaking.
+ */
+function isNonBreakingReadonlyMemberRelaxation(removedLine: string, addedLine: string): boolean {
+    const removed = removedLine.replace(API_EXTRACTOR_UNDOCUMENTED_SUFFIX, "");
+    return READONLY_MEMBER_PREFIX.test(removed) && removed.replace(READONLY_MEMBER_PREFIX, "$1") === addedLine.replace(API_EXTRACTOR_UNDOCUMENTED_SUFFIX, "");
+}
+
 const CONST_LITERAL_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*) = (.+);$/;
 const CONST_TYPED_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*): (.+);$/;
 
@@ -878,7 +892,9 @@ export function breakingApiLines(diff: string, currentReport = ""): string[] {
     return hunks.flatMap((hunk) =>
         hunk.removedLines.filter(
             (removedLine) =>
-                !hunk.addedLines.some((addedLine) => isNonBreakingUndocumentedCommentLayoutChange(removedLine, addedLine)) &&
+                !hunk.addedLines.some(
+                    (addedLine) => isNonBreakingUndocumentedCommentLayoutChange(removedLine, addedLine) || isNonBreakingReadonlyMemberRelaxation(removedLine, addedLine)
+                ) &&
                 !isNonBreakingMultilineOptionalParameterExpansion(removedLine, hunk.addedLines) &&
                 !addedLines.some(
                     (addedLine) =>

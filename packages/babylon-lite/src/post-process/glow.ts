@@ -59,8 +59,10 @@ export interface GlowPostProcessTaskConfig {
 
 /** One compound frame-graph task: emissive geometry, four blurs, then additive composition. */
 export interface GlowPostProcessTask extends Task {
-    readonly outputTexture: RenderTarget;
-    readonly resolveTexture: RenderTarget | undefined;
+    /** Borrowed color destination. To compose elsewhere, reassign it with `resolveTexture`, then rebuild the task. */
+    outputTexture: RenderTarget;
+    /** Borrowed single-sample resolve destination of a multisample `outputTexture`. */
+    resolveTexture: RenderTarget | undefined;
     readonly emissiveTexture: RenderTarget;
     readonly blurredTextures: readonly [RenderTarget, RenderTarget];
     meshes: readonly Mesh[] | undefined;
@@ -87,9 +89,7 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
     if (!(initialKernel > 0) || !Number.isFinite(initialKernel)) {
         throw new Error("GlowPostProcessTask requires a positive finite blurKernelSize.");
     }
-    if (!target._descriptor.format) {
-        throw new Error("GlowPostProcessTask requires a color targetTexture.");
-    }
+    checkDestination(target, resolve);
     if (type !== 0 && type !== 2) {
         throw new Error("GlowPostProcessTask mainTextureType must be 0 (unsigned byte) or 2 (half float).");
     }
@@ -98,12 +98,6 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
     }
     if (!(ratio > 0) || !Number.isFinite(ratio) || fixed < 0 || !Number.isFinite(fixed)) {
         throw new Error("GlowPostProcessTask requires a positive finite ratio and a nonnegative finite fixed size.");
-    }
-    if (
-        resolve &&
-        ((target._descriptor.samples ?? 1) === 1 || resolve === target || resolve._descriptor.samples !== 1 || resolve._descriptor.format !== target._descriptor.format)
-    ) {
-        throw new Error("GlowPostProcessTask resolveTexture requires a distinct, matching single-sample target for an MSAA output.");
     }
     const name = config.name ?? "glow";
     const mapSize = { width: 1, height: 1 };
@@ -125,7 +119,7 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
     );
     const blurred: readonly [RenderTarget, RenderTarget] = [targets[1]!, targets[3]!];
     const mode = config.alphaBlendingMode ?? 1;
-    const merge = createGlowMerge(engine, blurred, target, resolve, mode, config.ldrMerge ?? false);
+    const merge = createGlowMerge(engine, blurred, mode, config.ldrMerge ?? false);
     // Through these modes a black map adds nothing and leaves destination alpha, so an empty map is skippable.
     const additive = mode === 1 || mode === 6;
     const context: GlowMaterialContext = {
@@ -283,16 +277,23 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             if (disposed) {
                 throw new Error("GlowPostProcessTask has been disposed.");
             }
+            const target = task.outputTexture;
+            const resolve = task.resolveTexture;
+            checkDestination(target, resolve);
             const dimensions = target === scene.surface.scRT ? scene.surface.canvas : (target._resolveSize?.(target._descriptor) ?? target._descriptor.size);
             if (!("width" in dimensions) || !("height" in dimensions)) {
                 throw new Error("GlowPostProcessTask could not resolve the destination dimensions.");
             }
             // The map is sampled in destination screen space, so it is projected with the destination aspect even when fixed-size.
             aspect = dimensions.width / dimensions.height;
-            mapSize.width = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.width * ratio));
-            mapSize.height = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.height * ratio));
-            smallSize.width = Math.max(1, mapSize.width >> 1);
-            smallSize.height = Math.max(1, mapSize.height >> 1);
+            const width = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.width * ratio));
+            const height = fixed ? Math.max(2, Math.floor(fixed)) : Math.max(1, Math.floor(dimensions.height * ratio));
+            // Owned targets and blur pipelines depend only on the device and map size: a retarget keeps them.
+            const rebuild = device !== engine._device || width !== mapSize.width || height !== mapSize.height;
+            mapSize.width = width;
+            mapSize.height = height;
+            smallSize.width = Math.max(1, width >> 1);
+            smallSize.height = Math.max(1, height >> 1);
             if (device !== engine._device) {
                 for (const draw of draws.values()) {
                     disposeGlowDraw(context, draw);
@@ -312,14 +313,16 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
             // The scene group binds these lights, or task-owned ones, on the next execution.
             sceneLights = ensureSceneLightState(engine, scene)._buffer;
             boundLights = null;
-            buildRenderTarget(emissive, engine);
-            context.targetTexture = emissive._colorTexture;
-            color.view = emissive._colorView!;
-            depth.view = emissive._depthView!;
-            for (const blur of blurs) {
-                blur.record();
+            if (rebuild) {
+                buildRenderTarget(emissive, engine);
+                context.targetTexture = emissive._colorTexture;
+                color.view = emissive._colorView!;
+                depth.view = emissive._depthView!;
+                for (const blur of blurs) {
+                    blur.record();
+                }
             }
-            merge.record();
+            merge.record(target, resolve);
             epoch++;
             sceneKey.length = 0;
             idleAlpha = NaN;
@@ -559,4 +562,14 @@ export function createGlowPostProcessTask(config: GlowPostProcessTaskConfig, eng
         },
     };
     return task;
+}
+
+function checkDestination(target: RenderTarget, resolve: RenderTarget | undefined): void {
+    const desc = target._descriptor;
+    if (!desc.format) {
+        throw new Error("GlowPostProcessTask requires a color targetTexture.");
+    }
+    if (resolve && ((desc.samples ?? 1) === 1 || resolve === target || resolve._descriptor.samples !== 1 || resolve._descriptor.format !== desc.format)) {
+        throw new Error("GlowPostProcessTask resolveTexture requires a distinct, matching single-sample target for an MSAA output.");
+    }
 }
