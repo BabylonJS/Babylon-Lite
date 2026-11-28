@@ -823,6 +823,7 @@ export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.j
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 export { setShadowGeneratorEnabled } from "./shadow/shadow-enabled.js";
+export { isShadowGeneratorReady, whenShadowGeneratorReady } from "./shadow/shadow-ready.js";
 export { setShadowCasterMaterial } from "./material/set-shadow-caster-material.js";
 
 // ─── Animation ───────────────────────────────────────────────────────

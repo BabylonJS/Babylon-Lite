@@ -87,6 +87,13 @@ export interface ShadowGenerator {
     /** @internal Caster set whose lazily-imported material views are still loading. While set, the
      *  generator is skipped by the shadow task so the pass cannot reach an unassigned no-colour factory. */
     _preloadPending?: readonly import("../mesh/mesh.js").Mesh[];
+    /** @internal Active preparation of `_preloadPending`, unique per preparation (its identity tells a superseded one
+     *  apart); rejects when its import fails. */
+    _preloadReady?: Promise<void>;
+    /** @internal Wakes `whenShadowGeneratorReady` waiters when the active preparation changes; installed only by them. */
+    _onPreloadChange?: () => void;
+    /** @internal Settles at the next active-preparation change; shared by the waiters that installed `_onPreloadChange`. */
+    _preloadChange?: Promise<void>;
     /** @internal Lazily creates (or returns the cached) shadow-task state for rendering the shadow map this frame. */
     _ensureShadowTaskState?(
         engine: import("../engine/engine.js").EngineContext,

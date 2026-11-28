@@ -412,6 +412,8 @@ createPcfSpotlightShadowGenerator(engine: Engine, light: SpotLight, config?: Pcf
 createPcfDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: PcfDirectionalShadowGeneratorConfig): ShadowGenerator
 setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void
 setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void
+isShadowGeneratorReady(shadowGenerator: ShadowGenerator): boolean
+whenShadowGeneratorReady(shadowGenerator: ShadowGenerator): Promise<void>
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController

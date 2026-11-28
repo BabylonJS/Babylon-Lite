@@ -8,6 +8,7 @@ import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages
 import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs";
 import { createShadowTask } from "../../../packages/babylon-lite/src/frame-graph/shadow-task";
 import { getNoColorView, preloadPcfShadowTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
+import { isShadowGeneratorReady, whenShadowGeneratorReady } from "../../../packages/babylon-lite/src/shadow/shadow-ready";
 
 type Preload = (casterMeshes: readonly Mesh[]) => Promise<void>;
 
@@ -141,6 +142,138 @@ describe("shadow caster preload race", () => {
         // The PBR factory must have been imported. Building the view can still fail on this stub material,
         // but never because the factory itself is missing.
         expect(String(thrown ?? "")).not.toContain("is not a function");
+    });
+});
+
+describe("public shadow generator readiness", () => {
+    it("is ready before any caster set and after its preparation", async () => {
+        const preload = gate();
+        const { sg } = makeGenerator(() => preload.promise);
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+        await expect(whenShadowGeneratorReady(sg)).resolves.toBeUndefined();
+
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+        expect(isShadowGeneratorReady(sg)).toBe(false);
+        const ready = vi.fn();
+        const waiting = whenShadowGeneratorReady(sg).then(ready);
+        await settle();
+        expect(ready).not.toHaveBeenCalled();
+
+        preload.release();
+        await waiting;
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+    });
+
+    it("waits for a caster set that supersedes the awaited one", async () => {
+        const first = gate();
+        const second = gate();
+        let call = 0;
+        const { sg } = makeGenerator(() => (call++ === 0 ? first.promise : second.promise));
+
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+        const ready = vi.fn();
+        const waiting = whenShadowGeneratorReady(sg).then(ready);
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+
+        first.release();
+        await settle();
+        expect(ready).not.toHaveBeenCalled();
+        expect(isShadowGeneratorReady(sg)).toBe(false);
+
+        second.release();
+        await waiting;
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+    });
+
+    it("ignores the failure of a superseded caster set", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const first = gate();
+        const second = gate();
+        let call = 0;
+        const { sg } = makeGenerator(() => (call++ === 0 ? first.promise.then(() => Promise.reject(new Error("superseded import failed"))) : second.promise));
+
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+        const waiting = whenShadowGeneratorReady(sg);
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+
+        first.release();
+        second.release();
+        await expect(waiting).resolves.toBeUndefined();
+        error.mockRestore();
+    });
+
+    it("follows a replacement that is prepared while the superseded import is still pending", async () => {
+        const first = gate();
+        let call = 0;
+        // The replacement's views are already loaded (or the set is empty), so only the first import is slow.
+        const { sg } = makeGenerator(() => (call++ === 0 ? first.promise : Promise.resolve()));
+
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+        const waiting = whenShadowGeneratorReady(sg);
+        setShadowTaskCasterMeshes(sg, []);
+
+        // The first import never lands in this test: the waiter must not depend on it.
+        await expect(waiting).resolves.toBeUndefined();
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+    });
+
+    it("does not let an older load of the same caster array report the newer one ready", async () => {
+        const first = gate();
+        const second = gate();
+        let call = 0;
+        const { sg } = makeGenerator(() => (call++ === 0 ? first.promise : second.promise));
+        const casters = [{} as Mesh];
+
+        setShadowTaskCasterMeshes(sg, casters);
+        const ready = vi.fn();
+        const waiting = whenShadowGeneratorReady(sg).then(ready);
+        // Same array, re-supplied after a caster's material changed: a new preparation.
+        setShadowTaskCasterMeshes(sg, casters);
+
+        first.release();
+        await settle();
+        expect(isShadowGeneratorReady(sg)).toBe(false);
+        expect(sg._preloadPending).toBe(casters);
+        expect(ready).not.toHaveBeenCalled();
+
+        second.release();
+        await waiting;
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+    });
+
+    it("does not report the failure of an older load of the same caster array", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const first = gate();
+        const second = gate();
+        let call = 0;
+        const { sg } = makeGenerator(() => (call++ === 0 ? first.promise.then(() => Promise.reject(new Error("obsolete import failed"))) : second.promise));
+        const casters = [{} as Mesh];
+
+        setShadowTaskCasterMeshes(sg, casters);
+        const settled = vi.fn();
+        const waiting = whenShadowGeneratorReady(sg).then(settled, settled);
+        setShadowTaskCasterMeshes(sg, casters);
+
+        first.release();
+        await settle();
+        expect(settled).not.toHaveBeenCalled();
+        expect(isShadowGeneratorReady(sg)).toBe(false);
+
+        second.release();
+        await waiting;
+        expect(settled).toHaveBeenCalledWith(undefined);
+        expect(isShadowGeneratorReady(sg)).toBe(true);
+        error.mockRestore();
+    });
+
+    it("rejects and stays not ready when the latest preparation fails", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { sg } = makeGenerator(() => Promise.reject(new Error("no-colour view import failed")));
+
+        setShadowTaskCasterMeshes(sg, [{} as Mesh]);
+        await expect(whenShadowGeneratorReady(sg)).rejects.toThrow("no-colour view import failed");
+        expect(isShadowGeneratorReady(sg)).toBe(false);
+        error.mockRestore();
     });
 });
 

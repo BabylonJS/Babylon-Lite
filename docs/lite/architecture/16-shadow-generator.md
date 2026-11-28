@@ -40,6 +40,48 @@ sampling, and skips shadow-map rendering. Re-enabling restores the configured da
 the existing generator before the scene pass. The feature state is installed only when this setter
 is imported and called.
 
+### Readiness (`shadow-ready.ts`)
+
+```typescript
+export function isShadowGeneratorReady(shadowGenerator: ShadowGenerator): boolean;
+export function whenShadowGeneratorReady(shadowGenerator: ShadowGenerator): Promise<void>;
+```
+
+The helpers are for runtime caster updates. They do **not** replace awaiting
+`registerSceneWithShadowSupport()`: in the setup order above, the first caster list is supplied before
+the shadow task is installed, so nothing is parked yet and both helpers report ready although the list
+has not been prepared. Registration prepares it.
+
+```typescript
+setShadowTaskCasterMeshes(light.shadowGenerator, casters);
+await registerSceneWithShadowSupport(engine, scene); // prepares the initial casters
+
+// Later, at runtime (e.g. a new model):
+setShadowTaskCasterMeshes(light.shadowGenerator, modelMeshes);
+await whenShadowGeneratorReady(light.shadowGenerator); // or poll isShadowGeneratorReady() per frame
+requestRender();
+```
+
+Supplying a caster set (at registration or through `setShadowTaskCasterMeshes()`) parks it in
+`_preloadPending` while the no-colour material views of its caster families are imported, and the
+shadow task skips a parked generator, so its map is not rendered meanwhile.
+
+Each preparation is identified by a promise unique to it, `_preloadReady`
+(`Promise.resolve(_preloadShadowTask(casters)).then()`), not by the caster array: an application may
+re-supply the same array after changing a caster's material, and the family import may be a cached
+promise shared by two preparations. `preloadShadowTaskInput` lifts the park only while its own promise
+is still `_preloadReady`, so an older load of the same array cannot clear a newer park.
+
+`isShadowGeneratorReady()` is `!_preloadPending`; an on-demand renderer can skip frames while it is
+`false` instead of showing receivers with a stale or empty map. `whenShadowGeneratorReady()` races the
+active preparation against the next preparation change, so a waiter follows a replacement at once
+instead of waiting for the obsolete import. The change signal is a callback slot
+(`_onPreloadChange`) that only the waiters install; the scheduler and device-lost recovery call it
+when they replace or clear the active preparation. The promise rejects only with the failure of the
+active preparation; a superseded one's failure is ignored, and the generator stays not ready after a
+failure. A generator without a pending set is ready. Both functions live in their own module, so
+applications that don't import them carry only the scheduler's token and the optional callback call.
+
 ### Shared Base (`shadow-base.ts`)
 
 ```typescript
