@@ -14,7 +14,7 @@ export { normalizeVec3TupleOrUp } from "./normalize-vec3-tuple-or-up.js";
 export { normalizeVec3 } from "./normalize-vec3.js";
 export { negateVec3 } from "./negate-vec3.js";
 export { lerpVec3 } from "./lerp-vec3.js";
-export { sampleHermiteSpline, sampleCatmullRomSpline } from "./curve-splines.js";
+export { sampleHermiteSpline, sampleCatmullRomSpline, sampleArcThroughThreePoints } from "./curve-splines.js";
 export { expDampFactor, dampScalar, lerpAngleShortest } from "./damp.js";
 export {
     addVec3InPlace,

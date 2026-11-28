@@ -1,6 +1,6 @@
 /** Babylon.js-compatible curve/path helpers: `Angle`, `Curve3`, `Path3D` (pure JS). */
 
-import { sampleCatmullRomSpline, sampleHermiteSpline } from "babylon-lite";
+import { sampleArcThroughThreePoints, sampleCatmullRomSpline, sampleHermiteSpline } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
 
@@ -88,6 +88,19 @@ export class Curve3 {
 
     public static CreateCatmullRomSpline(points: readonly Vector3[], nbPoints: number, closed: boolean = false): Curve3 {
         return new Curve3(sampleCatmullRomSpline(points, nbPoints, closed).map(({ x, y, z }) => new Vector3(x, y, z)));
+    }
+
+    public static ArcThru3Points(first: Vector3, second: Vector3, third: Vector3, steps = 32, closed = false, fullCircle = false): Curve3 {
+        const points = sampleArcThroughThreePoints(first, second, third, steps, closed, fullCircle).map((point) => {
+            if (point === first) {
+                return first;
+            }
+            if (point === third) {
+                return third;
+            }
+            return new Vector3(point.x, point.y, point.z);
+        });
+        return new Curve3(points);
     }
 }
 

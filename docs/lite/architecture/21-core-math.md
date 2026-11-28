@@ -72,6 +72,16 @@ export function inverseLerp(a: number, b: number, value: number): number;
 
 The [bounded inverse interpolation contract](inverse-lerp.md) defines endpoint order, saturation, degenerate intervals, and compatibility forwarding.
 
+### Curve Sampling Functions (`curve-splines.ts`)
+
+```typescript
+export function sampleHermiteSpline(p1: Vec3, t1: Vec3, p2: Vec3, t2: Vec3, segmentCount: number): Vec3[];
+export function sampleCatmullRomSpline(points: readonly Vec3[], pointsPerSegment: number, closed?: boolean): Vec3[];
+export function sampleArcThroughThreePoints(first: Vec3, second: Vec3, third: Vec3, steps?: number, closed?: boolean, fullCircle?: boolean): Vec3[];
+```
+
+`sampleArcThroughThreePoints` mirrors Babylon.js `Curve3.ArcThru3Points`: collinear inputs return no points; partial arcs advance by `1 / steps` radians until they reach the third point within the radius-scaled tolerance; `closed` appends the original first point. Full circles use `steps` equal segments, begin and end with separate exact copies of `first`, return one point for zero steps, and retain a two-point closing path for positive fractional step counts below one.
+
 ### Vec3 Functions (`vec3.ts`)
 
 ```typescript
@@ -174,24 +184,24 @@ Both barrels use `normalizeVec3(v)` for objects and `normalizeVec3TupleOrUp(x, y
 
 Import public APIs from `@babylonjs/lite`, not internal math paths. The old names are removed rather than retained as compatibility aliases.
 
-| Previous API | Replacement |
-| --- | --- |
-| `normalizeVec3Object(v)` | `normalizeVec3(v)` |
-| `normalizeVec3(x, y, z, epsilon?)` | `normalizeVec3TupleOrUp(x, y, z, epsilon?)` |
+| Previous API                                | Replacement                                                |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `normalizeVec3Object(v)`                    | `normalizeVec3(v)`                                         |
+| `normalizeVec3(x, y, z, epsilon?)`          | `normalizeVec3TupleOrUp(x, y, z, epsilon?)`                |
 | `subVec3`, `subVec3ToRef`, `subVec3InPlace` | `subtractVec3`, `subtractVec3ToRef`, `subtractVec3InPlace` |
-| `mat4Identity` | `createIdentityMat4` |
-| `mat4Translation` | `createTranslationMat4` |
-| `mat4Scale` | `createScalingMat4` |
-| `mat4LookAtLH` | `createLookAtMat4LH` |
-| `mat4PerspectiveLH` | `createPerspectiveMat4LH` |
-| `mat4Compose`, `mat4Decompose` | `composeMat4`, `decomposeMat4` |
-| `mat4Multiply`, `mat4Invert` | `multiplyMat4`, `invertMat4` |
-| `mat4FromQuat` | `createMat4FromQuat` |
-| `mat4FromQuatInto` | `writeMat4FromQuatIntoBuffer` |
-| `quatFromRotationMatrix` | `createQuatFromRotationMat4` |
-| `quatFromLookDirectionRH` | `createQuatFromLookDirectionRH` |
-| `eulerToQuat` | `eulerXYZToQuatTuple` |
-| `quatToEulerXYZ` | `quatToEulerXYZTuple` |
+| `mat4Identity`                              | `createIdentityMat4`                                       |
+| `mat4Translation`                           | `createTranslationMat4`                                    |
+| `mat4Scale`                                 | `createScalingMat4`                                        |
+| `mat4LookAtLH`                              | `createLookAtMat4LH`                                       |
+| `mat4PerspectiveLH`                         | `createPerspectiveMat4LH`                                  |
+| `mat4Compose`, `mat4Decompose`              | `composeMat4`, `decomposeMat4`                             |
+| `mat4Multiply`, `mat4Invert`                | `multiplyMat4`, `invertMat4`                               |
+| `mat4FromQuat`                              | `createMat4FromQuat`                                       |
+| `mat4FromQuatInto`                          | `writeMat4FromQuatIntoBuffer`                              |
+| `quatFromRotationMatrix`                    | `createQuatFromRotationMat4`                               |
+| `quatFromLookDirectionRH`                   | `createQuatFromLookDirectionRH`                            |
+| `eulerToQuat`                               | `eulerXYZToQuatTuple`                                      |
+| `quatToEulerXYZ`                            | `quatToEulerXYZTuple`                                      |
 
 Quaternion conversions retain scalar inputs and tuple results. `createMat4FromQuat` retains four scalar inputs. Buffer kernels retain destination-first calls and operate directly on F32/F64 storage; matrix constructors continue to use the configured allocator. Internal matrix writers previously named `ToRef` now explicitly use `IntoBuffer`, without wrappers or changed argument order.
 
@@ -245,12 +255,12 @@ New matrices are allocated via `allocateMat4()` from `_matrix-allocator.ts`, whi
 | Function                 | Formula                                                                |
 | ------------------------ | ---------------------------------------------------------------------- |
 | `addVec3(a, b)`          | `{ x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }`                               |
-| `subtractVec3(a, b)`          | `{ x: a.x-b.x, y: a.y-b.y, z: a.z-b.z }`                               |
+| `subtractVec3(a, b)`     | `{ x: a.x-b.x, y: a.y-b.y, z: a.z-b.z }`                               |
 | `scaleVec3(v, s)`        | `{ x: v.x*s, y: v.y*s, z: v.z*s }`                                     |
 | `dotVec3(a, b)`          | `a.x*b.x + a.y*b.y + a.z*b.z`                                          |
 | `crossVec3(a, b)`        | `{ x: a.y*b.z - a.z*b.y, y: a.z*b.x - a.x*b.z, z: a.x*b.y - a.y*b.x }` |
 | `lengthVec3(v)`          | `√(v.x² + v.y² + v.z²)`                                                |
-| `normalizeVec3(v)`       | `v * (1/length)`, returns zero if `length <= 1e-10` |
+| `normalizeVec3(v)`       | `v * (1/length)`, returns zero if `length <= 1e-10`                    |
 | `negateVec3(v)`          | `{ x: -v.x, y: -v.y, z: -v.z }`                                        |
 | `lerpVec3(a, b, t)`      | `{ x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t, z: a.z+(b.z-a.z)*t }`       |
 | `writeVec3(out, off, v)` | `out[off]=v.x; out[off+1]=v.y; out[off+2]=v.z`                         |
@@ -380,30 +390,30 @@ result[15] = 1
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite                    | Babylon.js                                           |
-| ------------------------------- | ---------------------------------------------------- |
-| `Vec3` interface                | `BABYLON.Vector3` class                              |
-| `Vec4` interface                | `BABYLON.Vector4` class                              |
-| `Color3` interface              | `BABYLON.Color3` class                               |
-| `Color4` interface              | `BABYLON.Color4` class                               |
-| `Mat4` (Float32Array)           | `BABYLON.Matrix` (Float32Array `_m`)                 |
-| `Quat` interface                | `BABYLON.Quaternion` class                           |
-| `vec3(x,y,z)`                   | `new BABYLON.Vector3(x,y,z)`                         |
-| `addVec3(a,b)`                  | `a.add(b)`                                           |
-| `subtractVec3(a,b)`                  | `a.subtract(b)`                                      |
-| `crossVec3(a,b)`                | `BABYLON.Vector3.Cross(a,b)`                         |
-| `normalizeVec3(v)`              | `BABYLON.Vector3.Normalize(v)`                       |
-| `createIdentityMat4()`                | `BABYLON.Matrix.Identity()`                          |
-| `multiplyMat4(a,b)`             | `a.multiply(b)`                                      |
-| `createLookAtMat4LH(eye,target,up)`   | `BABYLON.Matrix.LookAtLH(eye,target,up)`             |
-| `createPerspectiveMat4LH(fov,ar,n,f)` | `BABYLON.Matrix.PerspectiveFovLH(fov,ar,n,f)`        |
-| `invertMat4(m)`                 | `m.invert()` / `BABYLON.Matrix.Invert(m)`            |
-| `createMat4FromQuat(qx,qy,qz,qw)`     | `BABYLON.Matrix.FromQuaternion(q)`                   |
-| `writeMat4FromQuatIntoBuffer(out,...)`     | `BABYLON.Matrix.FromQuaternionToRef(q,out)`          |
-| `composeMat4(t,r,s)`            | `BABYLON.Matrix.Compose(scale,rotation,translation)` |
-| Column-major layout             | Column-major layout (same)                           |
-| Left-handed                     | Left-handed (same)                                   |
-| Depth [0,1]                     | Depth [0,1] for WebGPU                               |
+| Babylon Lite                           | Babylon.js                                           |
+| -------------------------------------- | ---------------------------------------------------- |
+| `Vec3` interface                       | `BABYLON.Vector3` class                              |
+| `Vec4` interface                       | `BABYLON.Vector4` class                              |
+| `Color3` interface                     | `BABYLON.Color3` class                               |
+| `Color4` interface                     | `BABYLON.Color4` class                               |
+| `Mat4` (Float32Array)                  | `BABYLON.Matrix` (Float32Array `_m`)                 |
+| `Quat` interface                       | `BABYLON.Quaternion` class                           |
+| `vec3(x,y,z)`                          | `new BABYLON.Vector3(x,y,z)`                         |
+| `addVec3(a,b)`                         | `a.add(b)`                                           |
+| `subtractVec3(a,b)`                    | `a.subtract(b)`                                      |
+| `crossVec3(a,b)`                       | `BABYLON.Vector3.Cross(a,b)`                         |
+| `normalizeVec3(v)`                     | `BABYLON.Vector3.Normalize(v)`                       |
+| `createIdentityMat4()`                 | `BABYLON.Matrix.Identity()`                          |
+| `multiplyMat4(a,b)`                    | `a.multiply(b)`                                      |
+| `createLookAtMat4LH(eye,target,up)`    | `BABYLON.Matrix.LookAtLH(eye,target,up)`             |
+| `createPerspectiveMat4LH(fov,ar,n,f)`  | `BABYLON.Matrix.PerspectiveFovLH(fov,ar,n,f)`        |
+| `invertMat4(m)`                        | `m.invert()` / `BABYLON.Matrix.Invert(m)`            |
+| `createMat4FromQuat(qx,qy,qz,qw)`      | `BABYLON.Matrix.FromQuaternion(q)`                   |
+| `writeMat4FromQuatIntoBuffer(out,...)` | `BABYLON.Matrix.FromQuaternionToRef(q,out)`          |
+| `composeMat4(t,r,s)`                   | `BABYLON.Matrix.Compose(scale,rotation,translation)` |
+| Column-major layout                    | Column-major layout (same)                           |
+| Left-handed                            | Left-handed (same)                                   |
+| Depth [0,1]                            | Depth [0,1] for WebGPU                               |
 
 ## Dependencies
 
@@ -412,25 +422,25 @@ result[15] = 1
 
 ## Test Specification
 
-| Test                                   | Description                                             |
-| -------------------------------------- | ------------------------------------------------------- |
-| `createIdentityMat4`                         | All diagonal elements = 1, rest = 0                     |
-| `multiplyMat4 identity`                | `A × I = A`                                             |
-| `multiplyMat4 associativity`           | `(A×B)×C ≈ A×(B×C)` within epsilon                      |
-| `createLookAtMat4LH basic`                   | Eye at (0,0,-5), target (0,0,0): verify zAxis = (0,0,1) |
-| `writeLookAtWorldMat4LHIntoBuffer ≡ inverse`     | Element-for-element match with the transpose-of-look-at path it replaced, incl. both degenerate fallbacks |
-| `createPerspectiveMat4LH`                    | Verify `m[0] = tan/aspect`, `m[10] = far/(far-near)`    |
-| `invertMat4 × m = identity`            | Verify `m × m⁻¹ ≈ I`                                    |
-| `invertMat4 returns null for singular` | Zero matrix → null                                      |
-| `createMat4FromQuat identity`                | Quat (0,0,0,1) → identity matrix                        |
-| `createMat4FromQuat 90° around Y`            | Verify correct rotation                                 |
-| `writeMat4FromQuatIntoBuffer`                     | Writes into existing storage with no replacement         |
-| `composeMat4 T×R×S`                    | Compare with manual multiply of separate matrices       |
-| `normalizeVec3 zero`                   | Returns (0,0,0) for zero vector                         |
-| `crossVec3 X×Y=Z`                      | (1,0,0) × (0,1,0) = (0,0,1)                             |
-| `lerpVec3 t=0 and t=1`                 | Returns a and b respectively                            |
-| `writeVec3`                            | Verify Float32Array written at correct offset           |
-| `Mat4 brand`                           | Ensure typed as Float32Array with length 16             |
+| Test                                         | Description                                                                                               |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `createIdentityMat4`                         | All diagonal elements = 1, rest = 0                                                                       |
+| `multiplyMat4 identity`                      | `A × I = A`                                                                                               |
+| `multiplyMat4 associativity`                 | `(A×B)×C ≈ A×(B×C)` within epsilon                                                                        |
+| `createLookAtMat4LH basic`                   | Eye at (0,0,-5), target (0,0,0): verify zAxis = (0,0,1)                                                   |
+| `writeLookAtWorldMat4LHIntoBuffer ≡ inverse` | Element-for-element match with the transpose-of-look-at path it replaced, incl. both degenerate fallbacks |
+| `createPerspectiveMat4LH`                    | Verify `m[0] = tan/aspect`, `m[10] = far/(far-near)`                                                      |
+| `invertMat4 × m = identity`                  | Verify `m × m⁻¹ ≈ I`                                                                                      |
+| `invertMat4 returns null for singular`       | Zero matrix → null                                                                                        |
+| `createMat4FromQuat identity`                | Quat (0,0,0,1) → identity matrix                                                                          |
+| `createMat4FromQuat 90° around Y`            | Verify correct rotation                                                                                   |
+| `writeMat4FromQuatIntoBuffer`                | Writes into existing storage with no replacement                                                          |
+| `composeMat4 T×R×S`                          | Compare with manual multiply of separate matrices                                                         |
+| `normalizeVec3 zero`                         | Returns (0,0,0) for zero vector                                                                           |
+| `crossVec3 X×Y=Z`                            | (1,0,0) × (0,1,0) = (0,0,1)                                                                               |
+| `lerpVec3 t=0 and t=1`                       | Returns a and b respectively                                                                              |
+| `writeVec3`                                  | Verify Float32Array written at correct offset                                                             |
+| `Mat4 brand`                                 | Ensure typed as Float32Array with length 16                                                               |
 
 ## File Manifest
 
