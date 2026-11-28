@@ -10,9 +10,9 @@ updated by the `update-compat-layer` skill.
      `Lite compat package version` is NOT a sync marker -- it tracks the published
      package and changes only when that version changes. -->
 
-- **Last synced BJS commit:** `71c118d5493e204b55e0ac700a0320f57bb940a5`
-- **Last synced Lite commit:** `fab0fff3338b0e3a3eb1dfe83c05e202d00408be`
-- **Last sync date:** 2026-11-27
+- **Last synced BJS commit:** `eaf0cbd38ce0428b84bf99f2cda7714c9ebf98fd`
+- **Last synced Lite commit:** `deea0a7ecd6e2322bb6ab0eeeeff28a8406cd6a0`
+- **Last sync date:** 2026-11-28
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -90,7 +90,7 @@ file is the live status record for each:
 | `Plane` / `Ray` / `Frustum`                        | ✅ Full    | [math/plane.ts](src/math/plane.ts), [ray.ts](src/math/ray.ts), [frustum.ts](src/math/frustum.ts)                                                                                                                                                                                                                                                                                           |
 | `Size` / `Viewport`                                | ✅ Full    | [math/size.ts](src/math/size.ts)                                                                                                                                                                                                                                                                                                                                                           |
 | `Polar` / `Spherical`                              | ✅ Full    | [math/polar.ts](src/math/polar.ts), [math/spherical.ts](src/math/spherical.ts) (complete BJS value-object surfaces; rectangular conversion over tree-shakeable Lite coordinate helpers, including BJS `9.22.2` `atan2` semantics)                                                                                                                                                          |
-| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts)                                                                                                                                                                                                                                                                                                                                                         |
+| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts), including BJS `9.38` `Curve3.ArcThru3Points` over Lite's tree-shakeable three-point arc sampler; full circles have exactly `steps` segments, exact cloned endpoints, and BJS zero/fractional-step behavior                                                                                                                                             |
 | `Curve3` / `Path3D` / easing curves on math        | ⚡ Partial | curve + easing                                                                                                                                                                                                                                                                                                                                                                             |
 | `MinTemperatureKelvin` / `MaxTintMagnitude`        | ✅ Full    | exact BJS constants                                                                                                                                                                                                                                                                                                                                                                        |
 | `TemperatureTintToXyz` / `GetWhiteBalanceMatrix`   | ✅ Full    | [math/color-temperature.ts](src/math/color-temperature.ts) adapts tree-shakeable Lite color-temperature helpers; CIE 1960 Planckian-locus conversion and Bradford chromatic adaptation preserve BJS clamping, D65 calibration, and column-major `mat3` output. Shader/material white-balance state remains unsupported independently                                                       |
@@ -557,6 +557,7 @@ back-to-front rendering + view-dependent SH) through a `GaussianSplattingMesh`
 wrapper over Lite's `loadSplat` / `loadSOG` / `loadSPZ` (incl. `updateData` with
 `flipY` parity, `bakeCurrentTransformIntoVertices`, GPU picking, and opt-in
 Gaussian Point Splatting).
+
 ### ❌ Not working — grouped by blocker
 
 | Blocker | Scenes | Notes |

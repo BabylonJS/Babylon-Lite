@@ -915,7 +915,7 @@ export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
 export { inverseLerp } from "./math/inverse-lerp.js";
-export { sampleHermiteSpline, sampleCatmullRomSpline } from "./math/curve-splines.js";
+export { sampleHermiteSpline, sampleCatmullRomSpline, sampleArcThroughThreePoints } from "./math/curve-splines.js";
 export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
     addVec3InPlace,

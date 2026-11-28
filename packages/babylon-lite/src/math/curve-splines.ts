@@ -1,4 +1,7 @@
 import type { Vec3 } from "./types.js";
+import { crossVec3 } from "./cross-vec3.js";
+import { lengthVec3 } from "./length-vec3.js";
+import { normalizeVec3 } from "./normalize-vec3.js";
 
 function hermitePoint(p1: Vec3, t1: Vec3, p2: Vec3, t2: Vec3, amount: number): Vec3 {
     const amountSquared = amount * amount;
@@ -67,4 +70,81 @@ export function sampleCatmullRomSpline(points: readonly Vec3[], pointsPerSegment
     index--;
     sampled.push(catmullRomPoint(controls[index]!, controls[index + 1]!, controls[index + 2]!, controls[index + 3]!, 1));
     return sampled;
+}
+
+/** Samples the circular arc passing through three points with Babylon.js `Curve3.ArcThru3Points` semantics. */
+export function sampleArcThroughThreePoints(first: Vec3, second: Vec3, third: Vec3, steps = 32, closed = false, fullCircle = false): Vec3[] {
+    const arc: Vec3[] = [];
+    const vec1 = subtract(second, first);
+    const vec2 = subtract(third, second);
+    const vec3 = subtract(first, third);
+    const zAxis = crossVec3(vec1, vec2);
+    const crossLength = lengthVec3(zAxis);
+    if (crossLength < 1e-8) {
+        return arc;
+    }
+
+    const len1Squared = dot(vec1, vec1);
+    const len2Squared = dot(vec2, vec2);
+    const len3Squared = dot(vec3, vec3);
+    const crossLengthSquared = dot(zAxis, zAxis);
+    const radius = (0.5 * Math.sqrt(len1Squared) * Math.sqrt(len2Squared) * Math.sqrt(len3Squared)) / crossLength;
+    const a = (-0.5 * len2Squared * dot(vec1, vec3)) / crossLengthSquared;
+    const b = (-0.5 * len3Squared * dot(vec1, vec2)) / crossLengthSquared;
+    const c = (-0.5 * len1Squared * dot(vec2, vec3)) / crossLengthSquared;
+    const center = {
+        x: first.x * a + second.x * b + third.x * c,
+        y: first.y * a + second.y * b + third.y * c,
+        z: first.z * a + second.z * b + third.z * c,
+    };
+    const xAxis = normalizeVec3(subtract(first, center));
+    const yAxis = normalizeVec3(crossVec3(zAxis, xAxis));
+
+    if (fullCircle) {
+        arc.push({ ...first });
+        if (steps > 0) {
+            const step = (2 * Math.PI) / steps;
+            for (let index = 1; index < steps; index++) {
+                arc.push(pointOnCircle(center, xAxis, yAxis, radius, index * step));
+            }
+            arc.push({ ...first });
+        }
+        return arc;
+    }
+
+    const step = 1 / steps;
+    let theta = 0;
+    let point: Vec3;
+    do {
+        point = pointOnCircle(center, xAxis, yAxis, radius, theta);
+        arc.push(point);
+        theta += step;
+    } while (!equalsWithEpsilon(point, third, radius * step * 1.1));
+    arc.push(third);
+    if (closed) {
+        arc.push(first);
+    }
+    return arc;
+}
+
+function subtract(a: Vec3, b: Vec3): Vec3 {
+    return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function dot(a: Vec3, b: Vec3): number {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function pointOnCircle(center: Vec3, xAxis: Vec3, yAxis: Vec3, radius: number, theta: number): Vec3 {
+    const xScale = radius * Math.cos(theta);
+    const yScale = radius * Math.sin(theta);
+    return {
+        x: center.x + xAxis.x * xScale + yAxis.x * yScale,
+        y: center.y + xAxis.y * xScale + yAxis.y * yScale,
+        z: center.z + xAxis.z * xScale + yAxis.z * yScale,
+    };
+}
+
+function equalsWithEpsilon(a: Vec3, b: Vec3, epsilon: number): boolean {
+    return Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon && Math.abs(a.z - b.z) <= epsilon;
 }
