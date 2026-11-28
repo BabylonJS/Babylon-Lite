@@ -102,13 +102,19 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
  * rendering anyway would throw inside the frame with a far less actionable stack. Shared by the
  * registration preload above, which awaits it, and — installed through `_setShadowTaskInputPreloader` —
  * by the runtime re-supply in `setShadowTaskCasterMeshes`, which cannot.
+ *
+ * Each preparation is identified by its own promise (`_preloadReady`), not by the caster array: an app
+ * may re-supply the same array after changing a caster's material, and the family import may be a
+ * cached promise shared by both preparations. Starting one wakes the readiness waiters, which then
+ * follow the new preparation instead of the obsolete import.
  */
 async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
     shadowGenerator._preloadPending = casterMeshes;
-    const ready = shadowGenerator._preloadShadowTask?.(casterMeshes);
+    const ready = Promise.resolve(shadowGenerator._preloadShadowTask?.(casterMeshes)).then();
     shadowGenerator._preloadReady = ready;
+    shadowGenerator._onPreloadChange?.();
     await ready;
-    if (shadowGenerator._preloadPending === casterMeshes) {
+    if (shadowGenerator._preloadReady === ready) {
         shadowGenerator._preloadPending = undefined;
     }
 }

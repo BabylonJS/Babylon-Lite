@@ -26,7 +26,8 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
         }
         generator._shadowTaskState?._task.dispose();
         generator._shadowTaskState = undefined;
-        generator._preloadPending = undefined;
+        generator._preloadPending = generator._preloadReady = undefined;
+        generator._onPreloadChange?.();
 
         if (generator._shadowType === "csm") {
             // Match the CSM factory's eager resources without replacing its generator-bound hooks.
