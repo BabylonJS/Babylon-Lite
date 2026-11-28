@@ -64,6 +64,7 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+export { whenSceneBuildsComplete } from "./scene/scene-builds-complete.js";
 // Opt-in scene overlays: composite a scene onto an explicit base scene on the same surface.
 export { createOverlayScene } from "./scene/overlay-scene.js";
 export type { OverlaySceneOptions } from "./scene/overlay-scene.js";

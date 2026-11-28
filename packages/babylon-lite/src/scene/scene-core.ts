@@ -90,6 +90,8 @@ export interface RuntimeSceneBuildHooks {
      *  re-dispatching through them would bind resources the rebuild is about to retire. */
     dropBase(builder: MeshGroupBuilder): void;
     wait(meshes: readonly Mesh[]): Promise<void>;
+    /** Snapshot of the tracked builds and the exclusive group rebuild in flight now. Read by `whenSceneBuildsComplete`. */
+    inFlight(): Promise<void>[];
     /** @internal */
     _e(clear?: boolean): void;
     /** @internal */
@@ -258,6 +260,9 @@ export interface SceneContext extends RenderingContext {
     _pendingTopologyRetirements?: (() => void)[];
     /** @internal Lazy runtime-build hooks; absent in scenes that never widen a material group post-build. */
     _runtimeBuilds?: RuntimeSceneBuildHooks;
+    /** @internal Latest material-swap drain that started asynchronous work (runtime mesh or thin-instance builds).
+     *  Covers the dynamic import before `_runtimeBuilds` tracks the builds. Read by `whenSceneBuildsComplete`. */
+    _swapDrain?: Promise<void>;
     /** @internal True after scene disposal; used to abort asynchronous recovery/rebuild work. */
     _z?: boolean;
     /** @internal Temporary PBR transmission transaction sink used while rebuilding scene material groups. */

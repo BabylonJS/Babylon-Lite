@@ -86,6 +86,11 @@ export function onSceneDispose(scene: SceneContext, cb: () => void): void;
  *  Rebuilds the scene first when its light/shadow topology changed since the initial build. */
 export function registerScene(scene: SceneContext): Promise<void>;
 
+/** Resolves once the meshes added (or given a material) after registration have been built, starting the
+ *  builds of still-queued meshes without a frame. Errors are thrown from the next frame, not rejected; await
+ *  explicit rebuild APIs (e.g. `rebuildMaterial()`) separately. See "Runtime Adds & Removals". */
+export function whenSceneBuildsComplete(scene: SceneContext): Promise<void>;
+
 /** Remove the scene from the engine render list without disposing scene-owned resources. */
 export function unregisterScene(scene: SceneContext): void;
 
@@ -261,9 +266,39 @@ reasons back for the next frame's drain (27-render-pipeline, PBR Material Rebuil
 
 > **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
 > shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`
-> returns — `addToScene` itself returns `void` and offers no readiness signal. Adding at least one mesh of
-> each material family before `registerScene` keeps everything synchronous. Build failures surface through
-> the scene's before-render error hook rather than being swallowed.
+> returns — `addToScene` itself returns `void`. Adding at least one mesh of each material family before
+> `registerScene` keeps everything synchronous. Build failures surface through the scene's before-render
+> error hook rather than being swallowed.
+
+`whenSceneBuildsComplete(scene)` (`scene-builds-complete.ts`) is the readiness signal for these builds, for
+applications that render on demand and would otherwise never render the frame that shows the mesh. Its
+scope is the material-swap queue: mesh adds and material assignments after registration. Explicit rebuild
+APIs (`rebuildMaterial()`, `enableMaterialPlugins()`, `rebuildSceneRenderables()`) return their own
+promise, which callers await separately; for example, the first PBR `rebuildMaterial()` starts with a
+preload chain that is neither a drain nor tracked by `_runtimeBuilds` until later. It loops until nothing
+is left:
+
+1. On a registered scene (`_built`), it drains meshes still in `_materialSwapQueue` itself, so no frame has
+   to be rendered first. The drain returns early while an exclusive build runs; the next pass retries.
+2. It awaits, with `Promise.allSettled`, the latest asynchronous drain (`scene._swapDrain`) and
+   `_runtimeBuilds.inFlight()` (tracked builds plus the exclusive group rebuild).
+3. It returns once the drain is unchanged since the previous pass and nothing is in flight.
+
+`processMaterialSwaps` records `_swapDrain` whenever a drain starts asynchronous work (runtime mesh or
+thin-instance builds). That covers the dynamic import of `scene-runtime-mesh-build.ts`, during which
+`_runtimeBuilds` does not track the builds yet and may not exist. A disposed scene (`_z`) or a scene not
+yet registered resolves immediately.
+
+**Errors never reject the promise; they are thrown from the next rendered frame**, as with continuous
+rendering:
+
+- A failed runtime build goes through `_runtimeBuilds._x()`, rethrown by its before-render hook.
+- A failed load of `scene-runtime-mesh-build.ts` itself (the drain's import, or the thin-instance runtime
+  build's) has no `_runtimeBuilds` to report to. `_reportRuntimeBuildError` (`scene-material-swap.ts`) then
+  installs a before-render callback that throws the error once; with hooks present it uses `_x()`.
+- A rebuild that throws synchronously while the helper drains the queue stops its draining (draining again
+  would only repeat the error). The queue still holds the meshes, so the next frame's drain throws the same
+  error.
 
 `removeFromScene` mirrors this asymmetry on the teardown side: scene bookkeeping (list splices, group and
 frame-graph eviction, renderable-version bump) is synchronous, but **GPU teardown is deferred** —
