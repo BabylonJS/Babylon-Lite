@@ -101,16 +101,25 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     const builds = firstBuilds;
     return (scene._swapDrain = import("./scene-runtime-mesh-build.js").then(
         ({ C }) => C(scene, builds, pending),
-        (error: unknown) => {
-            // The chunk itself failed to load. Route it the same way a build failure goes — the whole
-            // point of this path is that a mesh must never disappear silently. `_runtimeBuilds` is
-            // installed by the build, so it may not exist yet when the import is what failed.
-            const hooks = scene._runtimeBuilds;
-            if (hooks) {
-                hooks._x(error);
-            } else {
-                console.error(error);
-            }
-        }
+        // The chunk itself failed to load. Route it the same way a build failure goes — the whole point of
+        // this path is that a mesh must never disappear silently.
+        (error: unknown) => _reportRuntimeBuildError(scene, error)
     ));
+}
+
+/** @internal Throw a runtime-build failure from the next rendered frame. `_runtimeBuilds` is installed by the
+ *  runtime build module, so it is missing when loading that module is what failed: the error is then thrown
+ *  once by a before-render callback of its own. Shared with the thin-instance runtime build. */
+export function _reportRuntimeBuildError(scene: SceneContext, error: unknown): void {
+    if (scene._runtimeBuilds) {
+        scene._runtimeBuilds._x(error);
+        return;
+    }
+    let raise = true;
+    scene._beforeRender.push(() => {
+        if (raise) {
+            raise = false;
+            throw error;
+        }
+    });
 }

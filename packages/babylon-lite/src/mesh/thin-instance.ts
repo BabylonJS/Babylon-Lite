@@ -8,9 +8,13 @@ import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _reportRuntimeBuildError } from "../scene/scene-material-swap.js";
 
 function buildRuntimeThinMesh(scene: SceneContext, mesh: Mesh, pending?: Promise<void>, material = mesh.material): Promise<void> {
-    return import("../scene/scene-runtime-mesh-build.js").then((module) => module.A(scene, material, mesh, pending)).catch((error) => console.error(error));
+    // A failed import (or an error before the build is tracked) is thrown from the next frame, like a build failure.
+    return import("../scene/scene-runtime-mesh-build.js")
+        .then((module) => module.A(scene, material, mesh, pending))
+        .catch((error: unknown) => _reportRuntimeBuildError(scene, error));
 }
 
 /** @internal One render pass's far-bucket output published by the GPU culler for the LOD partner's draw. */

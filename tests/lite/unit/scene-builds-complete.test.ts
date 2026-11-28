@@ -133,6 +133,21 @@ describe("whenSceneBuildsComplete", () => {
         expect(() => scene._beforeRender.forEach((callback) => callback(0))).toThrow("runtime build failed");
     });
 
+    it("leaves a rebuild that throws while draining the queue to the next frame", async () => {
+        const scene = await makeBuiltScene();
+        const [mesh] = scene.meshes as Mesh[];
+        // The mesh's group is already built, so the drain rebuilds it synchronously through this closure.
+        scene._groups.get(mesh!.material!._buildGroup)!.r = () => {
+            throw new Error("rebuild failed");
+        };
+        scene._materialSwapQueue.push(mesh!);
+
+        await expect(whenSceneBuildsComplete(scene)).resolves.toBeUndefined();
+        // Still queued, so the next frame's drain throws the same error, as with continuous rendering.
+        expect(scene._materialSwapQueue).toEqual([mesh]);
+        expect(() => processMaterialSwaps(scene)).toThrow("rebuild failed");
+    });
+
     it("does not build before registration", async () => {
         const scene = {
             _built: false,
